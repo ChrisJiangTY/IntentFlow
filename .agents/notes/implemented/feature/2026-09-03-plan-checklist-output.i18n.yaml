@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-03-plan-checklist-output.md
+2026-09-03-plan-checklist-output.md: c23f053125a85cd5a223dea7a82292ae26438613
+2026-09-03-plan-checklist-output.zh.md: 88d4def3eaa5b042202a7097dacf603375365da7

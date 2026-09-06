@@ -1,0 +1,106 @@
+- toolbar "Requirements view toolbar":
+  - button "Command":
+    - img
+    - text: Command
+  - button "Code"
+  - button "Text"
+  - button "Run all":
+    - img
+    - text: Run all
+- main:
+  - button "Collapse round":
+    - img
+  - strong: "Round 1:"
+  - text: Build a navigation HTML page, preserve the existing behavior, and validate it. Completed
+  - article:
+    - text: "[2] M MD"
+    - strong: Requirement Markdown
+    - text: "# User requirement Build a navigation HTML page, preserve the existing behavior, and validate it."
+  - article:
+    - text: "[2] P PLAN"
+    - strong: Execution Plan
+    - text: 1. Build the HTML navigation. 2. Verify the rendered result.
+  - article:
+    - text: "[✓]"
+    - button "Run task Build navigation HTML":
+      - img
+    - text: TASK1
+    - textbox "Task content Build navigation HTML":
+      - /placeholder: Enter the task title on the first line and an indented description below…
+      - text: Build navigation HTML Implement the requested navigation in index.html.
+    - toolbar "Notebook cell toolbar":
+      - button "Select previous task" [disabled]:
+        - img
+      - button "Select next task":
+        - img
+      - button "Add comment": ⌁
+      - button "Edit task":
+        - img
+      - button "More cell actions":
+        - img
+    - button "Ask the Agent to explain or optimize this task":
+      - img
+  - region "Task output Build navigation HTML":
+    - button "Collapse task output Build navigation HTML" [expanded]:
+      - img
+    - paragraph: Implemented index.html and preserved the current navigation behavior.
+  - article:
+    - text: "[!]"
+    - button "Run task Check mobile navigation":
+      - img
+    - text: TASK2
+    - textbox "Task content Check mobile navigation":
+      - /placeholder: Enter the task title on the first line and an indented description below…
+      - text: Check mobile navigation Verify the navigation at the mobile breakpoint.
+  - region "Task output Check mobile navigation":
+    - button "Collapse task output Check mobile navigation" [expanded]:
+      - img
+    - paragraph: The mobile breakpoint needs another pass.
+    - text: Task execution failed; failure is distinct from historical requirement regression.
+  - article:
+    - text: MD
+    - strong: Markdown note
+    - button "Edit note":
+      - img
+      - text: Edit note
+    - paragraph: Keep the existing DSH conversation controls visible.
+  - article:
+    - text: "[2]"
+    - img
+    - text: ✓
+    - strong: Final validation
+    - text: Completed
+    - paragraph: The HTML was generated; one ordinary mobile check failed, with no historical requirement regression.
+  - group "Notebook zoom":
+    - button "Zoom out Notebook": −
+    - text: 100%
+    - button "Zoom in Notebook": ＋
+- complementary "Notebook details":
+  - strong: Cell details
+  - button "Close details": ×
+  - paragraph: "Round 1: Build a navigation HTML page, preserve the existing behavior, and validate it."
+  - heading "Build navigation HTML" [level=3]
+  - paragraph: Implement the requested navigation in index.html.
+  - term: Status
+  - definition: Completed
+  - term: Task ID
+  - definition: TASK-WEB-01
+  - term: Agent turn
+  - definition: "2"
+  - text: Implemented index.html and preserved the current navigation behavior.
+  - heading "Review evidence" [level=3]
+  - strong: R1 · Navigation results must be easy to read
+  - paragraph: The recorded reply contains the required heading, exactly two list items, and the specified code block.
+  - term: Audit status
+  - definition: verified
+  - heading "Sources" [level=4]
+  - list:
+    - listitem: "#204 · user · The user explicitly specified the final response structure."
+  - heading "Related files" [level=4]
+  - list:
+    - listitem:
+      - code: nav-a.md
+      - text: · touches · The first navigation item comes from this file.
+    - listitem:
+      - code: nav-b.md
+      - text: · touches · The second navigation item comes from this file.

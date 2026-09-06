@@ -1,0 +1,99 @@
+- toolbar "Requirements view toolbar":
+  - button "Command":
+    - img
+    - text: Command
+  - button "Code"
+  - button "Text"
+  - button "Run all":
+    - img
+    - text: Run all
+- main:
+  - button "Collapse round":
+    - img
+  - strong: "Round 1:"
+  - text: Build a navigation HTML page, preserve the existing behavior, and validate it. Completed
+  - article:
+    - text: "[2] M MD"
+    - strong: Requirement Markdown
+    - text: "# User requirement Build a navigation HTML page, preserve the existing behavior, and validate it."
+  - article:
+    - text: "[2] P PLAN"
+    - strong: Execution Plan
+    - text: 1. Build the HTML navigation. 2. Verify the rendered result.
+  - article:
+    - text: "[✓]"
+    - button "Run task Build navigation HTML":
+      - img
+    - text: TASK1
+    - textbox "Task content Build navigation HTML":
+      - /placeholder: Enter the task title on the first line and an indented description below…
+      - text: Build navigation HTML Implement the requested navigation in index.html.
+  - region "Task output Build navigation HTML":
+    - button "Collapse task output Build navigation HTML" [expanded]:
+      - img
+    - paragraph: Implemented index.html and preserved the current navigation behavior.
+  - article:
+    - text: "[!]"
+    - button "Run task Check mobile navigation":
+      - img
+    - text: TASK2
+    - textbox "Task content Check mobile navigation":
+      - /placeholder: Enter the task title on the first line and an indented description below…
+      - text: Check mobile navigation Verify the navigation at the mobile breakpoint.
+  - region "Task output Check mobile navigation":
+    - button "Collapse task output Check mobile navigation" [expanded]:
+      - img
+    - paragraph: The mobile breakpoint needs another pass.
+    - text: Task execution failed; failure is distinct from historical requirement regression.
+  - article:
+    - text: "[ ]"
+    - button "Run task Export navigation results":
+      - img
+    - text: TASK3
+    - textbox "Task content Export navigation results":
+      - /placeholder: Enter the task title on the first line and an indented description below…
+      - text: Export navigation results Export the current navigation results. Use CSV. Keep the header. Validate the file.
+  - article:
+    - text: MD
+    - strong: Markdown note
+    - button "Edit note":
+      - img
+      - text: Edit note
+    - paragraph: Keep the existing DSH conversation controls visible.
+  - article:
+    - text: MD
+    - strong: Markdown note
+    - button "Edit note":
+      - img
+      - text: Edit note
+    - heading "Review notes" [level=1]
+    - list:
+      - listitem:
+        - strong: Keep
+        - text: the navigation
+      - listitem:
+        - text: Verify
+        - code: index.html
+    - table:
+      - rowgroup:
+        - row "Check Result":
+          - columnheader "Check"
+          - columnheader "Result"
+      - rowgroup:
+        - row "Mobile Pending":
+          - cell "Mobile"
+          - cell "Pending"
+    - text: js
+    - button "Copy"
+    - code: const reviewed = true
+  - article:
+    - text: "[2]"
+    - img
+    - text: ✓
+    - strong: Final validation
+    - text: Completed
+    - paragraph: The HTML was generated; one ordinary mobile check failed, with no historical requirement regression.
+  - group "Notebook zoom":
+    - button "Zoom out Notebook": −
+    - text: 100%
+    - button "Zoom in Notebook": ＋
