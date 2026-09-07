@@ -30,7 +30,7 @@ export const en = {
   'collapse': 'Collapse',
   'expand': 'Expand',
   'back': 'Back',
-  'brand.localBuild': 'DSH Local Build',
+  'brand.localBuild': 'IntentFlow Local Build',
   'unknown': 'Unknown',
   'none': 'None',
   'truncated': 'Truncated',

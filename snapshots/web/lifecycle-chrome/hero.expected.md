@@ -20,7 +20,7 @@
 - button "Settings":
   - img
   - text: Settings
-- text: Into the Unknown Preview
+- text: Turn intent into working software Preview
 - button "Choose workspace":
   - img
   - text: workspace
