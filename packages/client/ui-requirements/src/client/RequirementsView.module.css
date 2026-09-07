@@ -381,6 +381,79 @@
   font: 12px/18px var(--ds-font-family-code);
 }
 
+.clarificationRecord {
+  padding: 10px 14px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 9px;
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 92%, transparent);
+  font: var(--dsw-font-xxs-12);
+}
+
+.clarificationRecord summary {
+  cursor: pointer;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.clarificationRecord div,
+.clarificationRecord section {
+  margin-top: 10px;
+}
+
+.clarificationRecord p {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+}
+
+.documentMarkdown {
+  margin-top: 8px;
+}
+
+.documentEditor {
+  display: grid;
+  margin-top: 8px;
+  gap: 8px;
+}
+
+.documentEditor textarea {
+  min-height: 280px;
+  padding: 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+  font: 12px/18px var(--ds-font-family-code);
+}
+
+.inlineAction {
+  margin-left: auto;
+  padding: 2px 7px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 5px;
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
+  cursor: pointer;
+  font: var(--dsw-font-xxs-12);
+}
+
+.reviewVerdict {
+  display: flex;
+  margin-top: 10px;
+  padding: 8px 10px;
+  gap: 8px;
+  border-left: 3px solid var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 6%, transparent);
+  font: var(--dsw-font-xxs-12);
+}
+
+.reviewVerdict[data-verdict='warning'],
+.reviewVerdict[data-verdict='blocking'] {
+  border-left-color: var(--dsw-alias-state-warn-label);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-label) 7%, transparent);
+}
+
 .taskCellGroup {
   display: grid;
   min-width: 0;

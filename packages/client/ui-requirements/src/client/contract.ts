@@ -4,11 +4,12 @@ import type { ConversationViewNode } from '@deepseek-ai/dsh-client-ui-conversati
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   RequirementExecutionEvent,
-  RequirementMarkdownEvent,
+  RequirementClarificationEvent,
+  RequirementDocumentEvent,
   RequirementNoteEvent,
-  RequirementPlanEvent,
   RequirementReviewEvent,
   RequirementRoundEvent,
+  RequirementRunAllEvent,
   RequirementTaskExecutionEvent,
   RequirementTaskListEvent,
   RequirementUserVersionEvent,
@@ -31,14 +32,16 @@ export type RequirementUserVersionNode = RequirementNotebookNode<RequirementUser
 export type RequirementExecutionNode = RequirementNotebookNode<RequirementExecutionEvent> & { readonly kind: 'requirements-execution' }
 /** Projected product requirement round event. */
 export type RequirementRoundNode = RequirementNotebookNode<RequirementRoundEvent> & { readonly kind: 'requirements-round' }
-/** Projected Markdown artifact for a requirement round. */
-export type RequirementMarkdownNode = RequirementNotebookNode<RequirementMarkdownEvent> & { readonly kind: 'requirements-markdown' }
-/** Projected Plan artifact and approval state for a requirement round. */
-export type RequirementPlanNode = RequirementNotebookNode<RequirementPlanEvent> & { readonly kind: 'requirements-plan' }
+/** Projected clarification request or settlement for a requirement round. */
+export type RequirementClarificationNode = RequirementNotebookNode<RequirementClarificationEvent> & { readonly kind: 'requirements-clarification' }
+/** Projected editable requirement document for a round. */
+export type RequirementDocumentNode = RequirementNotebookNode<RequirementDocumentEvent> & { readonly kind: 'requirements-document' }
 /** Projected whole task-list replacement for a requirement round. */
 export type RequirementTaskListNode = RequirementNotebookNode<RequirementTaskListEvent> & { readonly kind: 'requirements-task-list' }
 /** Projected execution transition for one Notebook Task. */
 export type RequirementTaskExecutionNode = RequirementNotebookNode<RequirementTaskExecutionEvent> & { readonly kind: 'requirements-task-execution' }
+/** Projected lifecycle of one sequential Run All request. */
+export type RequirementRunAllNode = RequirementNotebookNode<RequirementRunAllEvent> & { readonly kind: 'requirements-run-all' }
 /** Projected user-authored text or comment cell. */
 export type RequirementNoteNode = RequirementNotebookNode<RequirementNoteEvent> & { readonly kind: 'requirements-note' }
 /** Projected final validation and historical regression event. */
@@ -50,10 +53,11 @@ export type RequirementViewNode =
   | RequirementUserVersionNode
   | RequirementExecutionNode
   | RequirementRoundNode
-  | RequirementMarkdownNode
-  | RequirementPlanNode
+  | RequirementClarificationNode
+  | RequirementDocumentNode
   | RequirementTaskListNode
   | RequirementTaskExecutionNode
+  | RequirementRunAllNode
   | RequirementNoteNode
   | RequirementValidationNode
 
@@ -63,10 +67,11 @@ export interface RequirementsSnapshot {
   readonly userVersions: readonly RequirementUserVersionNode[]
   readonly executions: readonly RequirementExecutionNode[]
   readonly rounds: readonly RequirementRoundNode[]
-  readonly markdowns: readonly RequirementMarkdownNode[]
-  readonly plans: readonly RequirementPlanNode[]
+  readonly clarifications: readonly RequirementClarificationNode[]
+  readonly documents: readonly RequirementDocumentNode[]
   readonly taskLists: readonly RequirementTaskListNode[]
   readonly taskExecutions: readonly RequirementTaskExecutionNode[]
+  readonly runAlls: readonly RequirementRunAllNode[]
   readonly notes: readonly RequirementNoteNode[]
   readonly validations: readonly RequirementValidationNode[]
 }

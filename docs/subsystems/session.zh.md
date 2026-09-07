@@ -743,9 +743,105 @@ Source: [`packages/api/session-controller/src/index.ts`](../../packages/api/sess
 
 ### `ctx.sessionRequirements` — `SessionRequirements`
 
-Coordinates user-owned versions and serialized independent reviews.
+Coordinates clarified requirement documents, executable Tasks, and serialized independent reviews.
 
 ```ts cordis-catalog
+/**
+ * Start one product requirement round and queue its requirement-analysis turn.
+ * @param agent - exact live Agent that receives the round.
+ * @param request - raw requirement and authoring language.
+ * @returns the durable round identity and first event sequence.
+ */
+@Remote('startRound') startRound(agent: Agent, request: RequirementRoundStartRequest): RequirementRoundStartResult
+
+/**
+ * Persist an editable requirement-document draft without starting Agent work.
+ * @param agent - exact live Agent that owns the round.
+ * @param request - round, optimistic revision, and replacement Markdown.
+ * @returns the committed document revision and event position.
+ */
+@Remote('editDocument') editDocument(agent: Agent, request: RequirementDocumentEditRequest): RequirementDocumentActionResult
+
+/**
+ * Queue task generation from one validated requirement-document revision.
+ * @param agent - exact live Agent that receives the generation turn.
+ * @param request - round and exact source document revision.
+ * @returns the queued document revision and event position.
+ */
+@Remote('generateTasks') generateTasks(agent: Agent, request: RequirementTaskGenerateRequest): RequirementDocumentActionResult
+
+/**
+ * Queue one nonblank task cell as a standalone Agent turn; empty drafts are rejected.
+ * @param agent - exact live Agent that receives the task.
+ * @param request - round and stable task identity.
+ * @returns the task execution identity and submitted event sequence.
+ */
+@Remote('runTask') runTask(agent: Agent, request: RequirementTaskRunRequest): RequirementTaskRunResult
+
+/**
+ * Insert one manually authored task, including an empty pending draft, into the current round.
+ * @param agent - exact live Agent that owns the round.
+ * @param request - task text and optional insertion point.
+ * @returns the durable task identity and task-list event sequence.
+ */
+@Remote('addTask') addTask(agent: Agent, request: RequirementTaskAddRequest): RequirementTaskMutationResult
+
+/**
+ * Persist a task's editable text, including empty drafts, and return it to the pending state.
+ * @param agent - exact live Agent that owns the round.
+ * @param request - task identity and replacement text.
+ * @returns the durable task identity and task-list event sequence.
+ */
+@Remote('editTask') editTask(agent: Agent, request: RequirementTaskEditRequest): RequirementTaskMutationResult
+
+/**
+ * Move a pending task one position without crossing locked or final tasks.
+ * @param agent - exact live Agent that owns the round.
+ * @param request - task identity and direction.
+ * @returns the durable task identity and task-list event sequence.
+ */
+@Remote('moveTask') moveTask(agent: Agent, request: RequirementTaskMoveRequest): RequirementTaskMutationResult
+
+/**
+ * Withdraw a task while retaining its historical task-list entries.
+ * @param agent - exact live Agent that owns the round.
+ * @param request - task identity to withdraw.
+ * @returns the durable task identity and task-list event sequence.
+ */
+@Remote('withdrawTask') withdrawTask(agent: Agent, request: RequirementTaskWithdrawRequest): RequirementTaskMutationResult
+
+/**
+ * Run the next pending task and continue in order after each completed task, skipping empty drafts.
+ * @param agent - exact live Agent that receives the task turns.
+ * @param request - round whose pending tasks should run.
+ * @returns the first queued task, when one exists.
+ */
+@Remote('runAll') runAll(agent: Agent, request: RequirementRunAllRequest): RequirementRunAllResult
+
+/**
+ * Stop Run All after the current task and its independent review settle.
+ * @param agent - exact live Agent that owns the ordered run.
+ * @param request - round whose ordered run should stop.
+ * @returns durable stop-request position.
+ */
+@Remote('stopRunAll') stopRunAll(agent: Agent, request: RequirementRunAllStopRequest): RequirementRunAllStopResult
+
+/**
+ * Add a durable note; passive Markdown may be empty, dispatched notes and comments must be nonblank.
+ * @param agent - exact live Agent that receives the note.
+ * @param request - round, cell kind, and user-authored content.
+ * @returns the note identity and event sequence.
+ */
+@Remote('addNote') addNote(agent: Agent, request: RequirementNoteRequest): RequirementNoteResult
+
+/**
+ * Persist replacement Markdown for a passive text note without dispatching a message.
+ * @param agent - exact live Agent that owns the note's Session.
+ * @param request - round, note identity, and verbatim Markdown source; empty text is allowed.
+ * @returns the existing note identity and new event sequence; missing or dispatched notes are rejected.
+ */
+@Remote('editNote') editNote(agent: Agent, request: RequirementNoteEditRequest): RequirementNoteResult
+
 /**
  * Commit one user-authored requirement version, then queue its exact change
  * as an ordinary user turn. The durable version remains current when Agent

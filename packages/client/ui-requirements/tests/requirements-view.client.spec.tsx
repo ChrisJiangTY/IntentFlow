@@ -6,9 +6,9 @@ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { RequirementsView } from '../src/client/RequirementsView.tsx'
 import type {
-  RequirementMarkdownNode,
+  RequirementClarificationNode,
+  RequirementDocumentNode,
   RequirementNoteNode,
-  RequirementPlanNode,
   RequirementReviewNode,
   RequirementRoundNode,
   RequirementTaskExecutionNode,
@@ -42,30 +42,33 @@ function snapshot(): RequirementsSnapshot {
     status: 'executing',
     turn: 1,
   }, 1) as RequirementRoundNode
-  const markdown: RequirementMarkdownNode = base('requirements-markdown', {
+  const clarification: RequirementClarificationNode = base('requirements-clarification', {
     version: 1,
     revision: 1,
     roundId,
-    sourceMessageId: 'message-1' as never,
-    language: 'zh',
-    markdown: '# 用户需求\n\n实现一个 Notebook 需求流。',
-  }, 2) as RequirementMarkdownNode
-  const plan: RequirementPlanNode = base('requirements-plan', {
+    attempt: 1,
+    status: 'answered',
+    questions: [{ id: 'scope', question: '覆盖哪个范围？' }],
+    answers: [{ id: 'scope', selected: ['当前页面'] }],
+  }, 2) as RequirementClarificationNode
+  const document: RequirementDocumentNode = base('requirements-document', {
     version: 1,
-    revision: 2,
+    revision: 1,
     roundId,
     turn: 1,
-    status: 'approved',
-    markdown: '1. 建立需求 Markdown\n2. 拆分并执行任务',
-  }, 3) as RequirementPlanNode
+    summary: '实现 Notebook 需求流',
+    markdown: '# 需求文档\n\n## 简介\n\n实现 Notebook。\n\n## 需求\n\n### 需求 1：Notebook\n\n**用户故事：** 作为用户，我希望使用 Notebook。\n\n#### 验收标准\n\n1. 系统应当显示任务。',
+    valid: true,
+    issues: [],
+  }, 3) as RequirementDocumentNode
   const tasks: RequirementTaskListNode = base('requirements-task-list', {
     version: 1,
     revision: 1,
     roundId,
-    planSeq: 3,
+    documentRevision: 1,
     tasks: [
-      { id: taskId, order: 0, title: '建立 Notebook', statement: '渲染需求、Plan、Task 和验证单元格。', status: 'pending' },
-      { id: secondTaskId, order: 1, title: '验证 Notebook', statement: '检查 Notebook 的完整用户路径。', status: 'pending' },
+      { id: taskId, order: 0, kind: 'implementation', title: '建立 Notebook', statement: '渲染需求、Task 和验证单元格。\n\n_关联需求：1.1_', requirementRefs: ['1.1'], status: 'pending' },
+      { id: secondTaskId, order: 1, kind: 'final-test', title: '验证 Notebook', statement: '检查 Notebook 的完整用户路径。\n\n_关联需求：1.1_', requirementRefs: ['1.1'], status: 'pending' },
     ],
   }, 4) as RequirementTaskListNode
   const validation: RequirementValidationNode = base('requirements-validation', {
@@ -80,8 +83,8 @@ function snapshot(): RequirementsSnapshot {
     failedTaskIds: [],
   }, 5) as RequirementValidationNode
   return {
-    reviews: [], userVersions: [], executions: [], rounds: [round], markdowns: [markdown], plans: [plan],
-    taskLists: [tasks], taskExecutions: [], notes: [], validations: [validation],
+    reviews: [], userVersions: [], executions: [], rounds: [round], clarifications: [clarification], documents: [document],
+    taskLists: [tasks], taskExecutions: [], runAlls: [], notes: [], validations: [validation],
   }
 }
 
@@ -94,8 +97,11 @@ function props(
   return {
     useRequirements,
     startRound: () => action({ roundId, round: 1, eventSeq: 1 }),
+    editDocument: vi.fn(() => action({ roundId, documentRevision: 2, eventSeq: 6 })),
+    generateTasks: vi.fn(() => action({ roundId, documentRevision: 1, eventSeq: 6 })),
     runTask: vi.fn(() => action({ roundId, taskId, eventSeq: 6 })),
     runAll: vi.fn(() => action({ roundId, taskId, eventSeq: 6 })),
+    stopRunAll: vi.fn(() => action({ roundId, eventSeq: 6 })),
     addTask: vi.fn(() => action({ roundId, taskId, eventSeq: 6 })),
     editTask: vi.fn(() => action({ roundId, taskId, eventSeq: 6 })),
     moveTask: vi.fn(() => action({ roundId, taskId, eventSeq: 6 })),
@@ -154,7 +160,7 @@ describe('RequirementsView Notebook', () => {
     const { container } = render(<RequirementsView {...props()} />)
 
     const cells = [...container.querySelectorAll<HTMLElement>('[data-cell]')]
-    expect(cells.map(cell => cell.dataset.cell)).toEqual(['markdown', 'plan', 'task', 'task', 'validation'])
+    expect(cells.map(cell => cell.dataset.cell)).toEqual(['clarification-record', 'document', 'task', 'task', 'validation'])
     expect(screen.getAllByRole('button', { name: '代码' })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: '文本' })).toHaveLength(1)
     expect(container.querySelector('[data-notebook-scroll]')).toBeTruthy()
@@ -221,7 +227,7 @@ describe('RequirementsView Notebook', () => {
 
     const cell = selectTask()
     const content = within(cell).getByRole('textbox', { name: '任务内容 建立 Notebook' }) as HTMLTextAreaElement
-    expect(content.value).toBe('建立 Notebook\n  渲染需求、Plan、Task 和验证单元格。')
+    expect(content.value).toBe('建立 Notebook\n  渲染需求、Task 和验证单元格。\n  \n  _关联需求：1.1_')
     expect(within(cell).queryByRole('textbox', { name: '任务标题' })).toBeNull()
     expect(within(cell).queryByRole('textbox', { name: '任务说明' })).toBeNull()
 
@@ -297,14 +303,15 @@ describe('RequirementsView Notebook', () => {
     const value = snapshot()
     const tasks = value.taskLists[0]!
     rerender(<RequirementsView {...props({ addTask, editTask: injected.editTask, runTask: injected.runTask }, { ...value, taskLists: [
-      { ...tasks, anchorSeq: 6, data: { ...tasks.data, revision: 2, tasks: [...tasks.data.tasks,
-        { id: addedTaskId, order: 2, title: '', statement: '', status: 'pending' },
+      { ...tasks, anchorSeq: 6, data: { ...tasks.data, revision: 2, tasks: [tasks.data.tasks[0]!,
+        { id: addedTaskId, order: 1, kind: 'implementation', title: '', statement: '', requirementRefs: [], status: 'pending' },
+        { ...tasks.data.tasks[1]!, order: 2 },
       ] } },
     ] })} />)
     const content = screen.getByRole('textbox', { name: '任务内容 新任务' }) as HTMLTextAreaElement
     const cell = content.closest('article')!
     expect(content).toBe(document.activeElement)
-    expect(within(cell).getByText('TASK3')).toBeTruthy()
+    expect(within(cell).getByText('TASK2')).toBeTruthy()
     expect(within(cell).queryByRole('button', { name: '保存' })).toBeNull()
     expect(within(cell).queryByRole('button', { name: '取消' })).toBeNull()
     expect(within(cell).getByRole('button', { name: '运行任务 新任务' }).hasAttribute('disabled')).toBe(true)
@@ -381,10 +388,10 @@ describe('RequirementsView Notebook', () => {
     expect(screen.getByRole('menuitem', { name: '使用中文内容' })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: '使用英文内容' })).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: '全部收起' }))
-    expect(screen.queryByText('需求 Markdown')).toBeNull()
+    expect(screen.queryByText('需求文档')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '命令' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '全部展开' }))
-    expect(screen.getByText('需求 Markdown')).toBeTruthy()
+    expect(screen.getAllByText('需求文档').length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: '命令' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '使用英文内容' }))
@@ -399,7 +406,7 @@ describe('RequirementsView Notebook', () => {
     expect(screen.getByText('100%')).toBeTruthy()
   })
 
-  it('supports move, edit, comment, withdraw, and Agent assistance actions', async () => {
+  it('keeps Final Test last while supporting edit, comment, withdraw, and Agent assistance actions', async () => {
     const moveTask = vi.fn(() => Promise.resolve({ ok: true as const, value: { roundId, taskId, eventSeq: 6 } }))
     const editTask = vi.fn(() => Promise.resolve({ ok: true as const, value: { roundId, taskId, eventSeq: 7 } }))
     const withdrawTask = vi.fn(() => Promise.resolve({ ok: true as const, value: { roundId, taskId, eventSeq: 8 } }))
@@ -408,12 +415,10 @@ describe('RequirementsView Notebook', () => {
     render(<RequirementsView {...props({ moveTask, editTask, withdrawTask, addNote, openView })} />)
 
     let cell = selectTask()
-    fireEvent.click(within(cell).getByRole('button', { name: '选择下一个任务' }))
-    expect(moveTask).toHaveBeenCalledWith({ roundId, taskId, direction: 'down' })
-    await waitFor(() => { expect(within(cell).getByRole('button', { name: '选择下一个任务' }).hasAttribute('disabled')).toBe(false) })
+    expect(within(cell).getByRole('button', { name: '选择下一个任务' }).hasAttribute('disabled')).toBe(true)
     cell = selectTask('验证 Notebook')
-    fireEvent.click(within(cell).getByRole('button', { name: '选择上一个任务' }))
-    expect(moveTask).toHaveBeenCalledWith({ roundId, taskId: secondTaskId, direction: 'up' })
+    expect(within(cell).getByRole('button', { name: '选择上一个任务' }).hasAttribute('disabled')).toBe(true)
+    expect(moveTask).not.toHaveBeenCalled()
     await waitFor(() => { expect(within(cell).getByRole('button', { name: '编辑任务' }).hasAttribute('disabled')).toBe(false) })
     cell = selectTask()
     fireEvent.change(within(cell).getByRole('textbox', { name: '任务内容 建立 Notebook' }), {
@@ -451,13 +456,15 @@ describe('RequirementsView Notebook', () => {
       version: 1,
       revision: 2,
       roundId,
+      documentRevision: 1,
       tasks: [
-        { id: 'PENDING' as never, order: 0, title: '等待任务', statement: 'pending', status: 'pending' },
-        { id: 'ACTIVE' as never, order: 1, title: '运行任务', statement: 'active', status: 'in_progress' },
-        { id: 'TURN' as never, order: 2, title: '轮次任务', statement: 'turn', status: 'in_progress' },
-        { id: 'FAILED' as never, order: 3, title: '失败任务', statement: 'failed', status: 'failed' },
-        { id: 'DONE' as never, order: 4, title: '完成任务', statement: 'done', status: 'completed' },
-        { id: 'GONE' as never, order: 5, title: '撤回任务', statement: 'withdrawn', status: 'withdrawn' },
+        { id: 'PENDING' as never, order: 0, kind: 'implementation', title: '等待任务', statement: 'pending', requirementRefs: ['1.1'], status: 'pending' },
+        { id: 'ACTIVE' as never, order: 1, kind: 'implementation', title: '运行任务', statement: 'active', requirementRefs: ['1.1'], status: 'in_progress' },
+        { id: 'TURN' as never, order: 2, kind: 'implementation', title: '轮次任务', statement: 'turn', requirementRefs: ['1.1'], status: 'in_progress' },
+        { id: 'FAILED' as never, order: 3, kind: 'implementation', title: '失败任务', statement: 'failed', requirementRefs: ['1.1'], status: 'failed' },
+        { id: 'DONE' as never, order: 4, kind: 'implementation', title: '完成任务', statement: 'done', requirementRefs: ['1.1'], status: 'completed' },
+        { id: 'GONE' as never, order: 5, kind: 'implementation', title: '撤回任务', statement: 'withdrawn', requirementRefs: ['1.1'], status: 'withdrawn' },
+        { id: 'FINAL' as never, order: 6, kind: 'final-test', title: '最终测试', statement: 'final', requirementRefs: ['1.1'], status: 'pending' },
       ],
     }, 9) as RequirementTaskListNode
     const active: RequirementTaskExecutionNode = base('requirements-task-execution', {
@@ -484,8 +491,8 @@ describe('RequirementsView Notebook', () => {
       ...value.taskLists[0]!.data,
       revision: 2,
       tasks: [
-        { id: taskId, order: 0, title: '回归任务', statement: 'regression', status: 'completed' },
-        { id: secondTaskId, order: 1, title: '失败任务', statement: 'failure', status: 'failed' },
+        { id: taskId, order: 0, kind: 'implementation', title: '回归任务', statement: 'regression', requirementRefs: ['1.1'], status: 'completed' },
+        { id: secondTaskId, order: 1, kind: 'final-test', title: '失败任务', statement: 'failure', requirementRefs: ['1.1'], status: 'failed' },
       ],
     }, 7) as RequirementTaskListNode
     const validation: RequirementValidationNode = base('requirements-validation', {

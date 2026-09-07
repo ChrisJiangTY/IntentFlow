@@ -9,11 +9,10 @@
     { "path": "../../core/session" },
     { "path": "../../util/brand" },
     { "path": "../../core/agent" },
-    { "path": "../../preset/agent-presets" },
-    { "path": "../../plan/plan-mode" },
     { "path": "../../core/tools" },
     { "path": "../../llm/llm" },
     { "path": "../../interaction/commands" },
+    { "path": "../../interaction/user-questions" },
     { "path": "../../subagent/subagent" },
     { "path": "../../typert/protocol" },
     { "path": "../../runtime-diagnostics/invariants" }

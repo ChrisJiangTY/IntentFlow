@@ -8,8 +8,11 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {
+  RequirementDocumentEditRequest,
   RequirementRoundStartRequest,
   RequirementRunAllRequest,
+  RequirementRunAllStopRequest,
+  RequirementTaskGenerateRequest,
   RequirementTaskAddRequest,
   RequirementTaskEditRequest,
   RequirementTaskMoveRequest,
@@ -77,6 +80,18 @@ export function apply(ctx: Context): void {
           ? { ok: true, value: result.value }
           : { ok: false, error: result.error.message }
       },
+      editDocument: async (request: RequirementDocumentEditRequest) => {
+        const result = await ctx.remote.sessionRequirements.editDocument(sessionId, request)
+        return result.ok
+          ? { ok: true, value: result.value }
+          : { ok: false, error: result.error.message }
+      },
+      generateTasks: async (request: RequirementTaskGenerateRequest) => {
+        const result = await ctx.remote.sessionRequirements.generateTasks(sessionId, request)
+        return result.ok
+          ? { ok: true, value: result.value }
+          : { ok: false, error: result.error.message }
+      },
       runTask: async (request: RequirementTaskRunRequest) => {
         const result = await ctx.remote.sessionRequirements.runTask(sessionId, request)
         return result.ok
@@ -85,6 +100,12 @@ export function apply(ctx: Context): void {
       },
       runAll: async (request: RequirementRunAllRequest) => {
         const result = await ctx.remote.sessionRequirements.runAll(sessionId, request)
+        return result.ok
+          ? { ok: true, value: result.value }
+          : { ok: false, error: result.error.message }
+      },
+      stopRunAll: async (request: RequirementRunAllStopRequest) => {
+        const result = await ctx.remote.sessionRequirements.stopRunAll(sessionId, request)
         return result.ok
           ? { ok: true, value: result.value }
           : { ok: false, error: result.error.message }

@@ -157,6 +157,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns Session commands, cold reads, durable-event following, live control state, model catalogs, workspace opening, and Agent activation policy.',
   },
   {
+    key: 'sessionRequirements',
+    pkg: 'session-requirements',
+    title: 'Requirement Notebook orchestration',
+    mode: 'core',
+    consumers: ['ui-requirements'],
+    note: 'Owns clarified requirement documents, generated Task lists, serialized execution, independent Task review gates, and final validation.',
+  },
+  {
     key: 'sessionFileReferences',
     pkg: 'api-session-controller',
     title: 'Session-addressed file-reference Remote adapter',
@@ -360,8 +368,8 @@ const SERVICE_ROLES: ServiceRole[] = [
     pkg: 'user-questions',
     title: 'Human question/answer seam',
     mode: 'seam',
-    consumers: ['tool-ask-user'],
-    note: 'UI front ends provide the active human-answer provider; tool-ask-user pauses a tool call on the provider-neutral ask() promise.',
+    consumers: ['tool-ask-user', 'session-requirements'],
+    note: 'UI front ends provide the active human-answer provider; tool-ask-user and Requirement Notebook authoring pause tool calls on the provider-neutral ask() promise.',
   },
   {
     key: 'planMode',

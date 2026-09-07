@@ -1,85 +1,61 @@
 # 需求执行 Notebook 界面映射
 
-本文档定义第三版 Jupyter 风格界面与 DSH 用户路径的对应关系。DSH 保留侧边栏、Session 顶栏、对话/轨迹/需求标签页和底部原生对话输入框；需求标签页把产品轮次显示为 Notebook。
+本文档定义需求文档工作流与 DSH Web 界面的对应关系。DSH 保留侧边栏、Session 顶栏、对话/轨迹/需求标签页和底部原生输入框；需求标签页把每个产品轮次显示为 Notebook。
 
 ## 核心交互模型
 
-一次产品轮次从底部输入框提交原始需求开始，到本轮 Task 完成并通过最终验证结束。产品轮次有独立的 `RequirementRoundId`，不把 Agent Turn 当成轮次标识。
-
-1. `startRound` 原样保存用户输入，追加需求 Markdown，并自动打开 Plan 模式。
-2. Plan 由 `exit_plan_mode` 持久化；用户批准 Plan 后，`todo_write` 按 Plan 中的顶层编号 `## N.` 阶段生成有序 Task Notebook，同一阶段内的所有 `N.x` 勾选项保留在同一个 Todo。
-3. 每个 Task 有稳定 `RequirementTaskId`、顺序、说明、执行状态和有界 Agent 输出，可单独执行或由“全部运行”按序执行；人话阶段标题与包含完整 Plan 大点的缩进正文属于同一个可编辑源，输出在输入单元格边框外以完整 Markdown 格式显示。
-4. 左侧单元格运行按钮和底部 DSH 对话输入框都把内容发送到当前 Session 的主对话执行链路；单元格运行发送当前 Task，底部输入框发送新需求、补充反馈或普通消息，二者都不创建独立执行对话。
-5. 全部实现 Task 完成后，审核子 Agent 生成最终验证 Notebook；验证同时检查本轮需求和仍有效的历史需求。
-6. 下一轮仍从 DSH 底部输入框开始，旧轮次和需求基线保留在 Session 日志中。
-
-用户从需求 Notebook 提交需求后，主对话默认执行以下路径：
+一次产品轮次从底部输入框提交原始需求开始，到所有 Task 通过审核并完成最终验证结束。产品轮次由独立的 `RequirementRoundId` 标识，不把 Agent Turn 当成产品轮次。
 
 ```text
-用户需求 → 主对话默认进入 Plan → Plan 获批后拆分为 Task 单元格 → Task 执行完成 → 生成验证单元格
+原始需求 → 关键歧义判断 → 可选澄清 → 中文需求文档 → 用户点击生成任务 → Task 块 → 逐项独立审核 → Final Test → 最终验证
 ```
 
-需求 Markdown、Plan、Task 列表、Task 执行、文本/批注、验证和轮次状态都是持久事件。界面只在本地保存选择、折叠、草稿、缩放和临时错误；刷新后从 Session target 重建 Notebook。
+1. `startRound` 原样保存用户输入，并让主 Agent 以只读方式检查仓库和判断关键歧义。
+2. 主 Agent 最多发起两批中文澄清问题，每批 1 至 5 个；不需要澄清时直接提交中文需求文档。
+3. 轮次标题显示不可编辑的短摘要；原始输入、问题和回答收在默认折叠的“澄清记录”中。
+4. 需求文档包含“简介”和连续编号的需求、用户故事、验收标准。文档可编辑；无效修订不能生成任务。
+5. 用户点击需求文档块的“生成任务”后，主 Agent 从确切文档修订生成多个顶层 Task 块。Notebook 不显示 Plan 卡片，也没有 Plan 审批。
+6. 每个顶层 Task 块保留对应阶段的全部 `N.x` 子勾选项和中文 `_关联需求：…_`；最后一个块固定为 Final Test。
+7. Task 单独运行或按序全部运行。一个 Task 完成后，独立审核者先给出通过、警告或阻塞判定，系统再决定是否继续。
+8. “停止全部运行”在当前 Task 及其审核结算后生效。Final Test 通过审核后，系统追加最终验证单元格。
 
-## 审核子 Agent 与红色状态
+轮次、澄清、需求文档、任务列表、Task 执行、“全部运行”、文本/批注、审核和验证都是持久事件。界面只在本地保存选择、折叠、草稿、缩放和临时错误；刷新后从 Session target 重建 Notebook。
 
-审核者读取历史审核快照、本轮 Markdown、Plan、Task 列表、Task 执行、文本/批注和只读工作区证据。只有本轮未授权地改变仍有效历史需求时，才产生 `regression`；用户明确的细化、替换、撤回不是回归。能够可靠归因时，验证记录 `taskId`，对应 Task 与验证单元格同时标红；不能归因时只标红验证单元格。Task 执行失败显示 `[!]` 与琥珀色状态，不表示历史回归。
+## 编辑与锁定
 
-## 实现状态审计
+- 需求文档在任务执行开始前可以编辑。文档修订后，旧任务列表不再显示，用户必须重新生成任务。
+- 任务生成进行期间不能编辑需求文档，防止 Agent 读取的修订与提交结果不一致。
+- 任一 Task 开始执行后，需求文档锁定。
+- 执行前，普通 Task 可以新增、编辑、重排或撤回；Final Test 可以编辑，但不能撤回、移动或离开末位。
+- 执行开始后，已完成、执行中和审核中的 Task 锁定。当前 Task 与审核结算且“全部运行”停止时，后续待处理 Task 才能编辑。
 
-| 路径能力 | 实现与证据 | 状态 |
-|---|---|---|
-| 原生输入与产品轮次 | `ui-conversation` 读取当前 view，把需求输入路由到 `startRound`；`session-requirements` 追加 `requirement/round` | 满足 |
-| Markdown 与自动 Plan | `requirement/markdown` 保存原始输入；`startRound` 调用 `planMode.set(agent, true)` | 满足 |
-| Plan 与 Task 拆分 | 捕获 `exit_plan_mode`；审批后捕获 `todo/write`，每个顶层 `## N.` 阶段生成一个 Todo，其首行作为人话标题，后续行保留整个阶段 | 满足 |
-| Task Notebook | `RequirementsView` 渲染说明、状态、输出、运行按钮、悬浮工具栏、详情抽屉和回归样式 | 满足 |
-| Task 操作 | `runTask`、`runAll`、`addTask`、`editTask`、`moveTask`、`withdrawTask` 均为生成 Remote 并追加持久事件 | 满足 |
-| 文本与批注 | `+文本` 和单元格批注通过 `addNote({ dispatch: false })` 持久保存但不执行；星光辅助使用 `dispatch: true` 发送到主对话 | 满足 |
-| 最终验证与历史回归 | 每个父 Turn 结束后独立审核；`requirement/validation` 保存结果、失败 Task、回归需求和可选 Task 归因 | 满足 |
-| DSH 第三版视觉 | 需求页采用 Figma Notebook 的固定顶部工具栏、轮次标题、单元格、蓝色选中框、右侧状态条和红/琥珀错误状态；底部输入框仍为 DSH 原生组件 | 满足 |
-| 持久化与重放 | `assembly.ts` 按事件类型投影所有 Notebook 节点；Session invariant 检查版本、关联和状态转换 | 满足 |
+## 审核与状态
 
-## 第三版功能作用与状态
+Task 执行失败使用 `[!]` 和琥珀色状态。审核者返回 `warning` 时显示警告但允许继续；返回 `blocking`、审核不可用、输出无效或确认历史需求回归时，当前 Task 失败并停止“全部运行”。只有审核证据能够可靠归因时，历史回归才绑定到具体 Task；否则最终验证报告回归但不猜测责任。
 
-下表逐项记录第三版 Notebook 草稿中的功能作用和当前实现。`+代码` 与 `+文本` 只能出现在 Notebook 顶部工具栏；轮次标题、单元格之间和底部都不得出现其他添加按钮。工具栏固定在 Notebook 顶部，多轮滚动时仍可操作；右侧不显示独立的中英文切换控件，语言切换保留在“命令”菜单中。新建代码单元格以约 50px 的单行编辑器开始，并随输入内容自动向下增高。
+Final Test 是固定的最终任务。它覆盖需求文档的全部验收标准，可以修复本轮引入的问题并重新验证，但不得删除测试、放宽断言或隐藏失败。
 
-| 功能 | 作用 | 当前第三版状态 |
-|---|---|---|
-| Notebook 页面 | 展示当前 Session 的需求执行过程 | 已实现 |
-| `命令` | 打开审核、折叠、关系图、语言等操作 | 已实现 |
-| `+ 代码` | 在最新轮次顶部新增可执行需求单元格 | 已实现，且仅有顶部入口 |
-| `+ 文本` | 在最新轮次顶部新增章节标题、说明或 Markdown 注释 | 已实现，且仅有顶部入口；保存为不立即执行的持久 note |
-| `全部运行` | 按顺序执行多个需求单元格 | 已实现，遇到失败立即停止 |
-| 轮次标题 | 按产品需求轮次分组 | 已实现，如“第 1 轮”“第 2 轮” |
-| 折叠箭头 | 展开或收起某一轮的全部单元格 | 已实现 |
-| `[ ]` | 已提交、等待 Agent 执行 | 已实现 |
-| `[*]` | Agent 已开始执行但尚未获得 Turn 编号 | 已实现 |
-| `[n]` | 表示该单元格对应的 Agent Turn | 已实现，如 `[11]` |
-| `[!]` | 表示执行失败 | 已实现 |
-| 单元格运行按钮 | 将当前需求 Task 发送到主对话中执行，不创建独立执行对话 | 已实现 |
-| 单元格编辑器 | 编辑人话任务标题和完整技术说明 | 已实现；约 50px 单行起始高度，随内容自动增高 |
-| 单元格输出 | 在输入单元格外展示实现摘要、代码反馈、缺口和关联文件 | 已实现；无边框并保留完整 Markdown 格式，默认展开，左侧箭头可独立折叠 |
-| 蓝色边框 | 表示当前选中的需求单元格 | 已实现 |
-| 右侧状态条 | 快速表示需求执行和审核状态 | 已实现；等待灰、执行蓝、完成绿、失败琥珀、历史回归红 |
-| 上移/下移 | 调整需求的执行顺序 | 已实现 |
-| 编辑 | 修改当前需求 | 已实现 |
-| 删除/撤回 | 撤回需求，但不删除历史记录 | 已实现于“更多”菜单 |
-| 更多菜单 | 查看历史、证据、来源、关系和审核操作 | 已实现 |
-| 批注 | 给需求增加持久补充反馈，但不立即执行 | 已实现 |
-| Gemini/星光按钮 | 携带当前单元格引用打开主对话，请求 Agent 解释或优化当前需求 | 已实现 |
-| 缩放控件 | 调整 Notebook 显示比例 | 已实现 |
-| Notebook 滚动 | 浏览完整需求文档 | 已实现，底部原生输入框固定保留 |
-| 关系图 | 查看需求与代码之间的关系 | 已实现，从“命令”或“更多”进入按需抽屉 |
-| 需求详情 | 查看版本、审核证据、来源、关联文件和缺口 | 已实现为按需抽屉，不常驻占用 Notebook |
-| 底部对话输入框 | 将新需求、补充反馈或普通消息发送到当前 Session 的主对话中执行 | 已实现 |
-| Workspace Write | 控制当前会话的工作区权限模式 | 已保留 |
-| 模型与 High | 选择模型和推理强度 | 已保留 |
-| Session 指标 | 展示当前会话的运行状态或消耗信息 | 已保留 |
+## 实现映射
 
-控件的当前实现语义如下：顶部 `+代码` 创建 Task，顶部 `+文本` 和批注通过 `addNote({ dispatch: false })` 形成不立即执行的持久 Notebook 事件；星光按钮通过 `addNote({ dispatch: true })` 把引用当前 Task 的请求发送到主对话并切回对话视图。左侧单元格运行按钮和“全部运行”都通过主对话执行 Task，底部 DSH 输入框也通过同一主对话处理新需求、补充反馈和普通消息；“全部运行”按序执行并在失败处停止。执行已经排入但还没有 Turn 编号时显示 `[*]`，取得 Turn 编号后显示 `[n]`，执行失败显示 `[!]`；审核确认历史需求回归时使用红色状态。关系图和详情从命令或更多菜单进入，不占用 Notebook 常驻区域。
+| 路径能力 | 实现与证据 |
+|---|---|
+| 原始输入与摘要 | `requirement/round` 保存输入、状态和只读摘要；`RequirementsView` 渲染轮次标题与折叠记录 |
+| 澄清 | `clarify_requirements` 通过 `userQuestions` 交互；`requirement/clarification` 保存问题、答案和失败状态 |
+| 需求文档 | `submit_requirements_document` 与 `editDocument` 追加 `requirement/document` 修订；宿主验证中文结构 |
+| 生成任务 | `generateTasks` 排入生成轮次；`submit_requirement_tasks` 从确切文档修订追加 `requirement/task-list` |
+| Task 操作 | `runTask`、`runAll`、`stopRunAll`、`addTask`、`editTask`、`moveTask`、`withdrawTask` 追加持久事件 |
+| 独立审核 | `requirement/review` 保存逐 Task 判定；只有审核通过后才把执行标成完成 |
+| Final Test | 任务列表不变量要求唯一、末位且覆盖所有验收标准；通过后追加 `requirement/validation` |
+| 持久化与重放 | `assembly.ts` 按事件类型投影 Notebook 节点；Session invariant 检查修订、引用和状态转换 |
+
+## 界面控件
+
+顶部工具栏保留“命令”“+代码”“+文本”“全部运行”和停止控件。需求文档块提供编辑、保存、取消和“生成任务”。摘要不可编辑。Task 输入单元格继续支持自动保存、运行、上下移动、批注、详情、撤回和 Agent 辅助；输出使用 Markdown 渲染并可独立折叠。关系图和详情从命令或更多菜单按需打开，不占用 Notebook 常驻区域。
+
+底部原生输入框在需求标签页激活时创建新需求轮次；普通“对话”和“轨迹”输入行为不变。Workspace Write、模型选择、推理强度和 Session 指标继续由 DSH 外壳提供。
 
 ## 验收与检查
 
-目标路径必须满足：原始需求可重放；Markdown、Plan、Task、执行和验证顺序可见；Task 操作独立持久化；下一轮审核能区分授权变化和意外回归；回归与执行失败颜色不混淆；刷新或重开 Session 后 Notebook 状态一致。相关行为测试位于 `packages/session/session-requirements/tests/session-requirements.spec.ts`、`packages/client/ui-requirements/tests/requirements-view.client.spec.tsx`、`packages/client/ui-requirements/tests/assembly.client.spec.ts` 和 `packages/client/ui-conversation/tests/skeleton.client.spec.tsx`。
+目标路径必须满足：原始输入与澄清可重放；摘要只读；需求文档可验证和修订；生成任务不依赖 Plan；文档修订会使旧任务失效；Task 操作遵守锁定规则；每个 Task 在继续前完成独立审核；Final Test 始终处于末位并覆盖全部验收标准；刷新或重开 Session 后 Notebook 状态一致。
 
-实现决策：Plan 继续使用 DSH 已有的显式批准点；“全部运行”按序执行并在失败处停止；Task 保存有界 Agent 最终输出，完整工具证据留在轨迹和 Session 日志；文本/批注持久但默认不派发，只有明确的星光辅助操作才发送到主对话；只有审核证据能支持归因时才把回归绑定到 Task。
+相关行为测试位于 `packages/session/session-requirements/tests/` 和 `packages/client/ui-requirements/tests/`。`loader-composition.spec.ts` 通过 Loader 启动真实 Cordis 配置，并检查持久轮次与模型可见提示词。

@@ -121,21 +121,21 @@ describe('requirements snapshot builder', () => {
           summary: { zh: '已完成。', en: 'Completed.' }, regressions: [], failedTaskIds: [],
         }, 9),
         notebookNode('requirements-task-list', {
-          version: 1, revision: 1, roundId, tasks: [],
+          version: 1, revision: 1, roundId, documentRevision: 1, tasks: [],
         }, 8),
         notebookNode('requirements-round', {
           version: 1, revision: 1, roundId, round: 1, sourceMessageId: 'message-1' as never,
           language: 'zh', input: '建立 Notebook', status: 'completed',
         }, 6),
-        notebookNode('requirements-markdown', {
-          version: 1, revision: 1, roundId, sourceMessageId: 'message-1' as never,
-          language: 'zh', markdown: '# 用户需求\n\n建立 Notebook',
+        notebookNode('requirements-document', {
+          version: 1, revision: 1, roundId, turn: 1, summary: '建立 Notebook',
+          markdown: '# 需求文档\n\n## 简介\n\n建立 Notebook', valid: true, issues: [],
         }, 7),
       ],
     })
 
     expect(snapshot.rounds.map(item => item.data.roundId)).toEqual([roundId])
-    expect(snapshot.markdowns).toHaveLength(1)
+    expect(snapshot.documents).toHaveLength(1)
     expect(snapshot.taskLists).toHaveLength(1)
     expect(snapshot.validations).toHaveLength(1)
     expect(snapshot.rounds[0]!.anchorSeq).toBeLessThan(snapshot.validations[0]!.anchorSeq)

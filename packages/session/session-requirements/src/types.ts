@@ -69,6 +69,27 @@ export interface RequirementRoundStartResult {
   readonly eventSeq: number
 }
 
+/** Browser request that replaces the editable requirement document draft. */
+export interface RequirementDocumentEditRequest {
+  readonly roundId: RequirementRoundId
+  /** Latest document revision observed by the editor. */
+  readonly revision: number
+  readonly markdown: string
+}
+
+/** Browser request that generates tasks from one exact document revision. */
+export interface RequirementTaskGenerateRequest {
+  readonly roundId: RequirementRoundId
+  readonly documentRevision: number
+}
+
+/** Durable position returned after a document edit or task-generation request. */
+export interface RequirementDocumentActionResult {
+  readonly roundId: RequirementRoundId
+  readonly documentRevision: number
+  readonly eventSeq: number
+}
+
 /** Browser request that runs one task Notebook cell. */
 export interface RequirementTaskRunRequest {
   readonly roundId: RequirementRoundId
@@ -90,7 +111,7 @@ export interface RequirementTaskEditRequest {
   readonly statement: string
 }
 
-/** Browser request that changes one task's position in the current Plan. */
+/** Browser request that changes one task's position in the current generated task list. */
 export interface RequirementTaskMoveRequest {
   readonly roundId: RequirementRoundId
   readonly taskId: RequirementTaskId
@@ -130,6 +151,17 @@ export interface RequirementRunAllResult {
   readonly eventSeq?: number
 }
 
+/** Browser request that stops an ordered run after its current task settles. */
+export interface RequirementRunAllStopRequest {
+  readonly roundId: RequirementRoundId
+}
+
+/** Durable position returned after an ordered run accepts a stop request. */
+export interface RequirementRunAllStopResult {
+  readonly roundId: RequirementRoundId
+  readonly eventSeq: number
+}
+
 /** Browser request that adds a durable Notebook text or comment cell. */
 export interface RequirementNoteRequest {
   readonly roundId: RequirementRoundId
@@ -155,9 +187,14 @@ export interface RequirementNoteResult {
 
 /** Lifecycle of one product requirement round. */
 export type RequirementRoundStatus =
-  | 'planning'
-  | 'awaiting-approval'
+  | 'analyzing'
+  | 'clarifying'
+  | 'awaiting-input'
+  | 'document-ready'
+  | 'generating-tasks'
+  | 'tasks-ready'
   | 'executing'
+  | 'reviewing'
   | 'validating'
   | 'completed'
   | 'failed'
@@ -173,48 +210,79 @@ export interface RequirementRoundEvent {
   readonly language: RequirementAuthoringLanguage
   readonly input: string
   readonly status: RequirementRoundStatus
+  /** Task-generation message currently or most recently associated with the round. */
+  readonly generationMessageId?: MessageId
   /** Parent Agent turn currently responsible for this round. */
   readonly turn?: number
 }
 
-/** Durable Markdown rendering of one raw user requirement round. */
-export interface RequirementMarkdownEvent {
+/** One user-owned choice presented during requirement clarification. */
+export interface RequirementClarificationQuestion {
+  readonly id: string
+  readonly question: string
+  readonly header?: string
+  readonly options?: readonly {
+    readonly label: string
+    readonly description?: string
+  }[]
+}
+
+/** One answer returned for a requirement clarification question. */
+export interface RequirementClarificationAnswer {
+  readonly id: string
+  readonly selected: readonly string[]
+  readonly custom?: string
+}
+
+/** Durable request and settlement of one clarification batch. */
+export interface RequirementClarificationEvent {
   readonly version: 1
   readonly revision: number
   readonly roundId: RequirementRoundId
-  readonly sourceMessageId: MessageId
-  readonly language: RequirementAuthoringLanguage
-  readonly markdown: string
+  /** One-based clarification batch number, capped by the plugin configuration. */
+  readonly attempt: number
+  readonly status: 'asked' | 'answered' | 'dismissed'
+  readonly questions: readonly RequirementClarificationQuestion[]
+  readonly answers?: readonly RequirementClarificationAnswer[]
+  readonly error?: string
 }
 
-/** Lifecycle of a durable Plan artifact. */
-export type RequirementPlanStatus = 'proposed' | 'approved' | 'failed'
-
-/** Durable Plan artifact captured from the DSH plan-mode flow. */
-export interface RequirementPlanEvent {
+/** Editable Chinese requirement document generated after clarification. */
+export interface RequirementDocumentEvent {
   readonly version: 1
   readonly revision: number
   readonly roundId: RequirementRoundId
   readonly turn: number
-  readonly status: RequirementPlanStatus
+  /** Agent-authored read-only summary used by the round heading. */
+  readonly summary: string
   readonly markdown: string
+  /** Whether the current draft may generate tasks. */
+  readonly valid: boolean
+  /** Stable diagnostics for an invalid but persisted draft. */
+  readonly issues: readonly string[]
 }
+
+/** Semantic role of one top-level executable task block. */
+export type RequirementTaskKind = 'implementation' | 'checkpoint' | 'final-test'
 
 /** One task shown in a requirement Notebook; empty pending drafts cannot execute. */
 export interface RequirementTask {
   readonly id: RequirementTaskId
   readonly order: number
+  readonly kind: RequirementTaskKind
   readonly title: string
   readonly statement: string
-  readonly status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'withdrawn'
+  /** Acceptance criteria such as `1.1` that this block implements or verifies. */
+  readonly requirementRefs: readonly string[]
+  readonly status: 'pending' | 'in_progress' | 'reviewing' | 'completed' | 'failed' | 'withdrawn'
 }
 
-/** Whole task-list replacement projected from one round's Plan. */
+/** Whole task-list replacement generated from one requirement document revision. */
 export interface RequirementTaskListEvent {
   readonly version: 1
   readonly revision: number
   readonly roundId: RequirementRoundId
-  readonly planSeq?: number
+  readonly documentRevision: number
   readonly tasks: readonly RequirementTask[]
 }
 
@@ -225,10 +293,18 @@ export interface RequirementTaskExecutionEvent {
   readonly roundId: RequirementRoundId
   readonly taskId: RequirementTaskId
   readonly messageId: MessageId
-  readonly status: 'submitted' | 'processing' | 'completed' | 'failed'
+  readonly status: 'submitted' | 'processing' | 'reviewing' | 'completed' | 'failed'
   readonly turn?: number
   /** Bounded final Agent output attached to the task cell. */
   readonly output?: string
+}
+
+/** Durable lifecycle of a sequential Run All request. */
+export interface RequirementRunAllEvent {
+  readonly version: 1
+  readonly revision: number
+  readonly roundId: RequirementRoundId
+  readonly status: 'running' | 'stopping' | 'stopped' | 'completed' | 'failed'
 }
 
 /** A user-authored note; later events with the same round and note ids replace passive Markdown source. */
@@ -380,8 +456,8 @@ export interface RequirementRevision {
 
 /** Successful requirement review written after one parent turn. */
 export interface RequirementReviewCompleted {
-  /** Version 2 stores reviewer-authored text in both Chinese and English. */
-  readonly version: 1 | 2
+  /** Version 2 stores bilingual text; version 3 adds an optional task verdict. */
+  readonly version: 1 | 2 | 3
   readonly status: 'completed'
   /** Parent turn whose finished state was reviewed. */
   readonly turn: number
@@ -391,11 +467,18 @@ export interface RequirementReviewCompleted {
   readonly reviewerSessionId: SessionId
   /** Full requirement snapshot at this point in time. */
   readonly requirements: readonly RequirementRevision[]
+  /** Gate verdict when this review was requested for a Notebook task. */
+  readonly task?: {
+    readonly taskId: RequirementTaskId
+    readonly verdict: 'passed' | 'warning' | 'blocking'
+    readonly summary: RequirementText
+    readonly findings: readonly RequirementText[]
+  }
 }
 
 /** Failed review retained on the same timeline without inventing findings. */
 export interface RequirementReviewFailed {
-  readonly version: 1 | 2
+  readonly version: 1 | 2 | 3
   readonly status: 'failed'
   readonly turn: number
   readonly reviewedThroughSeq: number
@@ -428,14 +511,16 @@ declare module '@deepseek-ai/dsh-session/types' {
     'requirement/review': RequirementReviewEvent
     /** Product round and its raw user request. */
     'requirement/round': RequirementRoundEvent
-    /** Markdown artifact rendered from the raw user request. */
-    'requirement/markdown': RequirementMarkdownEvent
-    /** Plan-mode Markdown captured for one product round. */
-    'requirement/plan': RequirementPlanEvent
-    /** Whole task list derived from the approved Plan. */
+    /** Requirement clarification batch and its user answer. */
+    'requirement/clarification': RequirementClarificationEvent
+    /** Editable requirement document produced after clarification. */
+    'requirement/document': RequirementDocumentEvent
+    /** Whole task list generated from the current requirement document. */
     'requirement/task-list': RequirementTaskListEvent
     /** Execution status for one Notebook task. */
     'requirement/task-execution': RequirementTaskExecutionEvent
+    /** Sequential Run All lifecycle. */
+    'requirement/run-all': RequirementRunAllEvent
     /** User-authored Notebook text and comment cells. */
     'requirement/note': RequirementNoteEvent
     /** Independent final validation and confirmed historical regressions. */

@@ -1766,9 +1766,81 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   },
   {
     key: 'sessionRequirements',
-    summary: 'Coordinates user-owned versions and serialized independent reviews.',
-    description: 'Coordinates user-owned versions and serialized independent reviews.',
+    summary: 'Coordinates clarified requirement documents, executable Tasks, and serialized independent reviews.',
+    description: 'Coordinates clarified requirement documents, executable Tasks, and serialized independent reviews.',
     methods: [
+      {
+        signature: '@Remote(\'startRound\') startRound(agent: Agent, request: RequirementRoundStartRequest): RequirementRoundStartResult',
+        description: 'Start one product requirement round and queue its requirement-analysis turn.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that receives the round.' }, { name: 'request', description: 'raw requirement and authoring language.' }],
+        returns: 'the durable round identity and first event sequence.',
+      },
+      {
+        signature: '@Remote(\'editDocument\') editDocument(agent: Agent, request: RequirementDocumentEditRequest): RequirementDocumentActionResult',
+        description: 'Persist an editable requirement-document draft without starting Agent work.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that owns the round.' }, { name: 'request', description: 'round, optimistic revision, and replacement Markdown.' }],
+        returns: 'the committed document revision and event position.',
+      },
+      {
+        signature: '@Remote(\'generateTasks\') generateTasks(agent: Agent, request: RequirementTaskGenerateRequest): RequirementDocumentActionResult',
+        description: 'Queue task generation from one validated requirement-document revision.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that receives the generation turn.' }, { name: 'request', description: 'round and exact source document revision.' }],
+        returns: 'the queued document revision and event position.',
+      },
+      {
+        signature: '@Remote(\'runTask\') runTask(agent: Agent, request: RequirementTaskRunRequest): RequirementTaskRunResult',
+        description: 'Queue one nonblank task cell as a standalone Agent turn; empty drafts are rejected.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that receives the task.' }, { name: 'request', description: 'round and stable task identity.' }],
+        returns: 'the task execution identity and submitted event sequence.',
+      },
+      {
+        signature: '@Remote(\'addTask\') addTask(agent: Agent, request: RequirementTaskAddRequest): RequirementTaskMutationResult',
+        description: 'Insert one manually authored task, including an empty pending draft, into the current round.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that owns the round.' }, { name: 'request', description: 'task text and optional insertion point.' }],
+        returns: 'the durable task identity and task-list event sequence.',
+      },
+      {
+        signature: '@Remote(\'editTask\') editTask(agent: Agent, request: RequirementTaskEditRequest): RequirementTaskMutationResult',
+        description: 'Persist a task\'s editable text, including empty drafts, and return it to the pending state.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that owns the round.' }, { name: 'request', description: 'task identity and replacement text.' }],
+        returns: 'the durable task identity and task-list event sequence.',
+      },
+      {
+        signature: '@Remote(\'moveTask\') moveTask(agent: Agent, request: RequirementTaskMoveRequest): RequirementTaskMutationResult',
+        description: 'Move a pending task one position without crossing locked or final tasks.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that owns the round.' }, { name: 'request', description: 'task identity and direction.' }],
+        returns: 'the durable task identity and task-list event sequence.',
+      },
+      {
+        signature: '@Remote(\'withdrawTask\') withdrawTask(agent: Agent, request: RequirementTaskWithdrawRequest): RequirementTaskMutationResult',
+        description: 'Withdraw a task while retaining its historical task-list entries.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that owns the round.' }, { name: 'request', description: 'task identity to withdraw.' }],
+        returns: 'the durable task identity and task-list event sequence.',
+      },
+      {
+        signature: '@Remote(\'runAll\') runAll(agent: Agent, request: RequirementRunAllRequest): RequirementRunAllResult',
+        description: 'Run the next pending task and continue in order after each completed task, skipping empty drafts.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that receives the task turns.' }, { name: 'request', description: 'round whose pending tasks should run.' }],
+        returns: 'the first queued task, when one exists.',
+      },
+      {
+        signature: '@Remote(\'stopRunAll\') stopRunAll(agent: Agent, request: RequirementRunAllStopRequest): RequirementRunAllStopResult',
+        description: 'Stop Run All after the current task and its independent review settle.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that owns the ordered run.' }, { name: 'request', description: 'round whose ordered run should stop.' }],
+        returns: 'durable stop-request position.',
+      },
+      {
+        signature: '@Remote(\'addNote\') addNote(agent: Agent, request: RequirementNoteRequest): RequirementNoteResult',
+        description: 'Add a durable note; passive Markdown may be empty, dispatched notes and comments must be nonblank.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that receives the note.' }, { name: 'request', description: 'round, cell kind, and user-authored content.' }],
+        returns: 'the note identity and event sequence.',
+      },
+      {
+        signature: '@Remote(\'editNote\') editNote(agent: Agent, request: RequirementNoteEditRequest): RequirementNoteResult',
+        description: 'Persist replacement Markdown for a passive text note without dispatching a message.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that owns the note\'s Session.' }, { name: 'request', description: 'round, note identity, and verbatim Markdown source; empty text is allowed.' }],
+        returns: 'the existing note identity and new event sequence; missing or dispatched notes are rejected.',
+      },
       {
         signature: '@Remote(\'commit\') commit(agent: Agent, request: RequirementCommitRequest): RequirementCommitResult',
         description: 'Commit one user-authored requirement version, then queue its exact change as an ordinary user turn. The durable version remains current when Agent execution later fails.',
@@ -4662,12 +4734,100 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface RequirementCommitResult {\n    readonly requirementId: RequirementId;\n    readonly requirementVersion: number;\n    readonly eventSeq: number;\n}',
   },
   {
+    name: 'RequirementDocumentActionResult',
+    declaration: 'export interface RequirementDocumentActionResult {\n    readonly roundId: RequirementRoundId;\n    readonly documentRevision: number;\n    readonly eventSeq: number;\n}',
+  },
+  {
+    name: 'RequirementDocumentEditRequest',
+    declaration: 'export interface RequirementDocumentEditRequest {\n    readonly roundId: RequirementRoundId;\n    readonly revision: number;\n    readonly markdown: string;\n}',
+  },
+  {
     name: 'RequirementId',
     declaration: 'export type RequirementId = Branded<\'RequirementId\'>;',
   },
   {
+    name: 'RequirementNoteEditRequest',
+    declaration: 'export interface RequirementNoteEditRequest {\n    readonly roundId: RequirementRoundId;\n    readonly noteId: RequirementNoteId;\n    readonly content: string;\n}',
+  },
+  {
+    name: 'RequirementNoteId',
+    declaration: 'export type RequirementNoteId = Branded<\'RequirementNoteId\'>;',
+  },
+  {
+    name: 'RequirementNoteRequest',
+    declaration: 'export interface RequirementNoteRequest {\n    readonly roundId: RequirementRoundId;\n    readonly kind: \'text\' | \'comment\';\n    readonly content: string;\n    readonly dispatch: boolean;\n}',
+  },
+  {
+    name: 'RequirementNoteResult',
+    declaration: 'export interface RequirementNoteResult {\n    readonly roundId: RequirementRoundId;\n    readonly noteId: RequirementNoteId;\n    readonly eventSeq: number;\n}',
+  },
+  {
     name: 'RequirementRef',
     declaration: 'export interface RequirementRef {\n    readonly id: RequirementId;\n    readonly version: number;\n}',
+  },
+  {
+    name: 'RequirementRoundId',
+    declaration: 'export type RequirementRoundId = Branded<\'RequirementRoundId\'>;',
+  },
+  {
+    name: 'RequirementRoundStartRequest',
+    declaration: 'export interface RequirementRoundStartRequest {\n    readonly input: string;\n    readonly language: RequirementAuthoringLanguage;\n}',
+  },
+  {
+    name: 'RequirementRoundStartResult',
+    declaration: 'export interface RequirementRoundStartResult {\n    readonly roundId: RequirementRoundId;\n    readonly round: number;\n    readonly eventSeq: number;\n}',
+  },
+  {
+    name: 'RequirementRunAllRequest',
+    declaration: 'export interface RequirementRunAllRequest {\n    readonly roundId: RequirementRoundId;\n}',
+  },
+  {
+    name: 'RequirementRunAllResult',
+    declaration: 'export interface RequirementRunAllResult {\n    readonly roundId: RequirementRoundId;\n    readonly taskId?: RequirementTaskId;\n    readonly eventSeq?: number;\n}',
+  },
+  {
+    name: 'RequirementRunAllStopRequest',
+    declaration: 'export interface RequirementRunAllStopRequest {\n    readonly roundId: RequirementRoundId;\n}',
+  },
+  {
+    name: 'RequirementRunAllStopResult',
+    declaration: 'export interface RequirementRunAllStopResult {\n    readonly roundId: RequirementRoundId;\n    readonly eventSeq: number;\n}',
+  },
+  {
+    name: 'RequirementTaskAddRequest',
+    declaration: 'export interface RequirementTaskAddRequest {\n    readonly roundId: RequirementRoundId;\n    readonly afterTaskId?: RequirementTaskId;\n    readonly title: string;\n    readonly statement: string;\n}',
+  },
+  {
+    name: 'RequirementTaskEditRequest',
+    declaration: 'export interface RequirementTaskEditRequest {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n    readonly title: string;\n    readonly statement: string;\n}',
+  },
+  {
+    name: 'RequirementTaskGenerateRequest',
+    declaration: 'export interface RequirementTaskGenerateRequest {\n    readonly roundId: RequirementRoundId;\n    readonly documentRevision: number;\n}',
+  },
+  {
+    name: 'RequirementTaskId',
+    declaration: 'export type RequirementTaskId = Branded<\'RequirementTaskId\'>;',
+  },
+  {
+    name: 'RequirementTaskMoveRequest',
+    declaration: 'export interface RequirementTaskMoveRequest {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n    readonly direction: \'up\' | \'down\';\n}',
+  },
+  {
+    name: 'RequirementTaskMutationResult',
+    declaration: 'export interface RequirementTaskMutationResult {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n    readonly eventSeq: number;\n}',
+  },
+  {
+    name: 'RequirementTaskRunRequest',
+    declaration: 'export interface RequirementTaskRunRequest {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n}',
+  },
+  {
+    name: 'RequirementTaskRunResult',
+    declaration: 'export interface RequirementTaskRunResult {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n    readonly eventSeq: number;\n}',
+  },
+  {
+    name: 'RequirementTaskWithdrawRequest',
+    declaration: 'export interface RequirementTaskWithdrawRequest {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n}',
   },
   {
     name: 'ResolvedAlwaysRetryPolicy',

@@ -11,30 +11,41 @@
   - button "Collapse round":
     - img
   - strong: "Round 1:"
-  - text: Build a navigation HTML page, preserve the existing behavior, and validate it. Completed
+  - text: 构建并验证导航页面 Completed
+  - group: Clarification record
   - article:
-    - text: "[2] M MD"
-    - strong: Requirement Markdown
-    - text: "# User requirement Build a navigation HTML page, preserve the existing behavior, and validate it."
-  - article:
-    - text: "[2] P PLAN"
-    - strong: Execution Plan
-    - text: 1. Build the HTML navigation. 2. Verify the rendered result.
+    - text: "[2]"
+    - button "Generate tasks from the requirement document" [disabled]:
+      - img
+    - text: REQ
+    - strong: Requirement document
+    - heading "需求文档" [level=1]
+    - heading "简介" [level=2]
+    - paragraph: 构建并验证导航页面，同时保留现有行为。
+    - heading "需求" [level=2]
+    - heading "需求 1：导航页面" [level=3]
+    - paragraph:
+      - strong: 用户故事：
+      - text: 作为用户，我希望使用清晰的导航页面，以便访问主要功能。
+    - heading "验收标准" [level=4]
+    - list:
+      - listitem: 当页面打开时，系统应当显示导航内容。
+      - listitem: 当视口缩小至移动端时，系统应当保持导航可用。
   - article:
     - text: "[✓]"
-    - button "Run task Build navigation HTML":
+    - button "Run task Build navigation HTML" [disabled]:
       - img
     - text: TASK1
     - textbox "Task content Build navigation HTML":
       - /placeholder: Enter the task title on the first line and an indented description below…
-      - text: Build navigation HTML Implement the requested navigation in index.html.
+      - text: Build navigation HTML Implement the requested navigation in index.html. _关联需求：1.1_
     - toolbar "Notebook cell toolbar":
       - button "Select previous task" [disabled]:
         - img
-      - button "Select next task":
+      - button "Select next task" [disabled]:
         - img
       - button "Add comment": ⌁
-      - button "Edit task":
+      - button "Edit task" [disabled]:
         - img
       - button "More cell actions":
         - img
@@ -51,12 +62,20 @@
     - text: TASK2
     - textbox "Task content Check mobile navigation":
       - /placeholder: Enter the task title on the first line and an indented description below…
-      - text: Check mobile navigation Verify the navigation at the mobile breakpoint.
+      - text: Check mobile navigation Verify the navigation at the mobile breakpoint. _关联需求：1.2_
   - region "Task output Check mobile navigation":
     - button "Collapse task output Check mobile navigation" [expanded]:
       - img
     - paragraph: The mobile breakpoint needs another pass.
     - text: Task execution failed; failure is distinct from historical requirement regression.
+  - article:
+    - text: "[ ]"
+    - button "Run task Final Test" [disabled]:
+      - img
+    - text: TASK3
+    - textbox "Task content Final Test":
+      - /placeholder: Enter the task title on the first line and an indented description below…
+      - text: Final Test Run the complete navigation test set and verify every acceptance criterion. _关联需求：1.1、1.2_
   - article:
     - text: MD
     - strong: Markdown note
@@ -78,9 +97,9 @@
 - complementary "Notebook details":
   - strong: Cell details
   - button "Close details": ×
-  - paragraph: "Round 1: Build a navigation HTML page, preserve the existing behavior, and validate it."
+  - paragraph: "Round 1: 构建并验证导航页面"
   - heading "Build navigation HTML" [level=3]
-  - paragraph: Implement the requested navigation in index.html.
+  - paragraph: Implement the requested navigation in index.html. _关联需求：1.1_
   - term: Status
   - definition: Completed
   - term: Task ID

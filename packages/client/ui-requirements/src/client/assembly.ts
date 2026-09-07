@@ -8,11 +8,12 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {
   RequirementExecutionEvent,
-  RequirementMarkdownEvent,
+  RequirementClarificationEvent,
+  RequirementDocumentEvent,
   RequirementNoteEvent,
-  RequirementPlanEvent,
   RequirementReviewEvent,
   RequirementRoundEvent,
+  RequirementRunAllEvent,
   RequirementTaskExecutionEvent,
   RequirementTaskListEvent,
   RequirementUserVersionEvent,
@@ -28,10 +29,11 @@ export const EMPTY_REQUIREMENTS_SNAPSHOT: RequirementsSnapshot = {
   userVersions: EMPTY_NODES,
   executions: EMPTY_NODES,
   rounds: EMPTY_NODES,
-  markdowns: EMPTY_NODES,
-  plans: EMPTY_NODES,
+  clarifications: EMPTY_NODES,
+  documents: EMPTY_NODES,
   taskLists: EMPTY_NODES,
   taskExecutions: EMPTY_NODES,
+  runAlls: EMPTY_NODES,
   notes: EMPTY_NODES,
   validations: EMPTY_NODES,
 }
@@ -73,10 +75,11 @@ const reviewDefinition = eventDefinition<RequirementReviewEvent>('requirements-r
 const userVersionDefinition = eventDefinition<RequirementUserVersionEvent>('requirements-user-version', 'requirement/user-version')
 const executionDefinition = eventDefinition<RequirementExecutionEvent>('requirements-execution', 'requirement/execution')
 const roundDefinition = eventDefinition<RequirementRoundEvent>('requirements-round', 'requirement/round')
-const markdownDefinition = eventDefinition<RequirementMarkdownEvent>('requirements-markdown', 'requirement/markdown')
-const planDefinition = eventDefinition<RequirementPlanEvent>('requirements-plan', 'requirement/plan')
+const clarificationDefinition = eventDefinition<RequirementClarificationEvent>('requirements-clarification', 'requirement/clarification')
+const documentDefinition = eventDefinition<RequirementDocumentEvent>('requirements-document', 'requirement/document')
 const taskListDefinition = eventDefinition<RequirementTaskListEvent>('requirements-task-list', 'requirement/task-list')
 const taskExecutionDefinition = eventDefinition<RequirementTaskExecutionEvent>('requirements-task-execution', 'requirement/task-execution')
+const runAllDefinition = eventDefinition<RequirementRunAllEvent>('requirements-run-all', 'requirement/run-all')
 const noteDefinition = eventDefinition<RequirementNoteEvent>('requirements-note', 'requirement/note')
 const validationDefinition = eventDefinition<RequirementValidationEvent>('requirements-validation', 'requirement/validation')
 
@@ -103,10 +106,11 @@ export class RequirementsSnapshotBuilder implements ConversationViewBuilder<Requ
       userVersions: nodes.flatMap(node => node.kind === 'requirements-user-version' ? [node] : []),
       executions: nodes.flatMap(node => node.kind === 'requirements-execution' ? [node] : []),
       rounds: nodes.flatMap(node => node.kind === 'requirements-round' ? [node] : []),
-      markdowns: nodes.flatMap(node => node.kind === 'requirements-markdown' ? [node] : []),
-      plans: nodes.flatMap(node => node.kind === 'requirements-plan' ? [node] : []),
+      clarifications: nodes.flatMap(node => node.kind === 'requirements-clarification' ? [node] : []),
+      documents: nodes.flatMap(node => node.kind === 'requirements-document' ? [node] : []),
       taskLists: nodes.flatMap(node => node.kind === 'requirements-task-list' ? [node] : []),
       taskExecutions: nodes.flatMap(node => node.kind === 'requirements-task-execution' ? [node] : []),
+      runAlls: nodes.flatMap(node => node.kind === 'requirements-run-all' ? [node] : []),
       notes: nodes.flatMap(node => node.kind === 'requirements-note' ? [node] : []),
       validations: nodes.flatMap(node => node.kind === 'requirements-validation' ? [node] : []),
     }
@@ -129,10 +133,11 @@ export function registerRequirementsAssembly(ctx: Context): void {
     userVersionDefinition,
     executionDefinition,
     roundDefinition,
-    markdownDefinition,
-    planDefinition,
+    clarificationDefinition,
+    documentDefinition,
     taskListDefinition,
     taskExecutionDefinition,
+    runAllDefinition,
     noteDefinition,
     validationDefinition,
   ]) ctx.uiConversation.events.register(definition)

@@ -80,6 +80,8 @@
         reviewerProvider: spawn
         maxInputChars: 60000
         reviewerTools: [read, glob, grep]
+        maxClarificationRounds: 2
+        maxQuestionsPerRound: 5
 
     # Resolve bind host, SSH launch, and display once at boot, then mount the
     # matching dual-face directory picker. Mount -native or -browse directly in

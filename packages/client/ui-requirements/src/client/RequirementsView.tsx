@@ -1,4 +1,4 @@
-/** Requirements Notebook view: rounds, plans, tasks, validation, and regressions. */
+/** Requirements Notebook view: clarification, documents, tasks, review gates, and validation. */
 
 import {
   useLayoutEffect,
@@ -26,6 +26,8 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
+  RequirementDocumentActionResult,
+  RequirementDocumentEditRequest,
   RequirementNoteRequest,
   RequirementNoteEditRequest,
   RequirementNoteResult,
@@ -34,7 +36,10 @@ import type {
   RequirementRoundStartResult,
   RequirementRunAllRequest,
   RequirementRunAllResult,
+  RequirementRunAllStopRequest,
+  RequirementRunAllStopResult,
   RequirementTaskAddRequest,
+  RequirementTaskGenerateRequest,
   RequirementTaskEditRequest,
   RequirementTaskId,
   RequirementTaskMoveRequest,
@@ -66,17 +71,23 @@ export type RequirementActionOutcome<T> =
 export interface RequirementsViewInjected {
   /** Requirement Notebook snapshot source bound to the selected Session. */
   readonly hooks: { readonly requirements: ObservableSnapshot<RequirementsSnapshot> }
-  /** Start a raw requirement round and enter Plan mode. */
+  /** Start a raw requirement round and let the Agent clarify or submit its document. */
   startRound: (request: RequirementRoundStartRequest) => Promise<RequirementActionOutcome<RequirementRoundStartResult>>
+  /** Persist one optimistic requirement-document edit. */
+  editDocument: (request: RequirementDocumentEditRequest) => Promise<RequirementActionOutcome<RequirementDocumentActionResult>>
+  /** Generate executable task blocks from one document revision. */
+  generateTasks: (request: RequirementTaskGenerateRequest) => Promise<RequirementActionOutcome<RequirementDocumentActionResult>>
   /** Run one task cell. */
   runTask: (request: RequirementTaskRunRequest) => Promise<RequirementActionOutcome<RequirementTaskRunResult>>
   /** Run pending task cells in order. */
   runAll: (request: RequirementRunAllRequest) => Promise<RequirementActionOutcome<RequirementRunAllResult>>
+  /** Stop Run All after its current task and review settle. */
+  stopRunAll: (request: RequirementRunAllStopRequest) => Promise<RequirementActionOutcome<RequirementRunAllStopResult>>
   /** Insert a durable task, including an empty pending cell. */
   addTask: (request: RequirementTaskAddRequest) => Promise<RequirementActionOutcome<RequirementTaskMutationResult>>
   /** Edit one task and return it to the pending state. */
   editTask: (request: RequirementTaskEditRequest) => Promise<RequirementActionOutcome<RequirementTaskMutationResult>>
-  /** Move one task in the Plan order. */
+  /** Move one future task in execution order. */
   moveTask: (request: RequirementTaskMoveRequest) => Promise<RequirementActionOutcome<RequirementTaskMutationResult>>
   /** Withdraw one task before execution. */
   withdrawTask: (request: RequirementTaskWithdrawRequest) => Promise<RequirementActionOutcome<RequirementTaskMutationResult>>
@@ -108,6 +119,13 @@ interface TaskDraft {
   savedSource: string
   savedSeq: number
   pending?: Promise<string | undefined>
+  error?: string
+}
+
+interface DocumentDraft {
+  readonly roundId: RequirementRoundId
+  readonly revision: number
+  source: string
   error?: string
 }
 
@@ -144,7 +162,9 @@ function statusMark(
   if (task.status === 'withdrawn') return '×'
   if (task.status === 'failed') return '!'
   if (task.status === 'completed') return '✓'
-  if (task.status === 'in_progress') return execution?.data.turn === undefined ? '*' : String(execution.data.turn)
+  if (task.status === 'in_progress' || task.status === 'reviewing') {
+    return execution?.data.turn === undefined ? '*' : String(execution.data.turn)
+  }
   return ' '
 }
 
@@ -156,17 +176,16 @@ function validationMark(status: 'pending' | 'processing' | 'completed' | 'failed
 }
 
 function isTaskRunning(execution: RequirementTaskExecutionNode | undefined): boolean {
-  return execution?.data.status === 'submitted' || execution?.data.status === 'processing'
-}
-
-function roundText(node: RequirementRoundNode): string {
-  return node.data.input
+  return execution?.data.status === 'submitted'
+    || execution?.data.status === 'processing'
+    || execution?.data.status === 'reviewing'
 }
 
 function taskStatusKey(status: RequirementTaskListNode['data']['tasks'][number]['status']): RequirementsKey {
   switch (status) {
     case 'pending': return 'details.taskStatus.pending'
     case 'in_progress': return 'details.taskStatus.inProgress'
+    case 'reviewing': return 'details.taskStatus.reviewing'
     case 'completed': return 'details.taskStatus.completed'
     case 'failed': return 'details.taskStatus.failed'
     case 'withdrawn': return 'details.taskStatus.withdrawn'
@@ -181,8 +200,11 @@ function taskStatusKey(status: RequirementTaskListNode['data']['tasks'][number][
  */
 export function RequirementsView({
   useRequirements,
+  editDocument,
+  generateTasks,
   runTask,
   runAll,
+  stopRunAll,
   addTask,
   editTask,
   moveTask,
@@ -200,6 +222,7 @@ export function RequirementsView({
   const [collapsedOutputs, setCollapsedOutputs] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<SelectedCell | undefined>()
   const [noteDraft, setNoteDraft] = useState<NoteDraft | undefined>()
+  const [documentDraft, setDocumentDraft] = useState<DocumentDraft | undefined>()
   const taskDrafts = useRef(new Map<RequirementTaskId, TaskDraft>())
   const [draftRevision, renderDrafts] = useState(0)
   const [newTaskId, setNewTaskId] = useState<RequirementTaskId | undefined>()
@@ -213,8 +236,16 @@ export function RequirementsView({
   const [actionError, setActionError] = useState<string | undefined>()
 
   const rounds = useMemo(() => latestBy(snapshot.rounds, node => String(node.data.roundId)), [snapshot.rounds])
-  const markdowns = useMemo(() => latestBy(snapshot.markdowns, node => String(node.data.roundId)), [snapshot.markdowns])
-  const plans = useMemo(() => latestBy(snapshot.plans, node => String(node.data.roundId)), [snapshot.plans])
+  const documents = useMemo(() => latestBy(snapshot.documents, node => String(node.data.roundId)), [snapshot.documents])
+  const clarifications = useMemo(() => {
+    const grouped = new Map<string, typeof snapshot.clarifications>()
+    const latest = latestBy(snapshot.clarifications, node => `${node.data.roundId}:${node.data.attempt}`)
+    for (const node of latest.values()) {
+      const list = grouped.get(String(node.data.roundId)) ?? []
+      grouped.set(String(node.data.roundId), [...list, node])
+    }
+    return grouped
+  }, [snapshot.clarifications])
   const taskLists = useMemo(() => latestBy(snapshot.taskLists, node => String(node.data.roundId)), [snapshot.taskLists])
   const validations = useMemo(() => latestBy(snapshot.validations, node => String(node.data.roundId)), [snapshot.validations])
   const notes = useMemo(() => {
@@ -230,10 +261,28 @@ export function RequirementsView({
     snapshot.taskExecutions,
     node => `${node.data.roundId}:${node.data.taskId}`,
   ), [snapshot.taskExecutions])
+  const runAlls = useMemo(() => latestBy(snapshot.runAlls, node => String(node.data.roundId)), [snapshot.runAlls])
   const orderedRounds = [...rounds.values()].sort((left, right) => left.anchorSeq - right.anchorSeq)
   const latestRound = orderedRounds.at(-1)
+  const latestRoundDocument = latestRound === undefined ? undefined : documents.get(String(latestRound.data.roundId))
+  const latestRoundTaskList = latestRoundDocument === undefined
+    ? undefined
+    : taskLists.get(String(latestRound?.data.roundId))
+  const currentLatestTaskList = latestRoundTaskList?.data.documentRevision === latestRoundDocument?.data.revision
+    ? latestRoundTaskList
+    : undefined
+  const latestRunAll = latestRound === undefined ? undefined : runAlls.get(String(latestRound.data.roundId))
+  const activeRunAll = latestRunAll !== undefined
+    && (latestRunAll.data.status === 'running' || latestRunAll.data.status === 'stopping')
+    ? latestRunAll
+    : undefined
   const selectedRound = selected === undefined ? undefined : rounds.get(String(selected.roundId))
-  const selectedTaskList = selected === undefined ? undefined : taskLists.get(String(selected.roundId))
+  const selectedDocument = selected === undefined ? undefined : documents.get(String(selected.roundId))
+  const projectedSelectedTaskList = selected === undefined ? undefined : taskLists.get(String(selected.roundId))
+  const selectedTaskList = selectedDocument !== undefined
+    && projectedSelectedTaskList?.data.documentRevision === selectedDocument.data.revision
+    ? projectedSelectedTaskList
+    : undefined
   const selectedTask = selected?.taskId === undefined || selectedTaskList === undefined
     ? undefined
     : selectedTaskList.data.tasks.find(task => task.id === selected.taskId)
@@ -341,6 +390,23 @@ export function RequirementsView({
     })
   }
 
+  const stopEverything = async (roundId: RequirementRoundId): Promise<void> => {
+    await invoke(`stop:${String(roundId)}`, () => stopRunAll({ roundId }))
+  }
+
+  const saveDocument = async (draft: DocumentDraft): Promise<void> => {
+    const result = await invoke(`document:${String(draft.roundId)}`, () => editDocument({
+      roundId: draft.roundId,
+      revision: draft.revision,
+      markdown: draft.source,
+    }))
+    if (result !== undefined) setDocumentDraft(undefined)
+  }
+
+  const createTasks = async (roundId: RequirementRoundId, documentRevision: number): Promise<void> => {
+    await invoke(`generate:${String(roundId)}`, () => generateTasks({ roundId, documentRevision }))
+  }
+
   const insertTask = async (roundId: RequirementRoundId): Promise<void> => {
     setNoteDraft(undefined)
     setCollapsed(current => new Set([...current].filter(id => id !== String(roundId))))
@@ -408,7 +474,7 @@ export function RequirementsView({
   ): void => {
     setSelected({ roundId, taskId: task.id })
     setMoreOpen(undefined)
-    if (task.status === 'in_progress') return
+    if (task.status === 'in_progress' || task.status === 'reviewing' || task.status === 'completed') return
     setNoteDraft(undefined)
   }
 
@@ -416,16 +482,19 @@ export function RequirementsView({
     const taskList = taskLists.get(String(roundId))
     const taskIndex = taskList?.data.tasks.findIndex(task => task.id === taskId) ?? -1
     const task = taskList?.data.tasks[taskIndex]
+    const listBusy = taskList?.data.tasks.some(item => item.status === 'in_progress' || item.status === 'reviewing') ?? false
+    const futureTask = task?.status === 'pending' || task?.status === 'failed'
+    const canMove = futureTask && task.kind !== 'final-test' && !listBusy
     const menuKey = `${roundId}:${taskId}`
     const move = (direction: 'up' | 'down'): void => {
       void changeTaskOrder(roundId, taskId, direction)
     }
     return (
       <div className={css.cellToolbar} role="toolbar" aria-label={t('cell.toolbar')} onClick={(event) => { event.stopPropagation() }}>
-        <button type="button" aria-label={t('cell.movePrevious')} disabled={taskIndex <= 0} onClick={() => { move('up') }}><IconChevronUpOutline14 size={13} /></button>
-        <button type="button" aria-label={t('cell.moveNext')} disabled={taskList === undefined || taskIndex < 0 || taskIndex >= taskList.data.tasks.length - 1} onClick={() => { move('down') }}><IconChevronDownOutline14 size={13} /></button>
+        <button type="button" aria-label={t('cell.movePrevious')} disabled={!canMove || taskIndex <= 0 || taskList?.data.tasks[taskIndex - 1]?.status === 'completed'} onClick={() => { move('up') }}><IconChevronUpOutline14 size={13} /></button>
+        <button type="button" aria-label={t('cell.moveNext')} disabled={!canMove || taskList === undefined || taskIndex < 0 || taskList.data.tasks[taskIndex + 1]?.kind === 'final-test'} onClick={() => { move('down') }}><IconChevronDownOutline14 size={13} /></button>
         <button type="button" aria-label={t('cell.addComment')} onClick={() => { setNoteDraft({ roundId, kind: 'comment', content: '' }) }}>⌁</button>
-        <button type="button" aria-label={t('cell.edit')} disabled={task === undefined || task.status === 'in_progress'} onClick={() => {
+        <button type="button" aria-label={t('cell.edit')} disabled={!futureTask || listBusy} onClick={() => {
           if (task !== undefined) {
             beginTaskEdit(roundId, task)
           }
@@ -438,7 +507,7 @@ export function RequirementsView({
               <button type="button" role="menuitem" onClick={() => { openInspector('history', { roundId, taskId }) }}>{t('more.history')}</button>
               <button type="button" role="menuitem" onClick={() => { openInspector('relations', { roundId, taskId }) }}><IconLinkOutline14 size={12} />{t('more.relations')}</button>
               <button type="button" role="menuitem" onClick={() => { setMoreOpen(undefined); void review() }}><IconRefreshOutline14 size={12} />{t('toolbar.review')}</button>
-              {task?.status === 'pending' && <button className={css.destructiveMenuItem} type="button" role="menuitem" onClick={() => {
+              {task?.status === 'pending' && task.kind !== 'final-test' && !listBusy && <button className={css.destructiveMenuItem} type="button" role="menuitem" onClick={() => {
                 setMoreOpen(undefined)
                 void invoke(`withdraw-task:${String(taskId)}`, async () => {
                   const error = await flushTasks(roundId, taskId)
@@ -461,6 +530,13 @@ export function RequirementsView({
     const taskRegression = validations.get(String(roundId))?.data.regressions.some(item => item.taskId === task.id) ?? false
     const taskFailure = task.status === 'failed'
     const taskWithdrawn = task.status === 'withdrawn'
+    const taskList = taskLists.get(String(roundId))
+    const listBusy = taskList?.data.tasks.some(item => item.status === 'in_progress' || item.status === 'reviewing') ?? false
+    const taskEditable = !listBusy && (task.status === 'pending' || task.status === 'failed')
+    const priorTasksSettled = taskList?.data.tasks.every(item => item.order >= task.order
+      || item.status === 'completed' || item.status === 'withdrawn') ?? false
+    const runnable = (task.status === 'pending' || task.status === 'failed')
+      && (task.kind !== 'final-test' || priorTasksSettled)
     const isSelected = selected?.roundId === roundId && selected.taskId === task.id
     const busy = running === String(task.id) || isTaskRunning(execution)
     const mark = statusMark(task, execution)
@@ -469,6 +545,8 @@ export function RequirementsView({
     const label = task.title || t('cell.newTask')
     const outputKey = `${roundId}:${task.id}`
     const outputExpanded = !collapsedOutputs.has(outputKey)
+    const taskReview = snapshot.reviews.findLast(node => node.data.status === 'completed'
+      && node.data.task?.taskId === task.id)
     return (
       <div className={css.taskCellGroup} data-task-group key={String(task.id)}>
         <article
@@ -485,7 +563,7 @@ export function RequirementsView({
               type="button"
               aria-label={t(busy ? 'cell.running' : taskWithdrawn ? 'cell.withdrawn' : 'cell.run', { task: label })}
               aria-busy={busy}
-              disabled={busy || taskWithdrawn || running !== undefined || source.trim() === ''}
+              disabled={!runnable || busy || taskWithdrawn || running !== undefined || source.trim() === ''}
               onClick={(event) => { event.stopPropagation(); void runOne(roundId, task.id) }}
             >
               {busy ? <span className={css.spinner} /> : <IconPlayOutline16 size={13} />}
@@ -499,7 +577,7 @@ export function RequirementsView({
                 aria-label={t('cell.taskContent', { task: label })}
                 className={css.taskSource}
                 placeholder={t('cell.taskPlaceholder')}
-                readOnly={task.status === 'in_progress' || running !== undefined}
+                readOnly={!taskEditable || running !== undefined}
                 spellCheck={false}
                 value={source}
                 onValueChange={(nextSource) => {
@@ -519,7 +597,7 @@ export function RequirementsView({
           {isSelected && renderCellToolbar(roundId, task.id)}
           {isSelected && <button className={css.assistButton} type="button" aria-label={t('cell.assist')} onClick={(event) => { event.stopPropagation(); void askAgentAboutTask(roundId, task.id, task.statement) }}><IconSparkle16 size={15} /></button>}
         </article>
-        {(execution?.data.output !== undefined || taskFailure || taskWithdrawn) && (
+        {(execution?.data.output !== undefined || taskReview !== undefined || taskFailure || taskWithdrawn) && (
           <section className={css.cellOutput} aria-label={t('cell.output', { task: task.title })} data-cell-output data-collapsed={!outputExpanded || undefined}>
             <button
               className={css.outputToggle}
@@ -540,6 +618,12 @@ export function RequirementsView({
             {outputExpanded && (
               <div className={css.outputContent}>
                 {execution?.data.output !== undefined && <MarkdownText text={execution.data.output} labels={markdownLabels} />}
+                {taskReview?.data.status === 'completed' && taskReview.data.task !== undefined && (
+                  <div className={css.reviewVerdict} data-verdict={taskReview.data.task.verdict}>
+                    <strong>{t(`review.${taskReview.data.task.verdict}`)}</strong>
+                    <span>{text(taskReview.data.task.summary)}</span>
+                  </div>
+                )}
                 {taskFailure && <div className={css.taskError}>{t('cell.taskFailed')}</div>}
                 {taskWithdrawn && <div className={css.taskError}>{t('cell.taskWithdrawn')}</div>}
               </div>
@@ -573,14 +657,19 @@ export function RequirementsView({
 
   const renderRound = (round: RequirementRoundNode) => {
     const roundId = round.data.roundId
-    const markdown = markdowns.get(String(roundId))
-    const plan = plans.get(String(roundId))
-    const taskList = taskLists.get(String(roundId))
+    const document = documents.get(String(roundId))
+    const projectedTaskList = taskLists.get(String(roundId))
+    const taskList = document !== undefined && projectedTaskList?.data.documentRevision === document.data.revision
+      ? projectedTaskList
+      : undefined
+    const clarification = clarifications.get(String(roundId)) ?? []
     const validation = validations.get(String(roundId))
     const roundNotes = notes.get(String(roundId)) ?? []
     const isCollapsed = collapsed.has(String(roundId))
     const roundRegression = (validation?.data.regressions.length ?? 0) > 0
     const activeNoteDraft = noteDraft?.roundId === roundId ? noteDraft : undefined
+    const activeDocumentDraft = documentDraft?.roundId === roundId ? documentDraft : undefined
+    const documentLocked = snapshot.taskExecutions.some(node => node.data.roundId === roundId)
     const roundStatusKey = `round.status.${round.data.status}` as RequirementsKey
     const validationStatusKey = validation === undefined ? undefined : `validation.${validation.data.status}` as RequirementsKey
     return (
@@ -590,25 +679,58 @@ export function RequirementsView({
             {isCollapsed ? <IconChevronDownOutline14 size={14} /> : <IconChevronUpOutline14 size={14} />}
           </button>
           <strong>{t('round.label', { round: round.data.round })}</strong>
-          <span>{roundText(round)}</span>
+          <span>{document?.data.summary ?? t('round.summary.pending')}</span>
           <span className={`${css.roundStatus} ${roundRegression ? css.regressionText : ''}`}>{t(roundStatusKey)}</span>
         </header>
         {!isCollapsed && (
           <div className={css.cells}>
             {activeNoteDraft !== undefined && renderNoteEditor(activeNoteDraft)}
-            {markdown !== undefined && (
-              <article className={css.cell} data-cell="markdown" data-status="completed">
-                <span className={css.executionMark}>{round.data.turn === undefined ? '[ ]' : `[${round.data.turn}]`}</span>
-                <div className={css.cellGutter}><span className={css.editorPrompt}>{t('cell.markdownPrompt')}</span></div>
-                <div className={css.cellBody}><div className={css.cellTitle}><span>{t('cell.markdownType')}</span><strong>{t('cell.requirement')}</strong></div><pre className={css.markdown}>{markdown.data.markdown}</pre></div>
-                <span className={css.statusRail} aria-hidden />
-              </article>
-            )}
-            {plan !== undefined && (
-              <article className={`${css.cell} ${plan.data.status === 'failed' ? css.taskFailure : ''}`} data-cell="plan" data-status={plan.data.status === 'failed' ? 'failed' : 'completed'}>
-                <span className={css.executionMark} data-status={plan.data.status === 'failed' ? 'failed' : 'completed'}>{plan.data.status === 'failed' ? '[!]' : `[${plan.data.turn}]`}</span>
-                <div className={css.cellGutter}><span className={css.editorPrompt}>{t('cell.planPrompt')}</span></div>
-                <div className={css.cellBody}><div className={css.cellTitle}><span>{t('cell.planType')}</span><strong>{t('cell.plan')}</strong></div><pre className={css.markdown}>{plan.data.markdown}</pre></div>
+            <details className={css.clarificationRecord} data-cell="clarification-record">
+              <summary>{t('cell.clarificationRecord')}</summary>
+              <div><strong>{t('cell.rawRequirement')}</strong><p>{round.data.input}</p></div>
+              {clarification.map(node => (
+                <section key={node.key}>
+                  <strong>{t('cell.clarificationAttempt', { attempt: node.data.attempt })}</strong>
+                  {node.data.questions.map((question) => {
+                    const answer = node.data.answers?.find(item => item.id === question.id)
+                    const answerText = [...(answer?.selected ?? []), answer?.custom].filter(value => value !== undefined && value !== '').join('；')
+                    return <p key={question.id}><b>{question.question}</b>{answerText === '' ? ` · ${t('cell.awaitingAnswer')}` : ` · ${answerText}`}</p>
+                  })}
+                </section>
+              ))}
+            </details>
+            {document !== undefined && (
+              <article className={`${css.cell} ${!document.data.valid ? css.taskFailure : ''}`} data-cell="document" data-status={document.data.valid ? 'completed' : 'failed'}>
+                <span className={css.executionMark} data-status={document.data.valid ? 'completed' : 'failed'}>{document.data.valid ? `[${document.data.turn}]` : '[!]'}</span>
+                <div className={css.cellGutter}>
+                  <button
+                    className={css.runButton}
+                    type="button"
+                    aria-label={t('cell.generateTasks')}
+                    aria-busy={round.data.status === 'generating-tasks'}
+                    disabled={documentLocked || !document.data.valid || taskList !== undefined || round.data.status === 'generating-tasks' || running !== undefined}
+                    onClick={() => { void createTasks(roundId, document.data.revision) }}
+                  >
+                    {round.data.status === 'generating-tasks' ? <span className={css.spinner} /> : <IconPlayOutline16 size={13} />}
+                  </button>
+                </div>
+                <div className={css.cellBody}>
+                  <div className={css.cellTitle}><span>{t('cell.documentType')}</span><strong>{t('cell.requirementDocument')}</strong>
+                    {!documentLocked && activeDocumentDraft === undefined && <button className={css.inlineAction} type="button" onClick={() => { setDocumentDraft({ roundId, revision: document.data.revision, source: document.data.markdown }) }}>{t('cell.edit')}</button>}
+                  </div>
+                  {activeDocumentDraft === undefined
+                    ? <div className={css.documentMarkdown}><MarkdownText text={document.data.markdown} labels={markdownLabels} /></div>
+                    : <div className={css.documentEditor}>
+                      <AutoGrowTextarea aria-label={t('cell.documentContent')} value={activeDocumentDraft.source} onValueChange={(source) => { setDocumentDraft(current => current === undefined ? current : { ...current, source }) }} />
+                      <div className={css.editorActions}>
+                        <button type="button" disabled={running !== undefined} onClick={() => { void saveDocument(activeDocumentDraft) }}>{t('cell.save')}</button>
+                        <button type="button" onClick={() => { setDocumentDraft(undefined) }}>{t('cell.cancel')}</button>
+                      </div>
+                    </div>}
+                  {!document.data.valid && (
+                    <ul className={css.taskError}>{document.data.issues.map(issue => <li key={issue}>{issue}</li>)}</ul>
+                  )}
+                </div>
                 <span className={css.statusRail} aria-hidden />
               </article>
             )}
@@ -675,7 +797,7 @@ export function RequirementsView({
             <button type="button" role="menuitem" onClick={() => { setLanguage('en'); setCommandOpen(false) }}>{t('command.useEn')}</button>
           </div>}
         </div>
-        <button className={css.toolbarButton} type="button" disabled={latestRound === undefined || running !== undefined} onClick={() => {
+        <button className={css.toolbarButton} type="button" disabled={latestRound === undefined || currentLatestTaskList === undefined || activeRunAll !== undefined || running !== undefined} onClick={() => {
           if (latestRound === undefined) return
           void insertTask(latestRound.data.roundId)
         }}><span aria-hidden>＋</span>{t('toolbar.code')}</button>
@@ -684,7 +806,9 @@ export function RequirementsView({
           void insertMarkdownNote(latestRound.data.roundId)
         }}><span aria-hidden>＋</span>{t('toolbar.text')}</button>
         <span className={css.toolbarDivider} />
-        <button className={css.runAllButton} type="button" disabled={latestRound === undefined || running !== undefined} onClick={() => { if (latestRound !== undefined) void runEverything(latestRound.data.roundId) }}><IconPlayOutline16 size={13} />{t('toolbar.runAll')}</button>
+        {activeRunAll !== undefined
+          ? <button className={css.runAllButton} type="button" disabled={activeRunAll.data.status === 'stopping' || running !== undefined} onClick={() => { void stopEverything(activeRunAll.data.roundId) }}>{t(activeRunAll.data.status === 'stopping' ? 'toolbar.stopping' : 'toolbar.stopRunAll')}</button>
+          : <button className={css.runAllButton} type="button" disabled={latestRound === undefined || currentLatestTaskList === undefined || running !== undefined} onClick={() => { if (latestRound !== undefined) void runEverything(latestRound.data.roundId) }}><IconPlayOutline16 size={13} />{t('toolbar.runAll')}</button>}
       </div>
       {actionError !== undefined && <div className={css.actionError}>{t('toolbar.actionFailed')} · {actionError}</div>}
       {orderedRounds.length === 0
@@ -711,7 +835,7 @@ export function RequirementsView({
         <aside className={css.details} aria-label={t('details.aria')}>
           <div className={css.detailsHeader}><strong>{t(inspectorTitle)}</strong><button type="button" aria-label={t('details.close')} onClick={() => { setInspector(undefined) }}>×</button></div>
           <div className={css.detailsBody}>
-            <p className={css.detailsRound}>{t('round.label', { round: inspectionRound.data.round })} {roundText(inspectionRound)}</p>
+            <p className={css.detailsRound}>{t('round.label', { round: inspectionRound.data.round })} {documents.get(String(inspectionRound.data.roundId))?.data.summary ?? t('round.summary.pending')}</p>
             {inspector === 'details' && (
               <>
                 {selectedTask !== undefined ? (

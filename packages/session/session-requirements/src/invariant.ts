@@ -7,7 +7,7 @@ import type { RequirementNoteEvent, RequirementText } from './types.ts'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-session-requirements'
 
-function hasBlankText(value: RequirementText, version: 1 | 2): boolean {
+function hasBlankText(value: RequirementText, version: 1 | 2 | 3): boolean {
   if (version === 1) return typeof value !== 'string' || value.trim() === ''
   return typeof value !== 'object' || value.zh.trim() === '' || value.en.trim() === ''
 }
@@ -64,43 +64,70 @@ function validate(event: SessionEvent, fail: InvariantFailure): void {
     if (!Number.isSafeInteger(data.round) || data.round < 1) {
       fail(`requirement/round at seq ${event.seq} has an invalid round number`)
     }
-    if (!['planning', 'awaiting-approval', 'executing', 'validating', 'completed', 'failed'].includes(data.status)) {
+    if (!['analyzing', 'clarifying', 'awaiting-input', 'document-ready', 'generating-tasks', 'tasks-ready',
+      'executing', 'reviewing', 'validating', 'completed', 'failed'].includes(data.status)) {
       fail(`requirement/round at seq ${event.seq} has an invalid status`)
     }
     return
   }
-  if (event.type === 'requirement/markdown') {
+  if (event.type === 'requirement/clarification') {
     const data = event.data
     const version: unknown = data.version
     if (version !== 1 || !Number.isSafeInteger(data.revision) || data.revision < 1
-      || data.roundId.trim() === '' || data.sourceMessageId.trim() === '' || data.markdown.trim() === '') {
-      fail(`requirement/markdown at seq ${event.seq} has an invalid payload`)
+      || !Number.isSafeInteger(data.attempt) || data.attempt < 1 || data.roundId.trim() === ''
+      || data.questions.length < 1) {
+      fail(`requirement/clarification at seq ${event.seq} has an invalid payload`)
+    }
+    if (!['asked', 'answered', 'dismissed'].includes(data.status)) {
+      fail(`requirement/clarification at seq ${event.seq} has an invalid status`)
+    }
+    const ids = new Set<string>()
+    for (const question of data.questions) {
+      if (question.id.trim() === '' || question.question.trim() === '' || ids.has(question.id)
+        || question.options !== undefined && (question.options.length < 2 || question.options.length > 3)) {
+        fail(`requirement/clarification at seq ${event.seq} has an invalid question`)
+      }
+      ids.add(question.id)
+    }
+    if (data.status === 'answered') {
+      const answerIds = new Set<string>()
+      const invalidAnswers = data.answers === undefined || data.answers.length !== ids.size
+        || data.answers.some((answer) => {
+          const duplicate = answerIds.has(answer.id)
+          answerIds.add(answer.id)
+          return !ids.has(answer.id) || duplicate
+            || answer.selected.length === 0 && (answer.custom === undefined || answer.custom.trim() === '')
+        })
+      if (invalidAnswers) fail(`requirement/clarification at seq ${event.seq} has invalid answers`)
+    } else if (data.answers !== undefined) {
+      fail(`requirement/clarification at seq ${event.seq} has answers before settlement`)
     }
     return
   }
-  if (event.type === 'requirement/plan') {
+  if (event.type === 'requirement/document') {
     const data = event.data
     const version: unknown = data.version
     if (version !== 1 || !Number.isSafeInteger(data.revision) || data.revision < 1
-      || data.roundId.trim() === '' || data.markdown.trim() === '') {
-      fail(`requirement/plan at seq ${event.seq} has an invalid payload`)
-    }
-    if (!Number.isSafeInteger(data.turn) || data.turn < 1) {
-      fail(`requirement/plan at seq ${event.seq} has an invalid turn`)
-    }
-    if (!['proposed', 'approved', 'failed'].includes(data.status)) {
-      fail(`requirement/plan at seq ${event.seq} has an invalid status`)
+      || data.roundId.trim() === '' || data.summary.trim() === '' || Array.from(data.summary).length > 30
+      || data.markdown.trim() === '' || !Number.isSafeInteger(data.turn) || data.turn < 1
+      || data.valid !== (data.issues.length === 0)) {
+      fail(`requirement/document at seq ${event.seq} has an invalid payload`)
     }
     return
   }
   if (event.type === 'requirement/task-list') {
     const data = event.data
     const version: unknown = data.version
-    if (version !== 1 || !Number.isSafeInteger(data.revision) || data.revision < 1 || data.roundId.trim() === '') {
+    if (version !== 1 || !Number.isSafeInteger(data.revision) || data.revision < 1 || data.roundId.trim() === ''
+      || !Number.isSafeInteger(data.documentRevision) || data.documentRevision < 1) {
       fail(`requirement/task-list at seq ${event.seq} has an invalid payload`)
     }
     const ids = new Set<string>()
-    for (const task of data.tasks) {
+    const finalTasks = data.tasks.filter(task => task.kind === 'final-test')
+    if (finalTasks.length !== 1 || data.tasks.at(-1)?.kind !== 'final-test') {
+      fail(`requirement/task-list at seq ${event.seq} must end with exactly one Final Test`)
+    }
+    for (const [index, task] of data.tasks.entries()) {
       if (task.id.trim() === '' || ids.has(task.id)) {
         fail(`requirement/task-list at seq ${event.seq} has an empty or duplicate task id`)
       }
@@ -109,11 +136,17 @@ function validate(event: SessionEvent, fail: InvariantFailure): void {
         fail(`requirement/task-list at seq ${event.seq} has an empty executable task`)
       }
       ids.add(task.id)
-      if (!Number.isSafeInteger(task.order) || task.order < 0) {
+      if (!Number.isSafeInteger(task.order) || task.order !== index) {
         fail(`requirement/task-list at seq ${event.seq} has an invalid task order`)
       }
-      if (!['pending', 'in_progress', 'completed', 'failed', 'withdrawn'].includes(task.status)) {
+      if (!['implementation', 'checkpoint', 'final-test'].includes(task.kind)) {
+        fail(`requirement/task-list at seq ${event.seq} has an invalid task kind`)
+      }
+      if (!['pending', 'in_progress', 'reviewing', 'completed', 'failed', 'withdrawn'].includes(task.status)) {
         fail(`requirement/task-list at seq ${event.seq} has an invalid task status`)
+      }
+      if (task.requirementRefs.some(ref => !/^\d+\.\d+$/u.test(ref))) {
+        fail(`requirement/task-list at seq ${event.seq} has an invalid requirement reference`)
       }
     }
     return
@@ -125,11 +158,20 @@ function validate(event: SessionEvent, fail: InvariantFailure): void {
       || data.roundId.trim() === '' || data.taskId.trim() === '' || data.messageId.trim() === '') {
       fail(`requirement/task-execution at seq ${event.seq} has an invalid identity`)
     }
-    if (!['submitted', 'processing', 'completed', 'failed'].includes(data.status)) {
+    if (!['submitted', 'processing', 'reviewing', 'completed', 'failed'].includes(data.status)) {
       fail(`requirement/task-execution at seq ${event.seq} has an invalid status`)
     }
     if (data.turn !== undefined && (!Number.isSafeInteger(data.turn) || data.turn < 1)) {
       fail(`requirement/task-execution at seq ${event.seq} has an invalid turn`)
+    }
+    return
+  }
+  if (event.type === 'requirement/run-all') {
+    const data = event.data
+    const version: unknown = data.version
+    if (version !== 1 || !Number.isSafeInteger(data.revision) || data.revision < 1
+      || data.roundId.trim() === '' || !['running', 'stopping', 'stopped', 'completed', 'failed'].includes(data.status)) {
+      fail(`requirement/run-all at seq ${event.seq} has an invalid payload`)
     }
     return
   }
@@ -177,7 +219,7 @@ function validate(event: SessionEvent, fail: InvariantFailure): void {
   if (event.type !== 'requirement/review') return
   const data = event.data
   const version: unknown = data.version
-  if (version !== 1 && version !== 2) {
+  if (version !== 1 && version !== 2 && version !== 3) {
     fail(`requirement/review at seq ${event.seq} has unsupported version`)
     return
   }
@@ -186,6 +228,12 @@ function validate(event: SessionEvent, fail: InvariantFailure): void {
     fail(`requirement/review at seq ${event.seq} has invalid reviewedThroughSeq`)
   }
   if (data.status === 'failed') return
+  if (data.task !== undefined && (data.task.taskId.trim() === ''
+    || !['passed', 'warning', 'blocking'].includes(data.task.verdict)
+    || hasBlankText(data.task.summary, version)
+    || data.task.findings.some(finding => hasBlankText(finding, version)))) {
+    fail(`requirement/review at seq ${event.seq} has an invalid task verdict`)
+  }
   const ids = new Set<string>()
   for (const requirement of data.requirements) {
     if (requirement.id.trim() === '' || ids.has(requirement.id)) {
@@ -213,10 +261,12 @@ function validateRelations(events: readonly SessionEvent[], fail: InvariantFailu
   const versions = new Map<string, { readonly version: number; readonly messageId: string }>()
   const executions = new Map<string, 'processing' | 'completed' | 'failed'>()
   const rounds = new Map<string, number>()
-  const taskRevisions = new Map<string, number>()
+  const clarificationRevisions = new Map<string, number>()
+  const documentRevisions = new Map<string, number>()
+  const taskListRevisions = new Map<string, number>()
+  const taskExecutionRevisions = new Map<string, number>()
   const taskIds = new Map<string, Set<string>>()
-  const planRevisions = new Map<string, number>()
-  const markdownRevisions = new Map<string, number>()
+  const runAllRevisions = new Map<string, number>()
   const validationRevisions = new Map<string, number>()
   const notes = new Map<string, RequirementNoteEvent>()
   for (const event of events) {
@@ -229,40 +279,49 @@ function validateRelations(events: readonly SessionEvent[], fail: InvariantFailu
       rounds.set(String(event.data.roundId), event.data.revision)
       continue
     }
-    if (event.type === 'requirement/markdown') {
+    if (event.type === 'requirement/clarification') {
       const key = String(event.data.roundId)
-      if (!rounds.has(key) || event.data.revision !== (markdownRevisions.get(key) ?? 0) + 1) {
-        fail(`requirement/markdown at seq ${event.seq} has no valid round or revision`)
+      if (!rounds.has(key) || event.data.revision !== (clarificationRevisions.get(key) ?? 0) + 1) {
+        fail(`requirement/clarification at seq ${event.seq} has no valid round or revision`)
       }
-      markdownRevisions.set(key, event.data.revision)
+      clarificationRevisions.set(key, event.data.revision)
       continue
     }
-    if (event.type === 'requirement/plan') {
+    if (event.type === 'requirement/document') {
       const key = String(event.data.roundId)
-      if (!rounds.has(key) || event.data.revision !== (planRevisions.get(key) ?? 0) + 1) {
-        fail(`requirement/plan at seq ${event.seq} has no valid round or revision`)
+      if (!rounds.has(key) || event.data.revision !== (documentRevisions.get(key) ?? 0) + 1) {
+        fail(`requirement/document at seq ${event.seq} has no valid round or revision`)
       }
-      planRevisions.set(key, event.data.revision)
+      documentRevisions.set(key, event.data.revision)
       continue
     }
     if (event.type === 'requirement/task-list') {
       const key = String(event.data.roundId)
-      if (!rounds.has(key) || event.data.revision !== (taskRevisions.get(key) ?? 0) + 1) {
+      if (!rounds.has(key) || event.data.revision !== (taskListRevisions.get(key) ?? 0) + 1
+        || (documentRevisions.get(key) ?? 0) < event.data.documentRevision) {
         fail(`requirement/task-list at seq ${event.seq} has no valid round or revision`)
       }
-      taskRevisions.set(key, event.data.revision)
+      taskListRevisions.set(key, event.data.revision)
       taskIds.set(key, new Set(event.data.tasks.map(task => String(task.id))))
       continue
     }
     if (event.type === 'requirement/task-execution') {
       const key = String(event.data.roundId)
       const taskKey = `${key}:${String(event.data.taskId)}`
-      const previousRevision = taskRevisions.get(taskKey) ?? 0
+      const previousRevision = taskExecutionRevisions.get(taskKey) ?? 0
       if (!rounds.has(key) || !taskIds.get(key)?.has(String(event.data.taskId))
         || event.data.revision !== previousRevision + 1) {
         fail(`requirement/task-execution at seq ${event.seq} has no valid task or revision`)
       }
-      taskRevisions.set(taskKey, event.data.revision)
+      taskExecutionRevisions.set(taskKey, event.data.revision)
+      continue
+    }
+    if (event.type === 'requirement/run-all') {
+      const key = String(event.data.roundId)
+      if (!rounds.has(key) || event.data.revision !== (runAllRevisions.get(key) ?? 0) + 1) {
+        fail(`requirement/run-all at seq ${event.seq} has no valid round or revision`)
+      }
+      runAllRevisions.set(key, event.data.revision)
       continue
     }
     if (event.type === 'requirement/note') {

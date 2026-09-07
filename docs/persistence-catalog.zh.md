@@ -577,6 +577,28 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 ### `requirement/*`
 
+<a id="requirementclarification--log-only"></a>
+
+#### `requirement/clarification` — log-only
+
+```ts persistence-catalog
+/** Requirement clarification batch and its user answer. */
+'requirement/clarification': RequirementClarificationEvent
+```
+
+来源：[`packages/session/session-requirements/src/types.ts:515`](../packages/session/session-requirements/src/types.ts)
+
+<a id="requirementdocument--log-only"></a>
+
+#### `requirement/document` — log-only
+
+```ts persistence-catalog
+/** Editable requirement document produced after clarification. */
+'requirement/document': RequirementDocumentEvent
+```
+
+来源：[`packages/session/session-requirements/src/types.ts:517`](../packages/session/session-requirements/src/types.ts)
+
 <a id="requirementexecution--log-only"></a>
 
 #### `requirement/execution` — log-only
@@ -586,18 +608,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/execution': RequirementExecutionEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:416`](../packages/session/session-requirements/src/types.ts)
-
-<a id="requirementmarkdown--log-only"></a>
-
-#### `requirement/markdown` — log-only
-
-```ts persistence-catalog
-/** Markdown artifact rendered from the raw user request. */
-'requirement/markdown': RequirementMarkdownEvent
-```
-
-来源：[`packages/session/session-requirements/src/types.ts:425`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:506`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementnote--log-only"></a>
 
@@ -608,18 +619,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/note': RequirementNoteEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:433`](../packages/session/session-requirements/src/types.ts)
-
-<a id="requirementplan--log-only"></a>
-
-#### `requirement/plan` — log-only
-
-```ts persistence-catalog
-/** Plan-mode Markdown captured for one product round. */
-'requirement/plan': RequirementPlanEvent
-```
-
-来源：[`packages/session/session-requirements/src/types.ts:427`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:525`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementreview--log-only"></a>
 
@@ -633,7 +633,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/review': RequirementReviewEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:421`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:511`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementround--log-only"></a>
 
@@ -644,7 +644,18 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/round': RequirementRoundEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:423`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:513`](../packages/session/session-requirements/src/types.ts)
+
+<a id="requirementrun-all--log-only"></a>
+
+#### `requirement/run-all` — log-only
+
+```ts persistence-catalog
+/** Sequential Run All lifecycle. */
+'requirement/run-all': RequirementRunAllEvent
+```
+
+来源：[`packages/session/session-requirements/src/types.ts:523`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementtask-execution--log-only"></a>
 
@@ -655,18 +666,18 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/task-execution': RequirementTaskExecutionEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:431`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:521`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementtask-list--log-only"></a>
 
 #### `requirement/task-list` — log-only
 
 ```ts persistence-catalog
-/** Whole task list derived from the approved Plan. */
+/** Whole task list generated from the current requirement document. */
 'requirement/task-list': RequirementTaskListEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:429`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:519`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementuser-version--log-only"></a>
 
@@ -680,7 +691,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/user-version': RequirementUserVersionEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:414`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:504`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementvalidation--log-only"></a>
 
@@ -691,7 +702,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/validation': RequirementValidationEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:435`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:527`](../packages/session/session-requirements/src/types.ts)
 
 ### `sandbox/*`
 

@@ -84,6 +84,8 @@ describe.skipIf(!requiredArtifacts)('Remote built LIB chain', () => {
         },
       })
       host.provide('subagents', { start() { throw new Error('not used in this smoke') } })
+      host.provide('tools', { register() { return () => {} } })
+      host.provide('userQuestions', { ask() { throw new Error('not used in this smoke') } })
       await host.plugin({ inject: connectionHost.inject, apply: connectionHost.apply })
       await host.plugin(TypertRegistry)
       await host.plugin(AgentRegistry)
@@ -93,6 +95,8 @@ describe.skipIf(!requiredArtifacts)('Remote built LIB chain', () => {
         reviewerProvider: 'spawn',
         maxInputChars: 20000,
         reviewerTools: ['read'],
+        maxClarificationRounds: 2,
+        maxQuestionsPerRound: 5,
       })
       host.typert.register(TYPERT)
       host.typert.register(REQUIREMENTS_TYPERT)
@@ -200,6 +204,14 @@ describe.skipIf(!requiredArtifacts)('Remote built LIB chain', () => {
       )
       const agentContext = client.extend({ builtAgentId: scopedAgent.id })
       const scopedResult = await agentContext.remote.goals.create({ objective: 'scoped goal', maxGoalRounds: 3 })
+      const scopedRound = await agentContext.remote.sessionRequirements.startRound({
+        input: '生成一份可执行的中文需求文档。',
+        language: 'zh',
+      })
+      const generationWithoutDocument = await agentContext.remote.sessionRequirements.generateTasks({
+        roundId: scopedRound.value.roundId,
+        documentRevision: 1,
+      })
       const requirementResult = await client.remote.sessionRequirements.commit(rootAgent.id, {
         operation: 'add',
         language: 'en',
@@ -212,6 +224,8 @@ describe.skipIf(!requiredArtifacts)('Remote built LIB chain', () => {
         rootResult: rootResult.value,
         rootEdit: rootEdit.value,
         scopedResult: scopedResult.value,
+        scopedRound: scopedRound.value,
+        generationWithoutDocument,
         requirementResult: requirementResult.value,
         requirementEvent: requirementEvent?.data,
         requirementPrompt: queued.get('built-root-agent')?.content?.[0]?.text,
@@ -237,6 +251,8 @@ describe.skipIf(!requiredArtifacts)('Remote built LIB chain', () => {
       rootResult: { ref: { id: string; revision: number } }
       rootEdit: { objective: string; revision: number }
       scopedResult: { ref: { id: string; revision: number } }
+      scopedRound: { roundId: string; round: number; eventSeq: number }
+      generationWithoutDocument: { ok: false; error: { code: string; message: string } }
       requirementResult: { requirementId: string; requirementVersion: number; eventSeq: number }
       requirementEvent: { requirementId: string; requirementVersion: number; title: string }
       requirementPrompt: string
@@ -250,16 +266,22 @@ describe.skipIf(!requiredArtifacts)('Remote built LIB chain', () => {
       rootResult: { ref: { revision: 1 } },
       rootEdit: { objective: 'edited root goal', revision: 2 },
       scopedResult: { ref: { revision: 1 } },
+      scopedRound: { roundId: 'ROUND-01', round: 1 },
+      generationWithoutDocument: {
+        ok: false,
+        error: { code: 'internal' },
+      },
       requirementResult: { requirementId: 'R1', requirementVersion: 1 },
       requirementEvent: { requirementId: 'R1', requirementVersion: 1, title: 'Export results' },
       rootGoal: 'edited root goal',
       scopedGoal: 'scoped goal',
       rootEvents: 3,
-      scopedEvents: 1,
+      scopedEvents: 2,
     })
     expect(output.rootResult.ref.id).toMatch(/^goal-/)
     expect(output.scopedResult.ref.id).toMatch(/^goal-/)
     expect(output.requirementPrompt).toContain('All other existing requirements remain unchanged.')
+    expect(output.generationWithoutDocument.error.message).toContain('does not exist')
   }, 60_000)
 })
 

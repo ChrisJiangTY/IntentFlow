@@ -1,5 +1,5 @@
 ---
-description: "Notebook presentation for requirement rounds, plans, task execution, and independent validation in the dsh Web conversation."
+description: "Notebook presentation for requirement clarification, editable Chinese documents, executable Task blocks, and independent validation in the dsh Web conversation."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-client-ui-requirements` registers the Requirements tab beside Chat and Trajectory. It keeps the DSH sidebar, Session header, tabs, and native bottom composer, while presenting each requirement round as a Notebook containing the raw requirement Markdown, the Plan, executable Task cells, notes, and a final validation cell.
+`dsh-client-ui-requirements` registers the Requirements tab beside Chat and Trajectory. It presents each raw request as a summarized product round with collapsed clarification history, an editable Chinese requirement document, executable Task blocks, per-Task reviews, and final validation. The view keeps the DSH sidebar, Session header, tabs, and native bottom composer.
 
 ## Table of Contents
 
@@ -25,54 +25,63 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Submit a new requirement through the DSH bottom composer while the Requirements tab is active. The composer routes the raw text to `sessionRequirements.startRound`; the host records the product round and Markdown artifact, enables Plan mode, and queues the planning message. The raw input remains the round source rather than being replaced by an inferred title.
+Submit a new requirement through the DSH bottom composer while the Requirements tab is active. The composer routes the raw text to `sessionRequirements.startRound`. The round header later displays the Agent-generated summary as read-only text. The original input and every clarification question and answer remain available inside the collapsed clarification record.
 
-The Notebook renders rounds in order. Each round contains the Markdown requirement, the captured Plan, Todo-derived Task cells, durable text or comment cells, and the final validation cell. The fixed top toolbar is the only place that inserts code-task and text cells, so these actions remain available while the Notebook scrolls through multiple rounds. It provides commands, review, and ordered Run all execution; language switching remains in the Command menu instead of occupying a separate control on the right. A new code-task editor starts as a compact single row and grows vertically with its content. Each generated Task represents one top-level numbered Plan phase rather than one child checklist item, and its cell label uses `TASK1`, `TASK2`, and so on. It starts with a plain-language title that explains the whole phase outcome; the indented body preserves the phase heading, all child checklist items, technical details, implementation steps, and validation conditions. The title and body form one editable source inside the bordered input cell. The Agent response renders immediately below it as an unbordered Markdown output that preserves headings, paragraphs, lists, tables, inline code, and fenced code. Each output starts expanded and has a left disclosure arrow that independently collapses or restores its answer. A selected Task exposes run, move, comment, edit, details, withdrawal, and Agent-assistance actions, while zoom stays at the bottom of the Notebook canvas.
+When ambiguity is resolved, the Notebook renders the complete requirement document as Markdown. Edit opens the source in place with explicit Save and Cancel controls. Saving creates a new document revision; an invalid revision displays its validation issues and disables Generate Tasks. A saved revision hides Tasks generated from an older document revision. The document cannot change while generation is running or after Task execution begins.
 
-Code insertion creates a durable empty Task at the end of the round's Task list and focuses its editor. New and existing Task cells autosave as the user types, without Save or Cancel controls. Edits to each Task are serialized, with newer input retained while a save is pending. The left run button and Run all wait for the latest edits to persist before execution; save failure retains the input and blocks execution until a retry succeeds. A title-only Task can run; a completely empty cell cannot run and is skipped by Run all.
+Generate Tasks is the document block's execution action. It asks the main Agent to inspect the repository and produce ordered top-level Task blocks from the exact document revision. The Requirements view contains no Plan card and no Plan approval action. Each generated Task keeps all child checklist items inside its top-level block and displays Chinese requirement references. Every Task is required; Final Test is always the last block.
 
-Text insertion creates a passive Markdown note with no run button. The note reuses DSH's `MarkdownText` renderer for headings, lists, tables, and code blocks. Edit switches to Markdown source; Preview or leaving the editor restores the rendered note. Changes autosave in order, preserving whitespace, without Save or Cancel controls. A failed save retains the source and offers retry. Reopening the Session displays the latest saved source under the same note identity. Explicit comment insertion retains Save and Cancel controls; dispatched Agent-assistance comments cannot be edited.
+Before execution, users can add, edit, move, or withdraw ordinary pending Tasks. Final Test remains editable but cannot be moved or withdrawn. Once a Task starts, completed, in-progress, and reviewing cells are locked. Future pending Tasks become editable after the current Task and review settle and Run All is stopped.
 
-Task execution failures use `[!]` and an amber task state. A confirmed accidental regression of an active historical requirement uses a red Task cell when the reviewer can attribute it, and a red validation cell otherwise. User-authorized refinement, replacement, and withdrawal remain ordinary requirement lifecycle changes and are not rendered as regressions.
+Run All executes one Task at a time and waits for its independent review. A passed or warning review continues to the next Task; a blocking or failed review stops. Stop Run All remains visible during ordered execution and takes effect after the current Task and review settle. Final Test runs only after every preceding Task completes and produces the final validation after its own review passes.
 
-The projection consumes append-only `requirement/round`, `requirement/markdown`, `requirement/plan`, `requirement/task-list`, `requirement/task-execution`, `requirement/note`, and `requirement/validation` events, together with the existing review, user-version, and execution events. React state contains only selection, folding, draft, zoom, and transient action state; durable Notebook content is rebuilt from the Session target.
+The selected Task retains run, move, comment, edit, details, withdrawal, and Agent-assistance actions when their state permits. Agent output renders below the input cell as Markdown and can be collapsed independently. Passive text notes and comments remain replayable Notebook events. Zoom stays at the bottom of the Notebook canvas, while relationship and evidence panels open only on demand.
+
+Task execution failure uses `[!]` and an amber state. A warning review has its own warning presentation without blocking ordered execution. A confirmed accidental regression uses red only when the reviewer records that evidence; Task attribution appears only when the reviewer can support it.
+
+The projection consumes append-only `requirement/round`, `requirement/clarification`, `requirement/document`, `requirement/task-list`, `requirement/task-execution`, `requirement/run-all`, `requirement/note`, `requirement/review`, and `requirement/validation` events, together with user-version and execution events. React state contains only selection, folding, drafts, zoom, and transient action state; durable Notebook content is rebuilt from the Session target.
 
 -----
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
-The package contributes target-specific Event Definitions, an append-only snapshot builder, a Session selector hook, a `conversation.view` registration, and a composer route supplied to `ui-conversation`. The native DSH composer remains the only entry point for a new product round. Notebook mutations call generated `sessionRequirements` Remotes, so task order, task edits, withdrawals, notes, and executions are replayable Session facts.
+<details>
+<summary>Implementation internals — click to expand</summary>
 
-The view has no replacement bottom input and no fixed right inspector. Details open on demand from a selected cell. Product copy is owned by the typed `requirements` locale namespace; reviewer-authored bilingual content comes from durable review and validation events.
+The package contributes target-specific Event Definitions, an append-only snapshot builder, a Session selector hook, a `conversation.view` registration, and a composer route supplied to `ui-conversation`. The native DSH composer remains the only entry point for a new product round. Notebook mutations call generated `sessionRequirements` Remotes, so document revisions, Task order, edits, withdrawals, notes, executions, and Run All state are replayable Session facts.
+
+The view selects the latest event revision for each round, document, Task list, Task execution, review, Run All request, and note. A Task list renders only when its `documentRevision` equals the current document revision. Product copy belongs to the typed `requirements` locale namespace; reviewer-authored bilingual content comes from durable review and validation events.
+
+</details>
 
 -----
 
 <a id="further-exploration"></a>
 ## Further Exploration
 
-- [session-requirements](../../session/session-requirements/README.md) — host orchestration and durable Notebook event vocabulary.
+- [session-requirements](../../session/session-requirements/README.md) — host clarification, document, Task, and review orchestration.
 - [ui-conversation](../ui-conversation/README.md) — DSH shell, native composer, and view routing.
-- [ui-trajectory](../ui-trajectory/README.md) — adjacent activity ledger.
+- [ui-trajectory](../ui-trajectory/README.md) — detailed execution evidence.
 
 -----
 
 <a id="model-experience"></a>
 ## Model Experience
 
-None, as this browser-side package only invokes host-owned Remotes; `session-requirements` owns every resulting planning, Task, dispatched assistance, and reviewer model request.
+None, as this browser package calls host-owned Remotes and `session-requirements` owns every resulting analysis, task-generation, Task, dispatched assistance, and reviewer model request.
 
 #### KV Cache effect
 
-Host-owned round, Task, and explicitly dispatched assistance prompts follow normal provider caching rules; passive notes, local selection, folding, zoom, and view changes do not affect the model cache.
+Host-owned prompts follow normal provider caching rules. Local selection, folding, drafts, zoom, and view changes do not affect the model cache. Saving a document does not call a model; Generate Tasks creates a new main-Agent request against that revision.
 
 ## Known Limitations and Deferred Work
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Task output is bounded** — each Task retains a bounded final Agent response; detailed tool evidence remains in the Trajectory and Session log.
-- **Task attribution is reviewer evidence** — the reviewer assigns a regression to a Task only when the evidence supports that relationship; otherwise validation reports the regression without guessing.
-- **Unacknowledged edits are tab-local** — pending or failed autosaves and unsubmitted comments can be lost when the tab closes; acknowledged Task and Markdown note edits are rebuilt from the Session log.
+- **Unacknowledged edits are tab-local** — closing the tab can lose a pending or failed autosave, an unsaved document edit, or an unsubmitted comment.
+- **Task output is bounded** — each Task retains a bounded final Agent response; detailed tool evidence remains in Trajectory and the Session log.
+- **Task attribution is reviewer evidence** — the reviewer assigns a regression to a Task only when the evidence supports that relationship; otherwise final validation reports the regression without guessing.
 
 <a id="dev-note"></a>
 ### Dev Note
@@ -80,6 +89,6 @@ Host-owned round, Task, and explicitly dispatched assistance prompts follow norm
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-See the [requirement Notebook pipeline Agent Note](../../../.agents/notes/implemented/feature/2026-09-02-requirement-notebook-pipeline.md).
+See the [requirement document before tasks Agent Note](../../../.agents/notes/implemented/feature/2026-09-06-requirement-document-before-tasks.md).
 
 </details>

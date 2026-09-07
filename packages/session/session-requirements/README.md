@@ -1,5 +1,5 @@
 ---
-description: "Durable requirement Notebook orchestration and independent historical-regression validation for dsh sessions."
+description: "Durable clarification, Chinese requirement-document generation, executable task orchestration, and independent review for the dsh Requirements Notebook."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-session-requirements` owns the product-round protocol behind the Requirements Notebook. It records the raw request as Markdown, enters Plan mode, captures the Plan, projects Todo items into stable Task cells, records task execution and notes, and appends final validation. The independent reviewer compares the current round with active historical requirements and emits regression evidence separately from main-Agent claims.
+`dsh-session-requirements` turns one raw product request into a replayable Chinese requirement document before implementation begins. The main Agent asks only material clarification questions, then generates an editable document and, on explicit user action, an ordered set of executable Task blocks. Every Task passes an independent review before execution advances, and a mandatory last Final Test produces the round validation.
 
 ## Table of Contents
 
@@ -25,26 +25,35 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount the plugin where `agents`, `subagents`, and optionally `commands` are available. Configure a registered one-shot provider, a prompt character limit, and the exact read-only tool names exposed to the reviewer. The Web bundle uses the `spawn` provider with `read`, `glob`, and `grep`.
+Mount the plugin where `agents`, `subagents`, `tools`, and `userQuestions` are available. Configure a registered one-shot reviewer provider, the review prompt character limit, the exact read-only tools available to the reviewer, the maximum clarification batches, and the maximum questions per batch. The Web bundle uses two batches of at most five questions.
 
-The generated Remotes `startRound`, `runTask`, `runAll`, `addTask`, `editTask`, `moveTask`, `withdrawTask`, and `addNote` operate on the live Agent's Session. `startRound` preserves the raw input, appends the round and Markdown events, enables Plan mode, and queues one planning message. After Plan approval, each top-level numbered `## N.` phase becomes one Todo and then one ordered Task-list entry; its `N.1`, `N.2`, and other checklist items remain together in that Task. The Todo's first line supplies a plain-language phase outcome. Its following lines preserve the complete phase heading, checkbox states, files, commands, configuration, dependencies, implementation steps, and validation conditions as the Task statement. Task runs append submitted, processing, and terminal execution events; Run all queues the next pending task after a completed turn and stops after a failed turn.
+`startRound` preserves the raw input in `requirement/round` and queues a main-Agent analysis turn. The prompt requires read-only repository inspection before questions. When a decision belongs to the user and materially changes the result, the Agent calls `clarify_requirements`; the answers and the original questions are durable `requirement/clarification` events. The Agent can ask another batch within the configured limit. It otherwise calls `submit_requirements_document` without entering Plan mode or modifying files.
 
-Text and comment cells are durable note events. Passive Markdown notes use `dispatch: false`, preserve source whitespace, and may be empty. `editNote` appends replacement source under the same round and note identity; prior events remain unchanged, and the browser displays the latest version. Neither creation nor editing creates an Agent turn. Comments require nonblank content; the explicit Agent-assistance action uses `dispatch: true` and follows up in the main conversation. Comments and dispatched notes cannot be edited. A task can be edited, reordered, or withdrawn before execution; each mutation appends a replacement Task list while retaining prior log history. A withdrawn task remains visible but is excluded from Run all.
+The submitted document is Chinese Markdown with `# 需求文档`, `## 简介`, and `## 需求`, followed by consecutively numbered requirements, user stories, and acceptance criteria. The host validates this structure before marking the document usable. The browser may append a new document revision through `editDocument`; an invalid revision remains visible but cannot generate Tasks. Editing is blocked while task generation runs and after any Task execution begins.
 
-`addTask` and `editTask` accept empty title or statement strings for partially authored cells and persist them as pending Tasks. `runTask` requires at least one nonblank text field. Run all skips empty drafts, which do not hold the round in the executing state after other Tasks finish. Task edits do not dispatch an Agent message; [the browser editor](../../client/ui-requirements/README.md#use-this-package) controls autosave and waits for it before running.
+`generateTasks` queues a read-only main-Agent turn against one exact valid document revision. `submit_requirement_tasks` commits at least one implementation or checkpoint block plus one separate Final Test block. Each block contains all child checklist items for one top-level phase, uses Chinese `_关联需求：…_` references to real acceptance criteria, and is mandatory. The host places Final Test last and rejects a list that does not cover every acceptance criterion.
 
-After each parent `turn/end`, the configured one-shot reviewer receives the current Notebook artifacts, historical review snapshot, user messages, and bounded read-only workspace access. A completed review appends a validation event. The validation marks confirmed accidental breaks of active historical requirements as regressions, carries the responsible Task only when evidence supports attribution, and never treats a failed Task or missing evidence as a regression by itself.
+Before execution, pending Tasks can be added, edited, reordered, or withdrawn; Final Test can be edited but cannot be withdrawn or moved. Once execution starts, completed and running Tasks remain locked. Future pending Tasks can change only after the current Task and its review settle. `runTask` queues one Task in the main conversation. `runAll` continues in order after each accepted review, and `stopRunAll` stops after the current Task and review settle.
 
-The existing `commit` Remote remains available for version-addressed requirement records and compatibility with the requirement-review data model. The Notebook round protocol is the path used by the Requirements tab's native DSH composer.
+Each completed Task turn enters `reviewing`. The independent reviewer must return the matching Task identity and a `passed`, `warning`, or `blocking` verdict. Passed and warning verdicts advance execution; a blocking verdict, reviewer failure, or confirmed historical regression marks the Task failed and stops Run All. Final Test can repair failures introduced by the current round and rerun checks, but its prompt forbids deleting tests, weakening assertions, or hiding failures. A passed Final Test appends the final validation event.
+
+Text and comment cells remain durable note events. Passive Markdown uses `dispatch: false`; explicit Agent assistance uses `dispatch: true` and follows up in the main conversation. The existing `commit` Remote remains available for version-addressed requirement records used by the historical-review model.
 
 -----
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
-The package defines the durable round, Markdown, Plan, Task-list, Task-execution, note, and validation payloads in the Session event vocabulary. `SessionRequirements` serializes independent reviews per Session and appends only immutable events. Pipeline tracking joins plan-mode, Todo, message, and turn events to the current product round without treating an Agent Turn as a product-round identity.
+<details>
+<summary>Implementation internals — click to expand</summary>
 
-The review child is limited to the first delegation level and receives an explicit read-only tool allowlist. Disposal aborts active children and drains their promises before teardown. A completed child result is committed only while the exact parent Agent remains registered for the Session.
+The package registers three model tools for clarification, document submission, and task submission. Append-only round, clarification, document, task-list, task-execution, Run All, note, review, and validation events let the browser rebuild the Notebook without storing product state in React. Document and Task-list revisions are independent so a document edit invalidates older generated Tasks without rewriting history.
+
+Task execution joins the queued message to its Agent turn. Turn completion records output and starts the independent reviewer; only the reviewer settlement writes the Task terminal state and decides whether ordered execution continues. The in-memory Run All controller owns only the live continuation and stop request, while every user-visible state transition is durable.
+
+The reviewer child is limited to the first delegation level and receives an explicit read-only tool allowlist. Disposal aborts active children and drains their promises. A completed child result is committed only while the exact parent Agent remains registered for the Session.
+
+</details>
 
 -----
 
@@ -52,7 +61,8 @@ The review child is limited to the first delegation level and receives an explic
 ## Further Exploration
 
 - [ui-requirements](../../client/ui-requirements/README.md) — browser Notebook projection and native composer routing.
-- [subagent](../../subagent/subagent/README.md) — one-shot child execution seam.
+- [user-questions](../../interaction/user-questions/README.md) — interactive clarification request handling.
+- [subagent](../../subagent/subagent/README.md) — one-shot reviewer execution.
 - [session](../../core/session/README.md) — durable event log receiving Notebook facts.
 
 -----
@@ -64,23 +74,24 @@ The review child is limited to the first delegation level and receives an explic
 
 #### What the model sees
 
-The planning message contains the raw user request, its Markdown framing, the automatic Plan-mode instruction, the required one-Todo-per-top-level-phase format, and the historical-requirement preservation rule. A Task message names exactly one phase-level Task and includes the complete Plan section. A dispatched assistance note identifies its Task and round; passive text and comment notes remain in the Notebook without entering model input. The reviewer receives the previous complete requirement snapshot, current Notebook events, parent-turn evidence, and instructions to inspect the workspace before asserting verification or regression.
+The first main-Agent prompt contains the raw request, the clarification policy, the exact Chinese document structure, and prohibitions against Plan mode, file edits, and early task generation. A generation prompt contains the accepted document revision and the required Task and Final Test formats. A Task prompt names exactly one Task and its linked acceptance criteria. The reviewer receives the prior requirement snapshot, current Notebook events, parent-turn evidence, and read-only workspace instructions.
 
 #### Token effect
 
-Each new round, explicitly run Task, and dispatched assistance note creates one ordinary main-Agent turn. Passive notes do not. Run all serializes Task turns. Each completed parent turn triggers one auxiliary reviewer request, and `/requirements` triggers an explicit review. Reviewer input is bounded by `maxInputChars`.
+Each new round, task-generation request, explicitly run Task, and dispatched assistance note creates one ordinary main-Agent turn. Clarification answers continue the active analysis turn through the user-question interaction. Passive notes and document edits do not call a model. Each completed Task turn triggers one auxiliary reviewer request; manual `/requirements` review also triggers one. Reviewer input is bounded by `maxInputChars`.
 
 #### KV Cache effect
 
-Main prompts follow normal provider caching rules. Auxiliary input changes with the Session evidence and prior snapshot, so reuse ends at the first changed token in the reviewer request.
+Main prompts follow normal provider caching rules. Document revisions, generated Tasks, and Session evidence change later requests from their first changed token. Reviewer requests also vary with the accumulated evidence and prior snapshot.
 
 ## Known Limitations and Deferred Work
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Task output is bounded** — the task-execution event stores a bounded final assistant response; the full tool transcript remains in the Session log.
-- **Validation is evidence-based** — the reviewer can report an unconfirmed or unattributed concern only as review text; red regression state requires the explicit regression object.
-- **Plan approval remains an explicit checkpoint** — Task execution waits for the existing Plan-mode approval event, while task and note Remotes still validate their own live Session references.
+- **Clarification is deliberately bounded** — after the configured batches, unresolved material ambiguity leaves the round waiting for user direction instead of guessing.
+- **Task generation is revision-locked** — the document cannot change while a generation turn is active; retry or edit after that turn settles.
+- **Task output is bounded** — a task-execution event stores a bounded final assistant response; the complete tool transcript remains in Trajectory and the Session log.
+- **Review failure stops progress** — a missing, invalid, unavailable, or blocking reviewer result fails the current Task and requires an explicit retry.
 
 <a id="dev-note"></a>
 ### Dev Note
@@ -88,6 +99,6 @@ Main prompts follow normal provider caching rules. Auxiliary input changes with 
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-See the [requirement Notebook pipeline Agent Note](../../../.agents/notes/implemented/feature/2026-09-02-requirement-notebook-pipeline.md).
+See the [requirement document before tasks Agent Note](../../../.agents/notes/implemented/feature/2026-09-06-requirement-document-before-tasks.md).
 
 </details>

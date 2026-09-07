@@ -2003,7 +2003,7 @@ Source: [`packages/context/session-reference/src/config.ts:11`](../packages/cont
 
 ## `@deepseek-ai/dsh-session-requirements`
 
-Requires: `agents` · `subagents`
+Requires: `agents` · `subagents` · `tools` · `userQuestions`
 
 ```ts config-catalog
 /** Deployment choices for the independent reviewer. */
@@ -2014,10 +2014,14 @@ export interface Config {
   readonly maxInputChars: number
   /** Read-only tools exposed to the reviewer child. */
   readonly reviewerTools: string[]
+  /** Maximum clarification batches accepted for one requirement round. */
+  readonly maxClarificationRounds: number
+  /** Maximum questions accepted in one clarification batch. */
+  readonly maxQuestionsPerRound: number
 }
 ```
 
-Source: [`packages/session/session-requirements/src/index.ts:30`](../packages/session/session-requirements/src/index.ts)
+Source: [`packages/session/session-requirements/src/index.ts:69`](../packages/session/session-requirements/src/index.ts)
 
 <a id="deepseek-aidsh-session-telemetry-otel"></a>
 

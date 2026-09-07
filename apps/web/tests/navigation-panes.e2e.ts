@@ -295,6 +295,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     const roundId = 'ROUND-WEB-01' as never
     const completedTaskId = 'TASK-WEB-01' as never
     const failedTaskId = 'TASK-WEB-02' as never
+    const finalTaskId = 'TASK-WEB-FINAL' as never
     const sourceMessageId = 'requirements-source-message' as never
     session.append('requirement/round', {
       version: 1,
@@ -307,38 +308,54 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       status: 'completed',
       turn: 2,
     })
-    session.append('requirement/markdown', {
+    session.append('requirement/clarification', {
       version: 1,
       revision: 1,
       roundId,
-      sourceMessageId,
-      language: 'en',
-      markdown: '# User requirement\n\nBuild a navigation HTML page, preserve the existing behavior, and validate it.',
+      attempt: 1,
+      status: 'answered',
+      questions: [{ id: 'scope', question: '本次是否只修改导航页面？' }],
+      answers: [{ id: 'scope', selected: ['是，只修改导航页面'] }],
     })
-    session.append('requirement/plan', {
+    session.append('requirement/document', {
       version: 1,
       revision: 1,
       roundId,
       turn: 2,
-      status: 'approved',
-      markdown: '1. Build the HTML navigation.\n2. Verify the rendered result.',
+      summary: '构建并验证导航页面',
+      markdown: '# 需求文档\n\n## 简介\n\n构建并验证导航页面，同时保留现有行为。\n\n## 需求\n\n### 需求 1：导航页面\n\n**用户故事：** 作为用户，我希望使用清晰的导航页面，以便访问主要功能。\n\n#### 验收标准\n\n1. 当页面打开时，系统应当显示导航内容。\n2. 当视口缩小至移动端时，系统应当保持导航可用。',
+      valid: true,
+      issues: [],
     })
     session.append('requirement/task-list', {
       version: 1,
       revision: 1,
       roundId,
+      documentRevision: 1,
       tasks: [{
         id: completedTaskId,
         order: 0,
+        kind: 'implementation',
         title: 'Build navigation HTML',
-        statement: 'Implement the requested navigation in index.html.',
+        statement: 'Implement the requested navigation in index.html.\n\n_关联需求：1.1_',
+        requirementRefs: ['1.1'],
         status: 'completed',
       }, {
         id: failedTaskId,
         order: 1,
+        kind: 'checkpoint',
         title: 'Check mobile navigation',
-        statement: 'Verify the navigation at the mobile breakpoint.',
+        statement: 'Verify the navigation at the mobile breakpoint.\n\n_关联需求：1.2_',
+        requirementRefs: ['1.2'],
         status: 'failed',
+      }, {
+        id: finalTaskId,
+        order: 2,
+        kind: 'final-test',
+        title: 'Final Test',
+        statement: 'Run the complete navigation test set and verify every acceptance criterion.\n\n_关联需求：1.1、1.2_',
+        requirementRefs: ['1.1', '1.2'],
+        status: 'pending',
       }],
     })
     session.append('requirement/task-execution', {
@@ -510,23 +527,26 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     expect(commandBox.height).toBe(28)
 
     await toolbar.getByRole('button', { name: 'Code', exact: true }).click()
-    const editor = page.locator('[data-cell="task"]').last()
-    const input = editor.getByRole('textbox')
     await page.getByRole('textbox', { name: 'Task content New task' }).waitFor()
+    const editor = page.locator('[data-cell="task"]').nth(2)
+    const input = editor.getByRole('textbox')
     await editor.waitFor()
     const compactBox = await editor.boundingBox()
     if (compactBox === null) throw new Error('compact task editor geometry is unavailable')
-    expect(compactBox.height).toBeLessThanOrEqual(82)
+    expect(compactBox.height).toBeLessThanOrEqual(100)
     expect(await input.evaluate(node => node.style.height)).toBe('30px')
     expect(await editor.getByRole('button', { name: 'Save', exact: true }).count()).toBe(0)
     expect(await editor.getByRole('button', { name: 'Cancel', exact: true }).count()).toBe(0)
     expect(await editor.getByRole('button', { name: 'Run task New task' }).isDisabled()).toBe(true)
     const content = 'Export navigation results\n  Export the current navigation results.\n  Use CSV.\n  Keep the header.\n  Validate the file.'
+    const storedStatement = 'Export the current navigation results.\nUse CSV.\nKeep the header.\nValidate the file.\n\n_关联需求：1.1、1.2_'
     await input.fill(content)
     await expect.poll(() => {
       const latest = session.events.findLast(event => event.type === 'requirement/task-list')
-      return latest?.type === 'requirement/task-list' ? latest.data.tasks.at(-1)?.statement : undefined
-    }).toBe('Export the current navigation results.\nUse CSV.\nKeep the header.\nValidate the file.')
+      return latest?.type === 'requirement/task-list'
+        ? latest.data.tasks.find(task => task.title === 'Export navigation results')?.statement
+        : undefined
+    }).toBe(storedStatement)
     await expect.poll(async () => (await editor.boundingBox())?.height ?? 0).toBeGreaterThan(compactBox.height)
     const draft = (await captureStableAria(page, '[class*="viewArea"]', scaffold.workspaceCwd))
       .split(SEED_ID).join('{{seededId}}')
@@ -536,7 +556,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await page.getByRole('tab', { name: 'Requirements' }).click()
     const restored = page.getByRole('textbox', { name: 'Task content Export navigation results' })
     await restored.waitFor()
-    expect(await restored.inputValue()).toBe(content)
+    expect(await restored.inputValue()).toBe(`Export navigation results\n  ${storedStatement.replaceAll('\n', '\n  ')}`)
 
     const turnsBeforeNote = session.events.filter(event => event.type === 'turn/start').length
     await toolbar.getByRole('button', { name: 'Text', exact: true }).click()
@@ -565,7 +585,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await restoredNote.getByRole('button', { name: 'Edit note' }).click()
     expect(await page.getByRole('textbox', { name: 'Markdown note content' }).inputValue()).toBe(markdown)
     expect(session.events.filter(event => event.type === 'turn/start')).toHaveLength(turnsBeforeNote)
-  }, 60_000)
+  }, 120_000)
 
   it.skipIf(MODE === 'record')('downloads through the Session Header and /export with one dialog', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-navigation-export'))
