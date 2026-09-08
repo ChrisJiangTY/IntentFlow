@@ -196,6 +196,7 @@ describe('session requirements document pipeline', () => {
     const prompt = followup.mock.calls[0]?.[0]?.content[0]
     expect(prompt?.type === 'text' ? prompt.text : '').toContain('不要进入 Plan 模式')
     expect(prompt?.type === 'text' ? prompt.text : '').toContain('不得包含术语表')
+    expect(prompt?.type === 'text' ? prompt.text : '').toContain('当前 Session 的历史需求图谱索引')
   })
 
   it('records a clarification answer and commits a validated Chinese document', async () => {
@@ -217,13 +218,25 @@ describe('session requirements document pipeline', () => {
         options: [{ label: '仅当前页面' }, { label: '整个站点' }],
       }],
     }, exec(agent))
-    await submit.execute({ summary: '创建可验证页面', markdown: documentMarkdown }, exec(agent))
+    await submit.execute({
+      summary: '创建可验证页面',
+      markdown: documentMarkdown,
+      relations: [],
+    }, exec(agent))
 
     expect(ask).toHaveBeenCalledOnce()
     expect(session.events.filter(event => event.type === 'requirement/clarification').map(event => event.data.status))
       .toEqual(['asked', 'answered'])
     expect(session.events.findLast(event => event.type === 'requirement/document')).toMatchObject({
       data: { summary: '创建可验证页面', markdown: documentMarkdown, valid: true },
+    })
+    expect(session.events.findLast(event => event.type === 'requirement/graph')).toMatchObject({
+      data: {
+        revision: 1,
+        documentRevision: 1,
+        nodes: [{ requirementId: '1', title: '页面结构', acceptanceRefs: ['1.1', '1.2'] }],
+        relations: [],
+      },
     })
     expect(session.events.findLast(event => event.type === 'requirement/round')).toMatchObject({
       data: { status: 'document-ready' },
@@ -252,7 +265,7 @@ describe('session requirements document pipeline', () => {
     await clarification.execute(questions, exec(agent))
     await clarification.execute(questions, exec(agent))
     await expect(clarification.execute(questions, exec(agent))).rejects.toThrow('limited to 2 batches')
-    await expect(submit.execute({ summary: '创建可验证页面', markdown: documentMarkdown }, exec(agent)))
+    await expect(submit.execute({ summary: '创建可验证页面', markdown: documentMarkdown, relations: [] }, exec(agent)))
       .rejects.toThrow('no Requirement Notebook round is ready')
 
     expect(ask).toHaveBeenCalledTimes(2)

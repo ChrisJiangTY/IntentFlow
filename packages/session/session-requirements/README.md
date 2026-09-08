@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-session-requirements` turns one raw product request into a replayable Chinese requirement document before implementation begins. The main Agent asks only material clarification questions, then generates an editable document and, on explicit user action, an ordered set of executable Task blocks. Every Task passes an independent review before execution advances, and a mandatory last Final Test produces the round validation.
+`dsh-session-requirements` turns one raw product request into a replayable Chinese requirement document before implementation begins. The main Agent asks only material clarification questions, then generates an editable document and its requirement graph. On explicit user action, it creates ordered executable Task blocks whose reviewed progress updates the graph. A mandatory last Final Test produces the round validation.
 
 ## Table of Contents
 
@@ -29,7 +29,7 @@ Mount the plugin where `agents`, `subagents`, `tools`, and `userQuestions` are a
 
 `startRound` preserves the raw input in `requirement/round` and queues a main-Agent analysis turn. The prompt requires read-only repository inspection before questions. When a decision belongs to the user and materially changes the result, the Agent calls `clarify_requirements`; the answers and the original questions are durable `requirement/clarification` events. The Agent can ask another batch within the configured limit. It otherwise calls `submit_requirements_document` without entering Plan mode or modifying files.
 
-The submitted document is Chinese Markdown with `# 需求文档`, `## 简介`, and `## 需求`, followed by consecutively numbered requirements, user stories, and acceptance criteria. The host validates this structure before marking the document usable. The browser may append a new document revision through `editDocument`; an invalid revision remains visible but cannot generate Tasks. Editing is blocked while task generation runs and after any Task execution begins.
+The submitted document is Chinese Markdown with `# 需求文档`, `## 简介`, and `## 需求`, followed by consecutively numbered requirements, user stories, and acceptance criteria. `submit_requirements_document` also submits real dependencies within the current document and explicit refinement or supersession links to earlier rounds in the same Session. The host validates the document, graph endpoints, and dependency cycles before appending `requirement/document` and `requirement/graph`. The browser may append a new document revision through `editDocument`; a valid edit rebuilds graph nodes and retains only relations whose endpoints still exist, while an invalid revision remains visible, publishes no current graph, and cannot generate Tasks. Editing is blocked while task generation runs and after any Task execution begins.
 
 `generateTasks` queues a read-only main-Agent turn against one exact valid document revision. `submit_requirement_tasks` commits at least one implementation or checkpoint block plus one separate Final Test block. Each block contains all child checklist items for one top-level phase, uses Chinese `_关联需求：…_` references to real acceptance criteria, and is mandatory. The host places Final Test last and rejects a list that does not cover every acceptance criterion.
 
@@ -39,6 +39,8 @@ Each completed Task turn enters `reviewing`. The independent reviewer must retur
 
 Text and comment cells remain durable note events. Passive Markdown uses `dispatch: false`; explicit Agent assistance uses `dispatch: true` and follows up in the main conversation. The existing `commit` Remote remains available for version-addressed requirement records used by the historical-review model.
 
+The optional Session projection service folds each Session's graph, current Task list, and final validation into the client-visible `requirementGraph` value. During historical replay it deterministically extracts nodes from valid requirement documents that predate graph events, with an empty relation list, so existing Notebook rounds appear immediately after upgrade. A node is pending before mapped work completes, in progress while mapped work runs or only some acceptance criteria are complete, verified when reviewed non-final Tasks cover all of its acceptance criteria, and blocked after a mapped failure or recorded regression. The standard Session-list projection carries this value for both open and unopened Sessions so a browser can combine it by Workspace without reading foreign logs.
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -47,7 +49,7 @@ Text and comment cells remain durable note events. Passive Markdown uses `dispat
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The package registers three model tools for clarification, document submission, and task submission. Append-only round, clarification, document, task-list, task-execution, Run All, note, review, and validation events let the browser rebuild the Notebook without storing product state in React. Document and Task-list revisions are independent so a document edit invalidates older generated Tasks without rewriting history.
+The package registers three model tools for clarification, document submission, and task submission. Append-only round, clarification, document, graph, task-list, task-execution, Run All, note, review, and validation events let the browser rebuild the Notebook without storing product state in React. Document, graph, and Task-list revisions remain explicit, so a document edit invalidates older generated Tasks and their current graph without rewriting history.
 
 Task execution joins the queued message to its Agent turn. Turn completion records output and starts the independent reviewer; only the reviewer settlement writes the Task terminal state and decides whether ordered execution continues. The in-memory Run All controller owns only the live continuation and stop request, while every user-visible state transition is durable.
 
@@ -74,7 +76,7 @@ The reviewer child is limited to the first delegation level and receives an expl
 
 #### What the model sees
 
-The first main-Agent prompt contains the raw request, the clarification policy, the exact Chinese document structure, and prohibitions against Plan mode, file edits, and early task generation. A generation prompt contains the accepted document revision and the required Task and Final Test formats. A Task prompt names exactly one Task and its linked acceptance criteria. The reviewer receives the prior requirement snapshot, current Notebook events, parent-turn evidence, and read-only workspace instructions.
+The first main-Agent prompt contains the raw request, the clarification policy, the exact Chinese document structure, the current Session's prior graph index, and prohibitions against Plan mode, file edits, and early task generation. The Agent submits dependencies plus explicit refinement or supersession links with the document and uses an empty relation list when no relation exists. A generation prompt contains the accepted document revision and the required Task and Final Test formats. A Task prompt names exactly one Task and its linked acceptance criteria. The reviewer receives the prior requirement snapshot, current Notebook events including graph facts, parent-turn evidence, and read-only workspace instructions.
 
 #### Token effect
 
@@ -92,6 +94,7 @@ Main prompts follow normal provider caching rules. Document revisions, generated
 - **Task generation is revision-locked** — the document cannot change while a generation turn is active; retry or edit after that turn settles.
 - **Task output is bounded** — a task-execution event stores a bounded final assistant response; the complete tool transcript remains in Trajectory and the Session log.
 - **Review failure stops progress** — a missing, invalid, unavailable, or blocking reviewer result fails the current Task and requires an explicit retry.
+- **Graph relations are Session-local** — document authoring can reference earlier rounds from the same Session, and the browser can aggregate those graphs by Workspace; cross-Session relation authoring is not supported.
 
 <a id="dev-note"></a>
 ### Dev Note
@@ -99,6 +102,6 @@ Main prompts follow normal provider caching rules. Document revisions, generated
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-See the [requirement document before tasks Agent Note](../../../.agents/notes/implemented/feature/2026-09-06-requirement-document-before-tasks.md).
+See the [Workspace requirement knowledge graph Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.md).
 
 </details>

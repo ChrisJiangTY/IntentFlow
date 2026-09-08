@@ -4,6 +4,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { RequirementGraphProjection } from '@deepseek-ai/dsh-session-requirements/client'
 import { RequirementsView } from '../src/client/RequirementsView.tsx'
 import type {
   RequirementClarificationNode,
@@ -25,6 +28,59 @@ afterEach(cleanup)
 const roundId = 'ROUND-01' as never
 const taskId = 'TASK-01' as never
 const secondTaskId = 'TASK-02' as never
+const sessionId = 'SESSION-01' as never
+const workspaceId = 'WORKSPACE-01' as never
+
+function graphProjection(title = 'Notebook 需求节点'): RequirementGraphProjection {
+  return {
+    rounds: [{
+      roundId,
+      round: 1,
+      summary: '实现 Notebook 需求流',
+      documentRevision: 1,
+      nodes: [{ requirementId: '1', title, acceptanceRefs: ['1.1'], taskIds: [taskId], status: 'pending' }],
+      relations: [],
+    }],
+  }
+}
+
+function sessionList(projection: RequirementGraphProjection = graphProjection()): SessionListState {
+  return {
+    ids: [sessionId],
+    byId: {
+      [sessionId]: {
+        id: sessionId,
+        displayTitle: 'Notebook 需求流',
+        running: false,
+        blank: false,
+        updatedAt: 1,
+        projectionValues: { requirementGraph: projection },
+      },
+    },
+    current: sessionId,
+    phase: 'ready',
+    subagentsByParent: {},
+    jobsBySession: {},
+    currentAddress: undefined,
+  }
+}
+
+function workspaceSnapshot(sessionIds = [sessionId]): WorkspaceSnapshot {
+  return {
+    items: [{
+      workspaceId,
+      path: '/tmp/intentflow',
+      title: 'IntentFlow',
+      sessionIds,
+      createdAt: '2026-09-08T00:00:00.000Z',
+      updatedAt: '2026-09-08T00:00:00.000Z',
+    }],
+    archivedSessionIds: [],
+    state: 'idle',
+    phase: 'ready',
+    error: null,
+  }
+}
 
 function base<T>(kind: string, data: T, seq: number): { key: string; kind: string; id: string; target: 'requirements'; anchorSeq: number; time: number; data: T } {
   return { key: `${kind}:${seq}`, kind, id: String(seq), target: 'requirements', anchorSeq: seq, time: seq * 10, data }
@@ -93,8 +149,13 @@ function props(
   value: RequirementsSnapshot = snapshot(),
 ): Parameters<typeof RequirementsView>[0] {
   const useRequirements = <Selected,>(selector: (current: RequirementsSnapshot) => Selected): Selected => selector(value)
+  const sessions = sessionList()
+  const workspaces = workspaceSnapshot()
   const action = <T,>(result: T): Promise<{ readonly ok: true; readonly value: T }> => Promise.resolve({ ok: true, value: result })
   return {
+    sessionId,
+    useSessions: <Selected,>(selector: (current: SessionListState) => Selected): Selected => selector(sessions),
+    useWorkspaces: <Selected,>(selector: (current: WorkspaceSnapshot) => Selected): Selected => selector(workspaces),
     useRequirements,
     startRound: () => action({ roundId, round: 1, eventSeq: 1 }),
     editDocument: vi.fn(() => action({ roundId, documentRevision: 2, eventSeq: 6 })),
@@ -109,6 +170,7 @@ function props(
     addNote: vi.fn(() => action({ roundId, noteId: 'NOTE-01', eventSeq: 6 })),
     editNote: vi.fn(() => action({ roundId, noteId: 'NOTE-01', eventSeq: 7 })),
     requestReview: () => Promise.resolve(undefined),
+    openSession: vi.fn(),
     initialLanguage: 'zh',
     t,
     viewRequest: null,
@@ -156,6 +218,12 @@ function reviewSnapshot(): RequirementsSnapshot {
 }
 
 describe('RequirementsView Notebook', () => {
+  it('owns Notebook scrolling while the shared composer overlays the view', () => {
+    const { container } = render(<RequirementsView {...props()} />)
+    expect(container.querySelector('[data-conversation-composer-overlay]')).toBeTruthy()
+    expect(container.querySelector('[data-notebook-scroll]')).toBeTruthy()
+  })
+
   it('renders the requirement-to-validation order with top-only add controls', () => {
     const { container } = render(<RequirementsView {...props()} />)
 
@@ -376,7 +444,7 @@ describe('RequirementsView Notebook', () => {
     const toolbar = screen.getByRole('toolbar', { name: '需求视图工具栏' })
     const notebook = container.querySelector('[data-notebook-scroll]')
     expect(toolbar.getAttribute('data-sticky-toolbar')).toBe('true')
-    expect(toolbar.parentElement).toBe(notebook?.parentElement)
+    expect(toolbar.parentElement).toBe(notebook?.parentElement?.parentElement)
     expect(screen.queryByRole('group', { name: '需求内容语言' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '全部运行' }))
     await waitFor(() => { expect(runAll).toHaveBeenCalledWith({ roundId }) })
@@ -508,8 +576,8 @@ describe('RequirementsView Notebook', () => {
     expect(container.querySelector('[data-cell="validation"][data-status="regression"]')).toBeTruthy()
   })
 
-  it('shows review sources, files, gaps, history, and a requirement-code relation graph on demand', () => {
-    render(<RequirementsView {...props({}, reviewSnapshot())} />)
+  it('shows review evidence and opens the Workspace requirement graph on demand', () => {
+    const { container } = render(<RequirementsView {...props({}, reviewSnapshot())} />)
     let cell = selectTask()
     fireEvent.click(within(cell).getByRole('button', { name: '更多单元格操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '查看详情与证据' }))
@@ -524,10 +592,61 @@ describe('RequirementsView Notebook', () => {
     expect(screen.getByText('Agent 第 2 轮审核')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '关闭详情' }))
 
+    fireEvent.click(screen.getByRole('button', { name: '打开或关闭需求知识图谱' }))
+    expect(screen.queryByRole('complementary', { name: 'Workspace 需求知识图谱' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '命令' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '查看需求与代码关系' }))
-    expect(screen.getByRole('complementary', { name: 'Notebook 详情' })).toBeTruthy()
-    expect(screen.getByRole('region', { name: '需求与代码关系图' })).toBeTruthy()
-    expect(screen.getByText('R1')).toBeTruthy()
+    fireEvent.click(screen.getByRole('menuitem', { name: '打开需求知识图谱' }))
+    const graph = screen.getByRole('complementary', { name: 'Workspace 需求知识图谱' })
+    expect(within(graph).getByText('IntentFlow')).toBeTruthy()
+    expect(within(graph).getByText('当前 Session')).toBeTruthy()
+    const node = within(graph).getByRole('button', { name: /需求 1：Notebook 需求节点/u })
+    expect(node.dataset.status).toBe('pending')
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+    fireEvent.click(node)
+    expect(container.querySelector('[data-task-id="TASK-01"]')?.getAttribute('data-selected')).toBe('true')
+  })
+
+  it('opens a different Session when its Workspace graph node is selected', () => {
+    const otherSessionId = 'SESSION-02' as never
+    const otherRoundId = 'ROUND-02' as never
+    const sessions = sessionList()
+    const withOther: SessionListState = {
+      ...sessions,
+      ids: [sessionId, otherSessionId],
+      byId: {
+        ...sessions.byId,
+        [otherSessionId]: {
+          id: otherSessionId,
+          displayTitle: '第二个需求会话',
+          running: false,
+          blank: false,
+          updatedAt: 2,
+          projectionValues: {
+            requirementGraph: {
+              rounds: [{
+                roundId: otherRoundId,
+                round: 1,
+                summary: '跨会话需求',
+                documentRevision: 1,
+                nodes: [{
+                  requirementId: '1', title: '跨会话节点', acceptanceRefs: ['1.1'], taskIds: [], status: 'pending',
+                }],
+                relations: [],
+              }],
+            },
+          },
+        },
+      },
+    }
+    const workspaces = workspaceSnapshot([sessionId, otherSessionId])
+    const openSession = vi.fn()
+    render(<RequirementsView {...props({
+      openSession,
+      useSessions: <Selected,>(selector: (current: SessionListState) => Selected): Selected => selector(withOther),
+      useWorkspaces: <Selected,>(selector: (current: WorkspaceSnapshot) => Selected): Selected => selector(workspaces),
+    })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /需求 1：跨会话节点/u }))
+    expect(openSession).toHaveBeenCalledWith(otherSessionId)
   })
 })

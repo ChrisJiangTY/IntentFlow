@@ -586,7 +586,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/clarification': RequirementClarificationEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:515`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:580`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementdocument--log-only"></a>
 
@@ -597,7 +597,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/document': RequirementDocumentEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:517`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:582`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementexecution--log-only"></a>
 
@@ -608,7 +608,18 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/execution': RequirementExecutionEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:506`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:571`](../packages/session/session-requirements/src/types.ts)
+
+<a id="requirementgraph--log-only"></a>
+
+#### `requirement/graph` — log-only
+
+```ts persistence-catalog
+/** Complete requirement knowledge graph for one valid document revision. */
+'requirement/graph': RequirementGraphEvent
+```
+
+来源：[`packages/session/session-requirements/src/types.ts:584`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementnote--log-only"></a>
 
@@ -619,7 +630,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/note': RequirementNoteEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:525`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:592`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementreview--log-only"></a>
 
@@ -633,7 +644,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/review': RequirementReviewEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:511`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:576`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementround--log-only"></a>
 
@@ -644,7 +655,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/round': RequirementRoundEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:513`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:578`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementrun-all--log-only"></a>
 
@@ -655,7 +666,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/run-all': RequirementRunAllEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:523`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:590`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementtask-execution--log-only"></a>
 
@@ -666,7 +677,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/task-execution': RequirementTaskExecutionEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:521`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:588`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementtask-list--log-only"></a>
 
@@ -677,7 +688,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/task-list': RequirementTaskListEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:519`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:586`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementuser-version--log-only"></a>
 
@@ -691,7 +702,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/user-version': RequirementUserVersionEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:504`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:569`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementvalidation--log-only"></a>
 
@@ -702,7 +713,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'requirement/validation': RequirementValidationEvent
 ```
 
-来源：[`packages/session/session-requirements/src/types.ts:527`](../packages/session/session-requirements/src/types.ts)
+来源：[`packages/session/session-requirements/src/types.ts:594`](../packages/session/session-requirements/src/types.ts)
 
 ### `sandbox/*`
 

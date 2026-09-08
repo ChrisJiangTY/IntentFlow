@@ -108,5 +108,6 @@ describe('real Loader composition', () => {
     const prompt = followup.mock.calls[0]?.[0]?.content[0]
     expect(prompt?.type === 'text' ? prompt.text : '').toContain('判断是否存在必须由用户决定的关键歧义')
     expect(prompt?.type === 'text' ? prompt.text : '').toContain('不要进入 Plan 模式')
+    expect(prompt?.type === 'text' ? prompt.text : '').toContain('当前 Session 的历史需求图谱索引')
   })
 })

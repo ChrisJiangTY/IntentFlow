@@ -43,6 +43,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'requirement/clarification',
   'requirement/document',
   'requirement/execution',
+  'requirement/graph',
   'requirement/note',
   'requirement/review',
   'requirement/round',

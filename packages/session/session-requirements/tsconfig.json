@@ -7,6 +7,7 @@
     { "path": "../../../vendor/schemastery" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../core/session" },
+    { "path": "../session-projection" },
     { "path": "../../util/brand" },
     { "path": "../../core/agent" },
     { "path": "../../core/tools" },

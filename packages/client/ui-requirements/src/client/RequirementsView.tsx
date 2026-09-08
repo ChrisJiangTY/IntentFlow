@@ -9,6 +9,7 @@ import {
 } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   IconChecklistOutline14,
   IconChevronDownOutline14,
@@ -61,6 +62,8 @@ import type { RequirementsKey } from './locales.ts'
 import css from './RequirementsView.module.css'
 import { AutoGrowTextarea } from './AutoGrowTextarea.tsx'
 import { MarkdownNoteCell } from './MarkdownNoteCell.tsx'
+import { RequirementGraphPanel } from './RequirementGraphPanel.tsx'
+import { workspaceRequirementGraph, type WorkspaceRequirementNode } from './knowledge-graph.ts'
 
 /** Result returned after one structured Notebook action. */
 export type RequirementActionOutcome<T> =
@@ -97,6 +100,8 @@ export interface RequirementsViewInjected {
   editNote: (request: RequirementNoteEditRequest) => Promise<RequirementActionOutcome<RequirementNoteResult>>
   /** Dispatch an explicit independent review. */
   requestReview: () => Promise<string | undefined>
+  /** Navigate to another Session represented in the current Workspace graph. */
+  openSession: (sessionId: SessionId) => void
   /** Initial content language derived from the active product locale. */
   readonly initialLanguage: RequirementContentLanguage
 }
@@ -129,7 +134,7 @@ interface DocumentDraft {
   error?: string
 }
 
-type InspectorMode = 'details' | 'history' | 'relations'
+type InspectorMode = 'details' | 'history'
 
 const TASK_STATEMENT_INDENT = '  '
 
@@ -199,6 +204,9 @@ function taskStatusKey(status: RequirementTaskListNode['data']['tasks'][number][
  * @returns the complete requirements Notebook view.
  */
 export function RequirementsView({
+  sessionId,
+  useSessions,
+  useWorkspaces,
   useRequirements,
   editDocument,
   generateTasks,
@@ -212,11 +220,19 @@ export function RequirementsView({
   addNote,
   editNote,
   requestReview,
+  openSession,
   openView,
   initialLanguage,
   t,
 }: ConvViewProps & InjectFace<RequirementsViewInjected> & PropsLocale<typeof NS>) {
   const snapshot = useRequirements(value => value)
+  const sessionSnapshot = useSessions(value => value)
+  const workspaceSnapshot = useWorkspaces(value => value)
+  const knowledgeGraph = useMemo(
+    () => workspaceRequirementGraph(sessionSnapshot, workspaceSnapshot, sessionId),
+    [sessionId, sessionSnapshot, workspaceSnapshot],
+  )
+  const rootRef = useRef<HTMLDivElement>(null)
   const [language, setLanguage] = useState<RequirementContentLanguage>(initialLanguage)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [collapsedOutputs, setCollapsedOutputs] = useState<Set<string>>(new Set())
@@ -234,6 +250,7 @@ export function RequirementsView({
   const [moreOpen, setMoreOpen] = useState<string | undefined>()
   const [zoom, setZoom] = useState(1)
   const [actionError, setActionError] = useState<string | undefined>()
+  const [graphOpen, setGraphOpen] = useState(true)
 
   const rounds = useMemo(() => latestBy(snapshot.rounds, node => String(node.data.roundId)), [snapshot.rounds])
   const documents = useMemo(() => latestBy(snapshot.documents, node => String(node.data.roundId)), [snapshot.documents])
@@ -468,6 +485,28 @@ export function RequirementsView({
     setInspector(mode)
   }
 
+  const revealGraphNode = (node: WorkspaceRequirementNode): void => {
+    if (node.sessionId !== sessionId) {
+      openSession(node.sessionId)
+      return
+    }
+    const roundKey = String(node.roundId)
+    const mappedTask = taskLists.get(roundKey)?.data.tasks.find(task => node.taskIds.includes(task.id))
+    setCollapsed(current => new Set([...current].filter(id => id !== roundKey)))
+    setSelected(mappedTask === undefined
+      ? { roundId: node.roundId }
+      : { roundId: node.roundId, taskId: mappedTask.id })
+    queueMicrotask(() => {
+      const roundElement = [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-round-id]') ?? [])]
+        .find(element => element.dataset.roundId === roundKey)
+      const target = mappedTask === undefined
+        ? roundElement?.querySelector<HTMLElement>('[data-cell="document"]')
+        : [...(roundElement?.querySelectorAll<HTMLElement>('[data-task-id]') ?? [])]
+          .find(element => element.dataset.taskId === String(mappedTask.id))
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+  }
+
   const beginTaskEdit = (
     roundId: RequirementRoundId,
     task: RequirementTaskListNode['data']['tasks'][number],
@@ -505,7 +544,7 @@ export function RequirementsView({
             <span className={css.cellMenu} role="menu">
               <button type="button" role="menuitem" onClick={() => { openInspector('details', { roundId, taskId }) }}>{t('more.details')}</button>
               <button type="button" role="menuitem" onClick={() => { openInspector('history', { roundId, taskId }) }}>{t('more.history')}</button>
-              <button type="button" role="menuitem" onClick={() => { openInspector('relations', { roundId, taskId }) }}><IconLinkOutline14 size={12} />{t('more.relations')}</button>
+              <button type="button" role="menuitem" onClick={() => { setMoreOpen(undefined); setGraphOpen(true) }}><IconLinkOutline14 size={12} />{t('more.relations')}</button>
               <button type="button" role="menuitem" onClick={() => { setMoreOpen(undefined); void review() }}><IconRefreshOutline14 size={12} />{t('toolbar.review')}</button>
               {task?.status === 'pending' && task.kind !== 'final-test' && !listBusy && <button className={css.destructiveMenuItem} type="button" role="menuitem" onClick={() => {
                 setMoreOpen(undefined)
@@ -552,6 +591,7 @@ export function RequirementsView({
         <article
           className={`${css.cell} ${isSelected ? css.selected : ''} ${taskRegression ? css.regression : ''} ${taskFailure ? css.taskFailure : ''} ${taskWithdrawn ? css.withdrawn : ''}`}
           data-cell="task"
+          data-task-id={String(task.id)}
           data-selected={isSelected || undefined}
           data-status={taskRegression ? 'regression' : task.status}
           onClick={() => { beginTaskEdit(roundId, task) }}
@@ -673,7 +713,7 @@ export function RequirementsView({
     const roundStatusKey = `round.status.${round.data.status}` as RequirementsKey
     const validationStatusKey = validation === undefined ? undefined : `validation.${validation.data.status}` as RequirementsKey
     return (
-      <section className={css.round} key={String(roundId)}>
+      <section className={css.round} data-round-id={String(roundId)} key={String(roundId)}>
         <header className={css.roundHeading}>
           <button className={css.roundToggle} type="button" aria-label={t(isCollapsed ? 'round.expand' : 'round.collapse')} onClick={() => { toggleRound(String(roundId)) }}>
             {isCollapsed ? <IconChevronDownOutline14 size={14} /> : <IconChevronUpOutline14 size={14} />}
@@ -779,12 +819,10 @@ export function RequirementsView({
   const inspectionRound = selectedRound ?? latestRound
   const inspectorTitle: RequirementsKey = inspector === 'history'
     ? 'details.historyTitle'
-    : inspector === 'relations'
-      ? 'details.relationsTitle'
-      : 'details.title'
+    : 'details.title'
 
   return (
-    <div className={css.root}>
+    <div className={css.root} data-conversation-composer-overlay="" ref={rootRef}>
       <div className={css.toolbar} role="toolbar" aria-label={t('toolbar.aria')} data-sticky-toolbar="true">
         <div className={css.commandMenu}>
           <button className={css.commandButton} type="button" aria-expanded={commandOpen} onClick={() => { setCommandOpen(value => !value) }}><IconSearchOutline16 size={12} />{t('toolbar.command')}</button>
@@ -792,7 +830,7 @@ export function RequirementsView({
             <button type="button" role="menuitem" disabled={reviewing} onClick={() => { setCommandOpen(false); void review() }}><IconRefreshOutline14 size={12} />{t('toolbar.review')}</button>
             <button type="button" role="menuitem" onClick={() => { setCollapsed(new Set(orderedRounds.map(round => String(round.data.roundId)))); setCommandOpen(false) }}>{t('toolbar.collapseAll')}</button>
             <button type="button" role="menuitem" onClick={() => { setCollapsed(new Set()); setCommandOpen(false) }}>{t('toolbar.expandAll')}</button>
-            <button type="button" role="menuitem" onClick={() => { openInspector('relations') }}><IconLinkOutline14 size={12} />{t('more.relations')}</button>
+            <button type="button" role="menuitem" onClick={() => { setGraphOpen(true); setCommandOpen(false) }}><IconLinkOutline14 size={12} />{t('more.relations')}</button>
             <button type="button" role="menuitem" onClick={() => { setLanguage('zh'); setCommandOpen(false) }}>{t('command.useZh')}</button>
             <button type="button" role="menuitem" onClick={() => { setLanguage('en'); setCommandOpen(false) }}>{t('command.useEn')}</button>
           </div>}
@@ -809,28 +847,46 @@ export function RequirementsView({
         {activeRunAll !== undefined
           ? <button className={css.runAllButton} type="button" disabled={activeRunAll.data.status === 'stopping' || running !== undefined} onClick={() => { void stopEverything(activeRunAll.data.roundId) }}>{t(activeRunAll.data.status === 'stopping' ? 'toolbar.stopping' : 'toolbar.stopRunAll')}</button>
           : <button className={css.runAllButton} type="button" disabled={latestRound === undefined || currentLatestTaskList === undefined || running !== undefined} onClick={() => { if (latestRound !== undefined) void runEverything(latestRound.data.roundId) }}><IconPlayOutline16 size={13} />{t('toolbar.runAll')}</button>}
+        <button
+          className={css.graphToggle}
+          type="button"
+          aria-pressed={graphOpen}
+          aria-label={t('graph.toggle')}
+          onClick={() => { setGraphOpen(value => !value) }}
+        ><IconLinkOutline14 size={13} />{t('graph.title')}</button>
       </div>
       {actionError !== undefined && <div className={css.actionError}>{t('toolbar.actionFailed')} · {actionError}</div>}
-      {orderedRounds.length === 0
-        ? (
-          <div className={css.empty}>
-            <div className={css.emptyMark}><IconSparkle16 size={18} /></div>
-            <h2>{t('empty.title')}</h2>
-            <p>{t('empty.detail')}</p>
-          </div>
-        )
-        : (
-          <main className={css.notebook} data-notebook-scroll style={{ '--notebook-scale': zoom } as CSSProperties}>
-            <div className={css.notebookCanvas}>{orderedRounds.map(renderRound)}</div>
-            <div className={css.notebookFooter}>
-              <div className={css.zoomControls} role="group" aria-label={t('zoom.aria')}>
-                <button type="button" aria-label={t('zoom.out')} disabled={zoom <= 0.85} onClick={() => { setZoom(value => Math.max(.85, Number((value - .05).toFixed(2)))) }}>−</button>
-                <span>{Math.round(zoom * 100)}%</span>
-                <button type="button" aria-label={t('zoom.in')} disabled={zoom >= 1.2} onClick={() => { setZoom(value => Math.min(1.2, Number((value + .05).toFixed(2)))) }}>＋</button>
-              </div>
+      <div className={css.workspaceBody}>
+        {orderedRounds.length === 0
+          ? (
+            <div className={css.empty}>
+              <div className={css.emptyMark}><IconSparkle16 size={18} /></div>
+              <h2>{t('empty.title')}</h2>
+              <p>{t('empty.detail')}</p>
             </div>
-          </main>
+          )
+          : (
+            <main className={css.notebook} data-notebook-scroll style={{ '--notebook-scale': zoom } as CSSProperties}>
+              <div className={css.notebookCanvas}>{orderedRounds.map(renderRound)}</div>
+              <div className={css.notebookFooter}>
+                <div className={css.zoomControls} role="group" aria-label={t('zoom.aria')}>
+                  <button type="button" aria-label={t('zoom.out')} disabled={zoom <= 0.85} onClick={() => { setZoom(value => Math.max(.85, Number((value - .05).toFixed(2)))) }}>−</button>
+                  <span>{Math.round(zoom * 100)}%</span>
+                  <button type="button" aria-label={t('zoom.in')} disabled={zoom >= 1.2} onClick={() => { setZoom(value => Math.min(1.2, Number((value + .05).toFixed(2)))) }}>＋</button>
+                </div>
+              </div>
+            </main>
+          )}
+        {graphOpen && (
+          <RequirementGraphPanel
+            graph={knowledgeGraph}
+            currentSessionId={sessionId}
+            onClose={() => { setGraphOpen(false) }}
+            onSelect={revealGraphNode}
+            t={t}
+          />
         )}
+      </div>
       {inspector !== undefined && inspectionRound !== undefined && (
         <aside className={css.details} aria-label={t('details.aria')}>
           <div className={css.detailsHeader}><strong>{t(inspectorTitle)}</strong><button type="button" aria-label={t('details.close')} onClick={() => { setInspector(undefined) }}>×</button></div>
@@ -882,18 +938,6 @@ export function RequirementsView({
                       : <p>{reviewNode.data.error.message}</p>}
                   </article>
                 ))}
-              </section>
-            )}
-            {inspector === 'relations' && (
-              <section className={css.relationMap} aria-label={t('details.relationsAria')}>
-                {reviewedRequirements.flatMap(requirement => requirement.code.map(link => (
-                  <div className={css.relationRow} key={`${requirement.id}:${link.path}:${link.startLine ?? ''}`}>
-                    <span className={css.requirementNode}><strong>{requirement.id}</strong>{text(requirement.title)}</span>
-                    <span className={css.relationArrow}>→<small>{link.relation}</small></span>
-                    <span className={css.fileNode}><code>{link.path}</code><small>{text(link.evidence)}</small></span>
-                  </div>
-                )))}
-                {reviewedRequirements.every(requirement => requirement.code.length === 0) && <p>{t('details.noRelations')}</p>}
               </section>
             )}
           </div>

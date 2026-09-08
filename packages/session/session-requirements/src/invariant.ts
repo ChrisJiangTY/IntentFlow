@@ -115,6 +115,54 @@ function validate(event: SessionEvent, fail: InvariantFailure): void {
     }
     return
   }
+  if (event.type === 'requirement/graph') {
+    const data = event.data
+    const version: unknown = data.version
+    if (version !== 1 || !Number.isSafeInteger(data.revision) || data.revision < 1
+      || !Number.isSafeInteger(data.documentRevision) || data.documentRevision < 1
+      || data.roundId.trim() === '' || data.nodes.length === 0) {
+      fail(`requirement/graph at seq ${event.seq} has an invalid payload`)
+    }
+    const nodeIds = new Set<string>()
+    for (const node of data.nodes) {
+      if (!/^\d+$/u.test(node.requirementId) || nodeIds.has(node.requirementId)
+        || node.title.trim() === '' || node.acceptanceRefs.length === 0
+        || node.acceptanceRefs.some(ref => !new RegExp(`^${node.requirementId}\\.\\d+$`, 'u').test(ref))) {
+        fail(`requirement/graph at seq ${event.seq} has an invalid or duplicate node`)
+      }
+      nodeIds.add(node.requirementId)
+    }
+    const relationKeys = new Set<string>()
+    for (const relation of data.relations) {
+      const key = `${relation.source.roundId}:${relation.source.requirementId}:${relation.kind}:${relation.target.roundId}:${relation.target.requirementId}`
+      if (relationKeys.has(key) || relation.source.roundId.trim() === '' || relation.target.roundId.trim() === ''
+        || !/^\d+$/u.test(relation.source.requirementId) || !/^\d+$/u.test(relation.target.requirementId)
+        || relation.source.roundId === relation.target.roundId
+          && relation.source.requirementId === relation.target.requirementId
+        || !['depends-on', 'refines', 'supersedes'].includes(relation.kind) || relation.reason.trim() === '') {
+        fail(`requirement/graph at seq ${event.seq} has an invalid or duplicate relation`)
+      }
+      relationKeys.add(key)
+    }
+    const dependencies = new Map(data.nodes.map(node => [node.requirementId, [] as string[]]))
+    for (const relation of data.relations) {
+      if (relation.kind === 'depends-on') {
+        dependencies.get(relation.source.requirementId)?.push(relation.target.requirementId)
+      }
+    }
+    const visiting = new Set<string>()
+    const visited = new Set<string>()
+    const visit = (requirementId: string): void => {
+      if (visiting.has(requirementId)) fail(`requirement/graph at seq ${event.seq} contains a dependency cycle`)
+      if (visited.has(requirementId)) return
+      visiting.add(requirementId)
+      for (const target of dependencies.get(requirementId) ?? []) visit(target)
+      visiting.delete(requirementId)
+      visited.add(requirementId)
+    }
+    for (const node of data.nodes) visit(node.requirementId)
+    return
+  }
   if (event.type === 'requirement/task-list') {
     const data = event.data
     const version: unknown = data.version
@@ -263,6 +311,8 @@ function validateRelations(events: readonly SessionEvent[], fail: InvariantFailu
   const rounds = new Map<string, number>()
   const clarificationRevisions = new Map<string, number>()
   const documentRevisions = new Map<string, number>()
+  const graphRevisions = new Map<string, number>()
+  const graphNodes = new Map<string, Set<string>>()
   const taskListRevisions = new Map<string, number>()
   const taskExecutionRevisions = new Map<string, number>()
   const taskIds = new Map<string, Set<string>>()
@@ -293,6 +343,27 @@ function validateRelations(events: readonly SessionEvent[], fail: InvariantFailu
         fail(`requirement/document at seq ${event.seq} has no valid round or revision`)
       }
       documentRevisions.set(key, event.data.revision)
+      continue
+    }
+    if (event.type === 'requirement/graph') {
+      const key = String(event.data.roundId)
+      const currentNodeIds = new Set(event.data.nodes.map(node => node.requirementId))
+      const validRelation = event.data.relations.every((relation) => {
+        const sourceRound = String(relation.source.roundId)
+        const targetRound = String(relation.target.roundId)
+        if (sourceRound !== key || !currentNodeIds.has(relation.source.requirementId)) return false
+        if (relation.kind === 'depends-on' && targetRound !== key) return false
+        if (relation.kind !== 'depends-on' && targetRound === key) return false
+        return targetRound === key
+          ? currentNodeIds.has(relation.target.requirementId)
+          : graphNodes.get(targetRound)?.has(relation.target.requirementId) === true
+      })
+      if (!rounds.has(key) || event.data.revision !== (graphRevisions.get(key) ?? 0) + 1
+        || event.data.documentRevision !== documentRevisions.get(key) || !validRelation) {
+        fail(`requirement/graph at seq ${event.seq} has no valid document or relation endpoint`)
+      }
+      graphRevisions.set(key, event.data.revision)
+      graphNodes.set(key, currentNodeIds)
       continue
     }
     if (event.type === 'requirement/task-list') {

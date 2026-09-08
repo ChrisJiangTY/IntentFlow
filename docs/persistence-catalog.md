@@ -584,7 +584,7 @@ Source: [`packages/core/session/src/types.ts:291`](../packages/core/session/src/
 'requirement/clarification': RequirementClarificationEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:515`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:580`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementdocument--log-only"></a>
 
@@ -595,7 +595,7 @@ Source: [`packages/session/session-requirements/src/types.ts:515`](../packages/s
 'requirement/document': RequirementDocumentEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:517`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:582`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementexecution--log-only"></a>
 
@@ -606,7 +606,18 @@ Source: [`packages/session/session-requirements/src/types.ts:517`](../packages/s
 'requirement/execution': RequirementExecutionEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:506`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:571`](../packages/session/session-requirements/src/types.ts)
+
+<a id="requirementgraph--log-only"></a>
+
+#### `requirement/graph` — log-only
+
+```ts persistence-catalog
+/** Complete requirement knowledge graph for one valid document revision. */
+'requirement/graph': RequirementGraphEvent
+```
+
+Source: [`packages/session/session-requirements/src/types.ts:584`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementnote--log-only"></a>
 
@@ -617,7 +628,7 @@ Source: [`packages/session/session-requirements/src/types.ts:506`](../packages/s
 'requirement/note': RequirementNoteEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:525`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:592`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementreview--log-only"></a>
 
@@ -631,7 +642,7 @@ Source: [`packages/session/session-requirements/src/types.ts:525`](../packages/s
 'requirement/review': RequirementReviewEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:511`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:576`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementround--log-only"></a>
 
@@ -642,7 +653,7 @@ Source: [`packages/session/session-requirements/src/types.ts:511`](../packages/s
 'requirement/round': RequirementRoundEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:513`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:578`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementrun-all--log-only"></a>
 
@@ -653,7 +664,7 @@ Source: [`packages/session/session-requirements/src/types.ts:513`](../packages/s
 'requirement/run-all': RequirementRunAllEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:523`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:590`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementtask-execution--log-only"></a>
 
@@ -664,7 +675,7 @@ Source: [`packages/session/session-requirements/src/types.ts:523`](../packages/s
 'requirement/task-execution': RequirementTaskExecutionEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:521`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:588`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementtask-list--log-only"></a>
 
@@ -675,7 +686,7 @@ Source: [`packages/session/session-requirements/src/types.ts:521`](../packages/s
 'requirement/task-list': RequirementTaskListEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:519`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:586`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementuser-version--log-only"></a>
 
@@ -689,7 +700,7 @@ Source: [`packages/session/session-requirements/src/types.ts:519`](../packages/s
 'requirement/user-version': RequirementUserVersionEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:504`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:569`](../packages/session/session-requirements/src/types.ts)
 
 <a id="requirementvalidation--log-only"></a>
 
@@ -700,7 +711,7 @@ Source: [`packages/session/session-requirements/src/types.ts:504`](../packages/s
 'requirement/validation': RequirementValidationEvent
 ```
 
-Source: [`packages/session/session-requirements/src/types.ts:527`](../packages/session/session-requirements/src/types.ts)
+Source: [`packages/session/session-requirements/src/types.ts:594`](../packages/session/session-requirements/src/types.ts)
 
 ### `sandbox/*`
 

@@ -327,6 +327,14 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       valid: true,
       issues: [],
     })
+    session.append('requirement/graph', {
+      version: 1,
+      revision: 1,
+      roundId,
+      documentRevision: 1,
+      nodes: [{ requirementId: '1', title: '导航页面', acceptanceRefs: ['1.1', '1.2'] }],
+      relations: [],
+    })
     session.append('requirement/task-list', {
       version: 1,
       revision: 1,
@@ -472,12 +480,42 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await page.getByRole('complementary', { name: 'Notebook details' }).getByRole('button', { name: 'Close details' }).click()
     await toolbar.getByRole('button', { name: 'Command', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Use English content' }).click()
+    await toolbar.getByRole('button', { name: 'Open or close the requirement knowledge graph' }).click()
+    await expect.poll(() => page.getByRole('complementary', { name: 'Workspace requirement knowledge graph' }).count()).toBe(0)
     await toolbar.getByRole('button', { name: 'Command', exact: true }).click()
-    await page.getByRole('menuitem', { name: 'View requirement-code relations' }).click()
-    const relations = page.getByRole('region', { name: 'Requirement and code relationship graph' })
-    await relations.getByText('nav-a.md', { exact: true }).waitFor()
-    await relations.getByText('nav-b.md', { exact: true }).waitFor()
-    await page.getByRole('complementary', { name: 'Notebook details' }).getByRole('button', { name: 'Close details' }).click()
+    await page.getByRole('menuitem', { name: 'Open requirement knowledge graph' }).click()
+    const graph = page.getByRole('complementary', { name: 'Workspace requirement knowledge graph' })
+    const graphNode = graph.getByRole('button', { name: /requirement 1: 导航页面/u })
+    await graphNode.waitFor()
+    expect(await graphNode.getAttribute('data-status')).toBe('blocked')
+    const wideViewport = page.viewportSize()
+    if (wideViewport === null) throw new Error('requirements viewport geometry is unavailable')
+    const [graphBox, notebookBox, conversationScroll] = await Promise.all([
+      graph.boundingBox(),
+      page.locator('[data-notebook-scroll]').boundingBox(),
+      page.locator('[data-conversation-scroll]').evaluate(node => ({
+        clientHeight: node.clientHeight,
+        scrollHeight: node.scrollHeight,
+      })),
+    ])
+    if (graphBox === null || notebookBox === null) throw new Error('requirement graph geometry is unavailable')
+    expect(Math.abs(graphBox.height - notebookBox.height)).toBeLessThanOrEqual(1)
+    expect(graphBox.y + graphBox.height).toBeLessThanOrEqual(wideViewport.height)
+    expect(conversationScroll.scrollHeight).toBe(conversationScroll.clientHeight)
+
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.waitForTimeout(350)
+    const [narrowGraphBox, narrowToggleBox] = await Promise.all([
+      graph.boundingBox(),
+      toolbar.getByRole('button', { name: 'Open or close the requirement knowledge graph' }).boundingBox(),
+    ])
+    if (narrowGraphBox === null || narrowToggleBox === null) throw new Error('narrow requirement graph geometry is unavailable')
+    expect(narrowGraphBox.x).toBeGreaterThanOrEqual(0)
+    expect(narrowGraphBox.x + narrowGraphBox.width).toBeLessThanOrEqual(375)
+    expect(narrowGraphBox.width).toBeLessThanOrEqual(346)
+    expect(narrowToggleBox.x + narrowToggleBox.width).toBeLessThanOrEqual(375)
+    await page.setViewportSize(wideViewport)
+    await page.waitForTimeout(350)
 
     const failedRail = page.locator('[data-cell="task"][data-status="failed"] [class*="statusRail"]')
     expect(await failedRail.evaluate(node => getComputedStyle(node).backgroundColor)).toBe('rgb(235, 148, 13)')

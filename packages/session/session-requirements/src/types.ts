@@ -262,6 +262,71 @@ export interface RequirementDocumentEvent {
   readonly issues: readonly string[]
 }
 
+/** Relationship between two requirement-document nodes. */
+export type RequirementGraphRelationKind = 'depends-on' | 'refines' | 'supersedes'
+
+/** One requirement node addressed inside a Session's Notebook history. */
+export interface RequirementGraphNodeRef {
+  readonly roundId: RequirementRoundId
+  /** One-based top-level requirement number from the document. */
+  readonly requirementId: string
+}
+
+/** One top-level requirement and every acceptance criterion it owns. */
+export interface RequirementGraphNode {
+  /** One-based top-level requirement number from the document. */
+  readonly requirementId: string
+  readonly title: string
+  /** Acceptance criteria such as `1.1`; the list is non-empty and document ordered. */
+  readonly acceptanceRefs: readonly string[]
+}
+
+/** One directed dependency or requirement-history relationship. */
+export interface RequirementGraphRelation {
+  /** New or dependent requirement. */
+  readonly source: RequirementGraphNodeRef
+  /** Prior or prerequisite requirement. */
+  readonly target: RequirementGraphNodeRef
+  readonly kind: RequirementGraphRelationKind
+  /** Concise Chinese explanation displayed on the graph. */
+  readonly reason: string
+}
+
+/** Complete knowledge graph for one valid requirement-document revision. */
+export interface RequirementGraphEvent {
+  readonly version: 1
+  readonly revision: number
+  readonly roundId: RequirementRoundId
+  readonly documentRevision: number
+  readonly nodes: readonly RequirementGraphNode[]
+  readonly relations: readonly RequirementGraphRelation[]
+}
+
+/** User-facing implementation state derived from mapped Tasks and validation. */
+export type RequirementGraphNodeStatus = 'pending' | 'in-progress' | 'verified' | 'blocked'
+
+/** One requirement node in the Session-list projection delivered to clients. */
+export interface RequirementGraphProjectedNode extends RequirementGraphNode {
+  readonly status: RequirementGraphNodeStatus
+  /** Current non-withdrawn Tasks mapped to this requirement, in Task order. */
+  readonly taskIds: readonly RequirementTaskId[]
+}
+
+/** One historical Notebook round in the Session-list requirement graph projection. */
+export interface RequirementGraphRoundProjection {
+  readonly roundId: RequirementRoundId
+  readonly round: number
+  readonly summary: string
+  readonly documentRevision: number
+  readonly nodes: readonly RequirementGraphProjectedNode[]
+  readonly relations: readonly RequirementGraphRelation[]
+}
+
+/** Complete bounded requirement graph projection for one Session. */
+export interface RequirementGraphProjection {
+  readonly rounds: readonly RequirementGraphRoundProjection[]
+}
+
 /** Semantic role of one top-level executable task block. */
 export type RequirementTaskKind = 'implementation' | 'checkpoint' | 'final-test'
 
@@ -515,6 +580,8 @@ declare module '@deepseek-ai/dsh-session/types' {
     'requirement/clarification': RequirementClarificationEvent
     /** Editable requirement document produced after clarification. */
     'requirement/document': RequirementDocumentEvent
+    /** Complete requirement knowledge graph for one valid document revision. */
+    'requirement/graph': RequirementGraphEvent
     /** Whole task list generated from the current requirement document. */
     'requirement/task-list': RequirementTaskListEvent
     /** Execution status for one Notebook task. */
@@ -525,5 +592,12 @@ declare module '@deepseek-ai/dsh-session/types' {
     'requirement/note': RequirementNoteEvent
     /** Independent final validation and confirmed historical regressions. */
     'requirement/validation': RequirementValidationEvent
+  }
+}
+
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionMap {
+    /** Requirement knowledge graph and Task-derived node states for one Session. */
+    requirementGraph: RequirementGraphProjection
   }
 }

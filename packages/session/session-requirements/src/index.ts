@@ -8,6 +8,7 @@ import s from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-projection'
 import { defineTool, type ObjectJsonSchema, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { SubagentRun } from '@deepseek-ai/dsh-subagent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -22,6 +23,9 @@ import type {
   RequirementDocumentActionResult,
   RequirementDocumentEditRequest,
   RequirementDocumentEvent,
+  RequirementGraphEvent,
+  RequirementGraphNode,
+  RequirementGraphRelation,
   RequirementExecutionEvent,
   RequirementId,
   RequirementNoteRequest,
@@ -56,6 +60,8 @@ import type {
   RequirementText,
   RequirementUserVersionEvent,
 } from './types.ts'
+import { requirementAcceptanceRefs, requirementGraphNodes } from './document-graph.ts'
+import { requirementGraphProjectionDefinition } from './projection.ts'
 
 export type * from './types.ts'
 
@@ -221,6 +227,29 @@ const TASK_PROPERTIES = {
   },
 } as const
 
+const GRAPH_RELATION_PROPERTIES = {
+  source_requirement_id: {
+    type: 'string' as const,
+    required: true,
+    description: 'Top-level requirement number in the document being submitted, for example "2".',
+  },
+  target_requirement_id: {
+    type: 'string' as const,
+    required: true,
+    description: 'Top-level prerequisite or prior requirement number.',
+  },
+  target_round_id: {
+    type: 'string' as const,
+    description: 'Existing ROUND-NN identity for refines or supersedes; omit for a dependency in the current round.',
+  },
+  kind: {
+    type: 'string' as const,
+    required: true,
+    enum: ['depends-on', 'refines', 'supersedes'],
+  },
+  reason: { type: 'string' as const, required: true, description: 'Concise Chinese explanation of the relation.' },
+} as const
+
 function textOf(content: readonly ContentBlock[]): string {
   return content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
 }
@@ -283,6 +312,7 @@ function reviewerPrompt(
     if (event.type === 'requirement/round'
       || event.type === 'requirement/clarification'
       || event.type === 'requirement/document'
+      || event.type === 'requirement/graph'
       || event.type === 'requirement/task-list'
       || event.type === 'requirement/task-execution'
       || event.type === 'requirement/run-all'
@@ -458,6 +488,20 @@ function latestDocument(session: Session, roundId: RequirementRoundId): Requirem
   return event?.type === 'requirement/document' ? event.data : undefined
 }
 
+function latestGraph(session: Session, roundId: RequirementRoundId): RequirementGraphEvent | undefined {
+  const event = session.events.findLast(candidate => candidate.type === 'requirement/graph'
+    && candidate.data.roundId === roundId)
+  return event?.type === 'requirement/graph' ? event.data : undefined
+}
+
+function latestGraphs(session: Session): RequirementGraphEvent[] {
+  const graphs = new Map<string, RequirementGraphEvent>()
+  for (const event of session.events) {
+    if (event.type === 'requirement/graph') graphs.set(String(event.data.roundId), event.data)
+  }
+  return [...graphs.values()]
+}
+
 function latestTaskList(session: Session, roundId: RequirementRoundId): RequirementTaskListEvent | undefined {
   const event = session.events.findLast(candidate => candidate.type === 'requirement/task-list'
     && candidate.data.roundId === roundId)
@@ -581,28 +625,6 @@ function requirementDocumentIssues(markdown: string): string[] {
   return issues
 }
 
-function requirementAcceptanceRefs(markdown: string): Set<string> {
-  const refs = new Set<string>()
-  let requirement: string | undefined
-  let inAcceptance = false
-  for (const line of markdown.replaceAll('\r\n', '\n').split('\n')) {
-    const heading = /^### 需求\s+(\d+)：/u.exec(line)
-    if (heading?.[1] !== undefined) {
-      requirement = heading[1]
-      inAcceptance = false
-      continue
-    }
-    if (/^#### 验收标准\s*$/u.test(line)) {
-      inAcceptance = true
-      continue
-    }
-    if (/^#{1,4}\s/u.test(line)) inAcceptance = false
-    const criterion = inAcceptance ? /^(\d+)\.\s+\S/u.exec(line) : null
-    if (requirement !== undefined && criterion?.[1] !== undefined) refs.add(`${requirement}.${criterion[1]}`)
-  }
-  return refs
-}
-
 function normalizedRequirementRefs(
   refs: readonly string[],
   known: ReadonlySet<string>,
@@ -639,6 +661,93 @@ interface SubmittedQuestion {
     readonly label: string
     readonly description?: string
   }[]
+}
+
+interface SubmittedGraphRelation {
+  readonly source_requirement_id: string
+  readonly target_requirement_id: string
+  readonly target_round_id?: string
+  readonly kind: 'depends-on' | 'refines' | 'supersedes'
+  readonly reason: string
+}
+
+function requireGraphRelationArray(value: unknown): void {
+  if (!Array.isArray(value)) throw new TypeError('requirement graph relations must be an array')
+}
+
+function normalizedGraphRelations(
+  session: Session,
+  roundId: RequirementRoundId,
+  nodes: readonly RequirementGraphNode[],
+  inputs: readonly SubmittedGraphRelation[],
+): RequirementGraphRelation[] {
+  requireGraphRelationArray(inputs)
+  const currentIds = new Set(nodes.map(node => node.requirementId))
+  const previousGraphs = new Map(latestGraphs(session).map(graph => [String(graph.roundId), graph]))
+  const relations: RequirementGraphRelation[] = []
+  const keys = new Set<string>()
+  for (const [index, input] of inputs.entries()) {
+    const sourceRequirementId = normalizedRequirementText(input.source_requirement_id, 'title')
+    const targetRequirementId = normalizedRequirementText(input.target_requirement_id, 'title')
+    const reason = normalizedRequirementText(input.reason, 'statement')
+    if (!/^\d+$/u.test(sourceRequirementId) || !currentIds.has(sourceRequirementId)) {
+      throw new TypeError(`requirement graph relation ${index + 1} has an unknown source requirement "${sourceRequirementId}"`)
+    }
+    if (!/^\d+$/u.test(targetRequirementId)) {
+      throw new TypeError(`requirement graph relation ${index + 1} has an invalid target requirement`)
+    }
+    if (!/\p{Script=Han}/u.test(reason)) {
+      throw new TypeError(`requirement graph relation ${index + 1} reason must use Chinese`)
+    }
+    const kind: unknown = input.kind
+    if (kind !== 'depends-on' && kind !== 'refines' && kind !== 'supersedes') {
+      throw new TypeError(`requirement graph relation ${index + 1} has an invalid kind`)
+    }
+    const targetRoundId = kind === 'depends-on'
+      ? roundId
+      : normalizedRequirementText(input.target_round_id ?? '', 'title') as RequirementRoundId
+    if (kind === 'depends-on') {
+      if (input.target_round_id !== undefined) {
+        throw new TypeError(`requirement graph dependency ${index + 1} must stay inside the current round`)
+      }
+      if (!currentIds.has(targetRequirementId) || sourceRequirementId === targetRequirementId) {
+        throw new TypeError(`requirement graph dependency ${index + 1} has an unknown or identical target`)
+      }
+    } else {
+      if (targetRoundId === roundId) {
+        throw new TypeError(`requirement graph ${kind} relation ${index + 1} must target an earlier round`)
+      }
+      const targetGraph = previousGraphs.get(String(targetRoundId))
+      if (targetGraph?.nodes.some(node => node.requirementId === targetRequirementId) !== true) {
+        throw new TypeError(`requirement graph relation ${index + 1} targets unknown node "${targetRoundId}:${targetRequirementId}"`)
+      }
+    }
+    const key = `${sourceRequirementId}:${kind}:${targetRoundId}:${targetRequirementId}`
+    if (keys.has(key)) throw new TypeError(`requirement graph relation ${index + 1} is duplicated`)
+    keys.add(key)
+    relations.push({
+      source: { roundId, requirementId: sourceRequirementId },
+      target: { roundId: targetRoundId, requirementId: targetRequirementId },
+      kind,
+      reason,
+    })
+  }
+  const dependencies = new Map(nodes.map(node => [node.requirementId, [] as string[]]))
+  for (const relation of relations) {
+    if (relation.kind === 'depends-on') dependencies.get(relation.source.requirementId)?.push(relation.target.requirementId)
+  }
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const visit = (id: string): void => {
+    if (visiting.has(id)) throw new TypeError('requirement graph dependencies must not contain a cycle')
+    if (visited.has(id)) return
+    visiting.add(id)
+    for (const target of dependencies.get(id) ?? []) visit(target)
+    visiting.delete(id)
+    visited.add(id)
+  }
+  for (const node of nodes) visit(node.requirementId)
+  return relations
 }
 
 function submittedTask(
@@ -736,6 +845,9 @@ export class SessionRequirements extends TypertRemoteService {
    */
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'sessionRequirements')
+    ctx.inject(['sessionProjections'], (projectionCtx) => {
+      projectionCtx.sessionProjections.register(requirementGraphProjectionDefinition)
+    })
     ctx.tools.register(defineTool({
       name: 'clarify_requirements',
       description: 'Ask one batch of Chinese clarification questions for the active Requirement Notebook round. Use only for user-owned choices or material ambiguity that repository inspection cannot resolve.',
@@ -781,6 +893,16 @@ export class SessionRequirements extends TypertRemoteService {
       parameters: {
         summary: { type: 'string', required: true, description: 'Read-only Chinese round summary of at most 30 characters.' },
         markdown: { type: 'string', required: true, description: 'Complete Chinese Markdown using # 需求文档, ## 简介, and ## 需求.' },
+        relations: {
+          type: 'array',
+          required: true,
+          description: 'Requirement dependencies and explicit refinement or supersession links. Submit [] when no relation exists.',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: GRAPH_RELATION_PROPERTIES,
+          },
+        },
       },
       output: {
         schema: {
@@ -793,7 +915,7 @@ export class SessionRequirements extends TypertRemoteService {
         },
         render: (_args, value) => [{ type: 'text', text: `需求文档已保存为 v${value.revision}。` }],
       },
-      execute: (args, exec) => Promise.resolve(this.submitDocument(args.summary, args.markdown, exec)),
+      execute: (args, exec) => Promise.resolve(this.submitDocument(args.summary, args.markdown, args.relations, exec)),
     }))
     ctx.tools.register(defineTool({
       name: 'submit_requirement_tasks',
@@ -1019,7 +1141,12 @@ export class SessionRequirements extends TypertRemoteService {
     }
   }
 
-  private submitDocument(summaryInput: string, markdownInput: string, exec: ToolRunContext): {
+  private submitDocument(
+    summaryInput: string,
+    markdownInput: string,
+    relationInputs: readonly SubmittedGraphRelation[],
+    exec: ToolRunContext,
+  ): {
     accepted: true
     revision: number
   } {
@@ -1032,6 +1159,8 @@ export class SessionRequirements extends TypertRemoteService {
     const issues = requirementDocumentIssues(markdown)
     if (issues.length > 0) throw new TypeError(`invalid requirement document: ${issues.join(' ')}`)
     const previous = latestDocument(agent.session, round.roundId)
+    const nodes = requirementGraphNodes(markdown)
+    const relations = normalizedGraphRelations(agent.session, round.roundId, nodes, relationInputs)
     const turn = currentOpenTurn(agent.session)
     if (turn === undefined) throw new Error('requirement document submission requires an open Agent turn')
     const document = agent.session.append('requirement/document', {
@@ -1044,6 +1173,7 @@ export class SessionRequirements extends TypertRemoteService {
       valid: true,
       issues: [],
     })
+    this.appendGraph(agent.session, round.roundId, document.data.revision, nodes, relations)
     this.updateRound(agent.session, round.roundId, { status: 'document-ready', turn })
     exec.concludeTurn()
     return { accepted: true, revision: document.data.revision }
@@ -1094,7 +1224,7 @@ export class SessionRequirements extends TypertRemoteService {
     const round = Math.max(0, ...rounds(session).map(item => item.round)) + 1
     const roundId = `ROUND-${String(round).padStart(2, '0')}` as RequirementRoundId
     const message = createUserMessage({
-      content: [{ type: 'text', text: this.roundPrompt(round, input, request.language) }],
+      content: [{ type: 'text', text: this.roundPrompt(session, round, input, request.language) }],
       source: { kind: 'user' },
     })
     const roundEvent = session.append('requirement/round', {
@@ -1153,6 +1283,19 @@ export class SessionRequirements extends TypertRemoteService {
       valid: issues.length === 0,
       issues,
     })
+    if (event.data.valid) {
+      const nodes = requirementGraphNodes(markdown)
+      const nodeIds = new Set(nodes.map(node => node.requirementId))
+      const previousGraph = latestGraph(session, request.roundId)
+      const graphsByRound = new Map(latestGraphs(session).map(graph => [String(graph.roundId), graph]))
+      const relations = previousGraph?.relations.filter((relation) => {
+        if (!nodeIds.has(relation.source.requirementId)) return false
+        if (relation.target.roundId === request.roundId) return nodeIds.has(relation.target.requirementId)
+        return graphsByRound.get(String(relation.target.roundId))?.nodes
+          .some(node => node.requirementId === relation.target.requirementId) === true
+      }) ?? []
+      this.appendGraph(session, request.roundId, event.data.revision, nodes, relations)
+    }
     this.updateRound(session, request.roundId, { status: 'document-ready' })
     return { roundId: request.roundId, documentRevision: event.data.revision, eventSeq: event.seq }
   }
@@ -1525,9 +1668,18 @@ export class SessionRequirements extends TypertRemoteService {
     if (value !== 'zh' && value !== 'en') throw new TypeError('requirement language must be zh or en')
   }
 
-  private roundPrompt(round: number, input: string, language: RequirementAuthoringLanguage): string {
+  private roundPrompt(
+    session: Session,
+    round: number,
+    input: string,
+    language: RequirementAuthoringLanguage,
+  ): string {
     void language
-    return `第 ${round} 轮需求 Notebook\n\n用户原始需求：\n${input}\n\n先通过只读检查了解实际仓库，能从代码和文档确定的事实不要询问用户。判断是否存在必须由用户决定的关键歧义；如有，调用 clarify_requirements，一次提出 1 至 ${this.config.maxQuestionsPerRound} 个相关中文问题，最多调用 ${this.config.maxClarificationRounds} 次。没有关键歧义，或回答已经足够时，调用 submit_requirements_document。不要进入 Plan 模式，不要修改文件，不要生成实现任务。\n\n需求文档必须全部使用中文，结构固定为：\n# 需求文档\n## 简介\n## 需求\n### 需求 1：<标题>\n**用户故事：** <作为……我希望……以便……>\n#### 验收标准\n1. <使用“当、如果、在……期间、系统应当”等明确条件和结果>\n\n需求编号和每项验收标准编号必须连续。不得包含术语表。summary 是 30 个中文字符以内的一句话轮次摘要。最终只通过 submit_requirements_document 提交完整文档，不要把文档作为普通回复输出。`
+    const priorGraphs = latestGraphs(session).map(graph => ({
+      roundId: graph.roundId,
+      requirements: graph.nodes.map(node => ({ requirementId: node.requirementId, title: node.title })),
+    }))
+    return `第 ${round} 轮需求 Notebook\n\n用户原始需求：\n${input}\n\n先通过只读检查了解实际仓库，能从代码和文档确定的事实不要询问用户。判断是否存在必须由用户决定的关键歧义；如有，调用 clarify_requirements，一次提出 1 至 ${this.config.maxQuestionsPerRound} 个相关中文问题，最多调用 ${this.config.maxClarificationRounds} 次。没有关键歧义，或回答已经足够时，调用 submit_requirements_document。不要进入 Plan 模式，不要修改文件，不要生成实现任务。\n\n需求文档必须全部使用中文，结构固定为：\n# 需求文档\n## 简介\n## 需求\n### 需求 1：<标题>\n**用户故事：** <作为……我希望……以便……>\n#### 验收标准\n1. <使用“当、如果、在……期间、系统应当”等明确条件和结果>\n\n需求编号和每项验收标准编号必须连续。不得包含术语表。summary 是 30 个中文字符以内的一句话轮次摘要。relations 必须列出当前文档内真实的 depends-on 依赖；只有当前需求明确细化或取代下列历史需求时，才使用 refines 或 supersedes 并填写 target_round_id。没有关系时提交空数组，不得为了连线臆造关系。最终只通过 submit_requirements_document 提交完整文档，不要把文档作为普通回复输出。\n\n当前 Session 的历史需求图谱索引：\n${JSON.stringify(priorGraphs)}`
   }
 
   private taskGenerationPrompt(round: RequirementRoundEvent, document: RequirementDocumentEvent): string {
@@ -1582,6 +1734,28 @@ export class SessionRequirements extends TypertRemoteService {
     }
     const event = session.append('requirement/task-list', data)
     return { ...event.data, seq: event.seq }
+  }
+
+  private appendGraph(
+    session: Session,
+    roundId: RequirementRoundId,
+    documentRevision: number,
+    nodes: readonly RequirementGraphNode[],
+    relations: readonly RequirementGraphRelation[],
+  ): RequirementGraphEvent {
+    const previous = latestGraph(session, roundId)
+    return session.append('requirement/graph', {
+      version: 1,
+      revision: (previous?.revision ?? 0) + 1,
+      roundId,
+      documentRevision,
+      nodes: nodes.map(node => ({ ...node, acceptanceRefs: [...node.acceptanceRefs] })),
+      relations: relations.map(relation => ({
+        ...relation,
+        source: { ...relation.source },
+        target: { ...relation.target },
+      })),
+    }).data
   }
 
   private currentTaskList(session: Session, roundId: RequirementRoundId): RequirementTaskListEvent {

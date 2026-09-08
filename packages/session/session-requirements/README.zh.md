@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-session-requirements` 在实现开始前，把一条原始产品需求转换成可重放的中文需求文档。主 Agent 只询问影响结果的关键问题，然后生成可编辑文档；用户明确操作后，再生成一组有序的可执行 Task 块。每个 Task 必须先通过独立审核才能继续执行，固定处于末尾的 Final Test 负责生成本轮最终验证。
+`dsh-session-requirements` 在实现开始前，把一条原始产品需求转换成可重放的中文需求文档。主 Agent 只询问影响结果的关键问题，然后生成可编辑文档及其需求图谱；用户明确操作后，再生成一组有序的可执行 Task 块，并用审核后的进度更新图谱。固定处于末尾的 Final Test 负责生成本轮最终验证。
 
 ## 目录
 
@@ -29,7 +29,7 @@ kind: "package-reference"
 
 `startRound` 把原始输入保存在 `requirement/round` 中，并排入一个主 Agent 分析轮次。提示词要求 Agent 在提问前以只读方式检查仓库。某项决定必须由用户作出且会显著改变结果时，Agent 调用 `clarify_requirements`；原始问题和答案保存为持久的 `requirement/clarification` 事件。在配置上限内，Agent 可以继续询问下一批问题。否则，Agent 调用 `submit_requirements_document`，不会进入 Plan 模式，也不会修改文件。
 
-提交的文档必须是中文 Markdown，包含 `# 需求文档`、`## 简介` 和 `## 需求`，后面依次列出连续编号的需求、用户故事与验收标准。宿主验证结构后才把文档标记为可用。浏览器可通过 `editDocument` 追加新的文档修订；无效修订仍然可见，但不能生成 Task。任务生成期间以及任何 Task 开始执行后，文档都禁止编辑。
+提交的文档必须是中文 Markdown，包含 `# 需求文档`、`## 简介` 和 `## 需求`，后面依次列出连续编号的需求、用户故事与验收标准。`submit_requirements_document` 还会提交当前文档内的真实依赖，以及指向同一 Session 更早轮次的明确细化或替代关系。宿主验证文档、图谱端点和依赖环后，再追加 `requirement/document` 与 `requirement/graph`。浏览器可通过 `editDocument` 追加新的文档修订；有效编辑会重建图谱节点，只保留端点仍存在的关系；无效修订仍然可见，不会发布当前图谱，也不能生成 Task。任务生成期间以及任何 Task 开始执行后，文档都禁止编辑。
 
 `generateTasks` 针对一个确切的有效文档修订排入只读主 Agent 轮次。`submit_requirement_tasks` 至少提交一个实现或检查点块，并单独提交一个 Final Test 块。每个块包含一个顶层阶段的全部子勾选项，使用中文 `_关联需求：…_` 引用真实验收标准，且所有块都是必做项。宿主把 Final Test 固定在末尾，并拒绝未覆盖全部验收标准的列表。
 
@@ -39,6 +39,8 @@ kind: "package-reference"
 
 文本和批注单元格继续使用持久 note 事件。被动 Markdown 使用 `dispatch: false`；明确的 Agent 辅助使用 `dispatch: true`，并在主对话中继续。现有 `commit` Remote 继续提供历史审核模型使用的版本寻址需求记录。
 
+可选的 Session 投影服务会把每个 Session 的图谱、当前 Task 列表和最终验证折叠为客户端可见的 `requirementGraph` 值。重放历史时，投影会从早于图谱事件的有效需求文档中确定性提取节点，并使用空关系列表，因此升级后现有 Notebook 轮次也会立即显示。映射工作完成前节点处于待实现；映射工作正在执行或只有部分验收标准完成时处于进行中；经过审核的非最终 Task 覆盖全部验收标准时处于已验证；映射任务失败或记录回归后处于失败或回归状态。标准 Session 列表投影会为已打开和未打开的 Session 携带该值，因此浏览器可以按 Workspace 合并，而无需读取其他 Session 的日志。
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -47,7 +49,7 @@ kind: "package-reference"
 <details>
 <summary>实现细节——点击展开</summary>
 
-本包注册 3 个模型工具，分别用于澄清、提交文档和提交任务。仅追加的轮次、澄清、文档、任务列表、任务执行、“全部运行”、note、审核和验证事件让浏览器无需在 React 中保存产品状态，也能重建 Notebook。文档和任务列表使用独立修订号，因此编辑文档会使旧任务失效，但不会改写历史。
+本包注册 3 个模型工具，分别用于澄清、提交文档和提交任务。仅追加的轮次、澄清、文档、图谱、任务列表、任务执行、“全部运行”、note、审核和验证事件让浏览器无需在 React 中保存产品状态，也能重建 Notebook。文档、图谱和任务列表使用明确修订号，因此编辑文档会使旧任务及其当前图谱失效，但不会改写历史。
 
 Task 执行把排入的消息关联到对应 Agent 轮次。轮次完成时先记录输出并启动独立审核者；只有审核结算后，系统才写入 Task 终态并决定是否继续按序执行。内存中的“全部运行”控制器只负责实时续跑和停止请求，所有用户可见的状态转换都持久保存。
 
@@ -74,7 +76,7 @@ Task 执行把排入的消息关联到对应 Agent 轮次。轮次完成时先�
 
 #### 模型看到什么
 
-第一个主 Agent 提示词包含原始需求、澄清策略、确切的中文文档结构，以及禁止进入 Plan 模式、修改文件和提前生成任务的要求。任务生成提示词包含已接受的文档修订，以及 Task 与 Final Test 的格式要求。Task 提示词只指定一个 Task 及其关联验收标准。审核者收到上一份需求快照、当前 Notebook 事件、父轮次证据和只读工作区指令。
+第一个主 Agent 提示词包含原始需求、澄清策略、确切的中文文档结构、当前 Session 的历史图谱索引，以及禁止进入 Plan 模式、修改文件和提前生成任务的要求。Agent 随文档提交依赖及明确的细化或替代关系；没有关系时使用空列表。任务生成提示词包含已接受的文档修订，以及 Task 与 Final Test 的格式要求。Task 提示词只指定一个 Task 及其关联验收标准。审核者收到上一份需求快照、包含图谱事实的当前 Notebook 事件、父轮次证据和只读工作区指令。
 
 #### Token 影响
 
@@ -92,6 +94,7 @@ Task 执行把排入的消息关联到对应 Agent 轮次。轮次完成时先�
 - **任务生成锁定文档修订**——生成轮次进行期间不能修改文档；请在该轮次结算后重试或编辑。
 - **Task 输出有长度上限**——task-execution 事件保存有界的助手最终回复；完整工具记录仍在“轨迹”和 Session 日志中。
 - **审核失败会停止执行**——审核结果缺失、无效、不可用或为 `blocking` 时，当前 Task 失败并需要明确重试。
+- **图谱关系限定在 Session 内**——文档创作可以引用同一 Session 的更早轮次，浏览器可以按 Workspace 聚合这些图谱；系统不支持跨 Session 关系创作。
 
 <a id="dev-note"></a>
 ### 开发备注
@@ -99,6 +102,6 @@ Task 执行把排入的消息关联到对应 Agent 轮次。轮次完成时先�
 <details>
 <summary>维护者的工作上下文——点击展开</summary>
 
-参阅[先生成需求文档再生成任务 Agent Note](../../../.agents/notes/implemented/feature/2026-09-06-requirement-document-before-tasks.zh.md)。
+参阅[Workspace 需求知识图谱 Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.zh.md)。
 
 </details>

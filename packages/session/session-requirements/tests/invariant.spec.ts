@@ -60,6 +60,69 @@ function finalTask(order: number): RequirementTask {
 }
 
 describe('requirement document pipeline invariant', () => {
+  it('accepts a graph for the current document and rejects unknown relation endpoints', async () => {
+    const { session, roundId } = await setup()
+    session.append('requirement/graph', {
+      version: 1,
+      revision: 1,
+      roundId,
+      documentRevision: 1,
+      nodes: [{ requirementId: '1', title: '页面', acceptanceRefs: ['1.1'] }],
+      relations: [],
+    })
+    session.append('requirement/document', {
+      version: 1,
+      revision: 2,
+      roundId,
+      turn: 1,
+      summary: '增加操作',
+      markdown,
+      valid: true,
+      issues: [],
+    })
+    expect(() => session.append('requirement/graph', {
+      version: 1,
+      revision: 2,
+      roundId,
+      documentRevision: 2,
+      nodes: [{ requirementId: '1', title: '页面', acceptanceRefs: ['1.1'] }],
+      relations: [{
+        source: { roundId, requirementId: '1' },
+        target: { roundId, requirementId: '2' },
+        kind: 'depends-on',
+        reason: '页面依赖缺失的需求。',
+      }],
+    })).toThrow('relation endpoint')
+  })
+
+  it('rejects circular dependencies inside one requirement document', async () => {
+    const { session, roundId } = await setup()
+    expect(() => session.append('requirement/graph', {
+      version: 1,
+      revision: 1,
+      roundId,
+      documentRevision: 1,
+      nodes: [
+        { requirementId: '1', title: '页面', acceptanceRefs: ['1.1'] },
+        { requirementId: '2', title: '交互', acceptanceRefs: ['2.1'] },
+      ],
+      relations: [
+        {
+          source: { roundId, requirementId: '1' },
+          target: { roundId, requirementId: '2' },
+          kind: 'depends-on',
+          reason: '页面依赖交互。',
+        },
+        {
+          source: { roundId, requirementId: '2' },
+          target: { roundId, requirementId: '1' },
+          kind: 'depends-on',
+          reason: '交互依赖页面。',
+        },
+      ],
+    })).toThrow('dependency cycle')
+  })
+
   it('accepts drafts while requiring one last Final Test', async () => {
     const { session, roundId } = await setup()
     expect(() => session.append('requirement/task-list', {

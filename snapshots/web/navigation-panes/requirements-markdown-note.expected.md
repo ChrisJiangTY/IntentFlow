@@ -7,6 +7,9 @@
   - button "Run all":
     - img
     - text: Run all
+  - button "Open or close the requirement knowledge graph" [pressed]:
+    - img
+    - text: Requirement graph
 - main:
   - button "Collapse round":
     - img
@@ -116,3 +119,16 @@
     - button "Zoom out Notebook": −
     - text: 100%
     - button "Zoom in Notebook": ＋
+- complementary "Workspace requirement knowledge graph":
+  - strong: Requirement graph
+  - text: Current project
+  - button "Close the requirement knowledge graph":
+    - img
+  - text: Pending In progress Verified Failed or regressed
+  - 'heading "NavScenario: first run bash to Current Session" [level=3]'
+  - strong: "Round 1:"
+  - text: 构建并验证导航页面
+  - 'button "Round 1, requirement 1: 导航页面, status: Failed or regressed"':
+    - text: Requirement 1
+    - strong: 导航页面
+    - text: 2 acceptance criteria

@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -35,7 +36,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Required services for the view slot, Session event assembly, commands, and locale. */
-export const inject = ['slots', 'remote', 'remote.commands', 'remote.sessionRequirements', 'uiConversation', 'locale']
+export const inject = ['slots', 'remote', 'remote.commands', 'remote.sessionRequirements', 'sessions', 'uiConversation', 'locale']
 
 /** Register the requirements tab and its Session-scoped data source. */
 export function apply(ctx: Context): void {
@@ -73,6 +74,7 @@ export function apply(ctx: Context): void {
     label: () => t('view.requirements'),
     inject: (sessionId: SessionId): RequirementsViewInjected => ({
       hooks: { requirements: sourceFor(sessionId) },
+      openSession: (id) => { ctx.sessions.open(id) },
       initialLanguage: ctx.locale.getLocale().active === 'zh' ? 'zh' : 'en',
       startRound: async (request: RequirementRoundStartRequest) => {
         const result = await ctx.remote.sessionRequirements.startRound(sessionId, request)
