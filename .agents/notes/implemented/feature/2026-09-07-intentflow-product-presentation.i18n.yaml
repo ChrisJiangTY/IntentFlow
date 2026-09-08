@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-07-intentflow-product-presentation.md
-2026-09-07-intentflow-product-presentation.md: ef86b9c3db61c74bdefa0b8c30506cc08a7430e8
-2026-09-07-intentflow-product-presentation.zh.md: bcf692d9828b9e4faa1aed9df4a07fab026e47ae
+2026-09-07-intentflow-product-presentation.md: e0febe87e585160ec3127f091ab5e5399b8f9296
+2026-09-07-intentflow-product-presentation.zh.md: 60b4f8b16bd8c0f947353364fb1ad4dc504c3387

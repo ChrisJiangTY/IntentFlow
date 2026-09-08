@@ -54,16 +54,17 @@ describe('ic_ds_ icon set', () => {
   })
 })
 
-describe('FishLogo', () => {
-  it('renders the fish path in currentColor at the native ratio', () => {
-    const { container } = render(<primitives.FishLogo />)
+describe('IntentFlowLogo', () => {
+  it('renders three intent streams and the result node in a square icon', () => {
+    const { container } = render(<primitives.IntentFlowLogo />)
     const svg = container.querySelector('svg')!
     expect(svg.getAttribute('width')).toBe('24')
-    expect(Number(svg.getAttribute('height'))).toBeCloseTo(17.66, 1)
-    expect(svg.getAttribute('viewBox')).toBe('0 0 23.16 17.04')
-    expect(container.querySelectorAll('path')).toHaveLength(1)
+    expect(svg.getAttribute('height')).toBe('24')
+    expect(svg.getAttribute('viewBox')).toBe('0 0 32 32')
+    expect(container.querySelectorAll('circle')).toHaveLength(3)
+    expect(container.querySelectorAll('path')).toHaveLength(4)
     expect(container.innerHTML).toContain('currentColor')
-    expect(container.innerHTML).not.toContain('M0 0L23.16')
+    expect(container.innerHTML).toContain('#695AF5')
   })
 })
 

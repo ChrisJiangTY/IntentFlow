@@ -29,7 +29,7 @@ Compose feature UI from these atoms whenever the web client needs a standard con
 
 ### Controls and icons
 
-`Button`, `Pill`, `Input`, `Menu`, `Modal`, `Tooltip`, `DisclosureRow`, `StateDot`, `HoverCard`, `Toast`, `ConnectionBanner`, `RiskConfirmation`, and the `OnboardingSurface` first-run takeover cover the common interaction shapes. The `ic_ds_*` icon set and the `FishLogo`/`BrandWordmark` marks fill brand and inline-icon slots. `useAnchoredPosition` and `useAnchoredMaxHeight` keep floating panels and bottom-anchored overlays clamped to the viewport and following their anchor. `HoverCard` keeps its portaled preview reachable across the anchor gap and can expose a copy button through the `copyText` prop. `Toast` holds for the window its owner names through `holdMs`, because how long a banner has to stay depends on how much there is to read; the same value drives its unmount timer and the stylesheet's fade delay, so the two cannot disagree.
+`Button`, `Pill`, `Input`, `Menu`, `Modal`, `Tooltip`, `DisclosureRow`, `StateDot`, `HoverCard`, `Toast`, `ConnectionBanner`, `RiskConfirmation`, and the `OnboardingSurface` first-run takeover cover the common interaction shapes. The `ic_ds_*` icon set and the `IntentFlowLogo`/`BrandWordmark` marks fill brand and inline-icon slots. `IntentFlowLogo` renders three intent streams converging on one result node and inherits the host surface's primary ink. `useAnchoredPosition` and `useAnchoredMaxHeight` keep floating panels and bottom-anchored overlays clamped to the viewport and following their anchor. `HoverCard` keeps its portaled preview reachable across the anchor gap and can expose a copy button through the `copyText` prop. `Toast` holds for the window its owner names through `holdMs`, because how long a banner has to stay depends on how much there is to read; the same value drives its unmount timer and the stylesheet's fade delay, so the two cannot disagree.
 
 ### Rendering agent output
 
@@ -103,7 +103,7 @@ None; this package neither assembles nor sends a provider request.
 These limits define how the atoms behave at the edges; they are current package constraints, not a component roadmap.
 
 - **Streaming defers cross-boundary reference resolution** — a reference-style link or footnote whose definition sits on the other side of the incremental freeze boundary renders as literal text while the reply streams; the settled full parse at finalize resolves it.
-- **Glyph-level icons are redrawn approximations** — the fish logo and the sparkle mark come from font glyphs whose vector geometry is not exportable from the local design data; hand-authored recreations stand in until an exact export path exists.
+- **The sparkle icon is a redrawn approximation** — the sparkle mark comes from a font glyph whose vector geometry is not exportable from the local design data; a hand-authored recreation stands in until an exact export path exists.
 - **`Pill` and `Input` have no design source** — both atoms are self-defined; the sidebar search field and view-tab strip that resemble them are consumer-owned compositions, not these atoms.
 - **No `Active` `StateDot` variant** — the supported states are done, warning, ongoing, and error.
 - **User-facing copy is required at the render site** — the atoms are zero-Cordis and cannot reach `ctx.locale`; each feature must supply complete localized labels through the primitive's typed props ([decision](../../../.agents/notes/implemented/architecture/2026-08-23-locale-owned-client-ui-copy.md)).

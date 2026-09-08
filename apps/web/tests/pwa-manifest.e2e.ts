@@ -17,19 +17,36 @@ it('ships install metadata with the built web application', async () => {
     start_url: '/',
     scope: '/',
     display: 'fullscreen',
-    icons: [{
-      src: '/favicon.svg',
-      sizes: 'any',
-      type: 'image/svg+xml',
-      purpose: 'any',
-    }],
+    icons: [
+      {
+        src: '/favicon.svg',
+        sizes: 'any',
+        type: 'image/svg+xml',
+        purpose: 'any',
+      },
+      {
+        src: '/intentflow-icon.png',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'any',
+      },
+    ],
   })
 })
 
-it('ships a favicon that switches to a light mark under dark color scheme', async () => {
+it('ships the IntentFlow favicon with light- and dark-scheme brand colors', async () => {
   const favicon = await readFile(join(DIST_ROOT, 'favicon.svg'), 'utf8')
-  // The light fill must live inside the dark-scheme media query, so the icon
-  // stays black in light mode and only turns white under a dark scheme.
-  expect(favicon).toMatch(/@media \(prefers-color-scheme: dark\)\s*{\s*path\s*{[^}]*fill:\s*#fff/i)
-  expect(favicon).toContain('fill="#000"')
+  expect(favicon).toContain('viewBox="0 0 32 32"')
+  expect(favicon.match(/<circle /g)).toHaveLength(3)
+  expect(favicon).toContain('.stream { fill: #2457d6; stroke: #2457d6; }')
+  expect(favicon).toMatch(/@media \(prefers-color-scheme: dark\)[\s\S]*#8ab4ff/i)
+  expect(favicon).toContain('.result { fill: #695af5; }')
+})
+
+it('ships a transparent square IntentFlow install icon', async () => {
+  const icon = await readFile(join(DIST_ROOT, 'intentflow-icon.png'))
+  expect(icon.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  expect(icon.readUInt32BE(16)).toBe(512)
+  expect(icon.readUInt32BE(20)).toBe(512)
+  expect(icon[25]).toBe(6)
 })

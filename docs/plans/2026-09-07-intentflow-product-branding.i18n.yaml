@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/plans/2026-09-07-intentflow-product-branding.md
-2026-09-07-intentflow-product-branding.md: 7c7aa0fc2ddeb6d978eb4ed13791513dca39f087
-2026-09-07-intentflow-product-branding.zh.md: 024c8f5b7df2da5701b5b1aba3dc0aadcf2e6947
+2026-09-07-intentflow-product-branding.md: 75302624c28bbce44f6343ad26e3deac5356a739
+2026-09-07-intentflow-product-branding.zh.md: ba242e92995756ea52e6afd51432a5e009b594b8
