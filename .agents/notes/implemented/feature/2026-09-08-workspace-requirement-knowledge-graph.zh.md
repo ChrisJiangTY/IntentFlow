@@ -10,6 +10,10 @@ Status: implemented
 
 ## Decision
 
+[Session 需求代码图谱](2026-09-16-session-requirement-code-graph.zh.md)替代本说明的 Workspace 聚合、跨 Session 导航和图谱呈现。本说明保留持久需求标识、关系验证、修订和状态决定。
+
+[集中需求审核决策](2026-09-16-batched-requirement-review.zh.md)替代本说明中“独立审核的实现 Task 可在 Final Test 前把需求变绿”的规则。本说明继续负责其他状态优先级和失败归因决定。
+
 每个有效需求文档修订都有一条完整的 `requirement/graph` 事件。节点来自文档中编号的需求和验收标准。文档创作工具还会提交带简短中文原因的有向关系。`depends-on` 连接当前文档内的节点；`refines` 和 `supersedes` 把当前节点连接到同一 Session 更早轮次中的现有节点。宿主拒绝重复节点和关系、未知或相同端点、跨轮次依赖、同轮次历史关系以及依赖环。
 
 图谱修订与 `requirement/document` 对齐。浏览器中的有效编辑会重建节点，并只保留端点仍然有效的关系。无效编辑会追加文档草稿，但不会为该修订生成图谱，因此读取投影会移除陈旧的当前图谱，而不会继续把它显示为当前状态。

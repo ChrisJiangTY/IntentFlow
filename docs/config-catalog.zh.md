@@ -2023,7 +2023,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/session/session-requirements/src/index.ts:69`](../packages/session/session-requirements/src/index.ts)
+来源：[`packages/session/session-requirements/src/index.ts:80`](../packages/session/session-requirements/src/index.ts)
 
 <a id="deepseek-aidsh-session-telemetry-otel"></a>
 

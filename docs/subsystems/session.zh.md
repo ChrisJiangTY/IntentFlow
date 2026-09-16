@@ -587,6 +587,12 @@ interface TurnEndReasonMap {
 
 `SessionOpenWorkspacePathRequest` 携带绝对路径或已按 workspace 解析的 `path`。`SessionOpenWorkspacePathValue` 确认 Host 已接受原生交接。Session-aware Client 会在已知当前 Session cwd 时据此解析相对路径；controller 将路径原样交给打开器，并通过 Session Remote 错误词汇表报告无效请求、取消与打开器失败。
 
+## Notebook 状态
+
+`RequirementChangesProjection` 通过 `RequirementCodeChange` 条目携带已记录的文件修改，包括事件序列号、执行 Turn、路径和修改前后片段。`requirementChanges` 投影独立于聊天分页，需求图谱通过 Task 执行 Turn 关联该投影。片段表示已记录执行，不代表文件当前内容。
+
+`RequirementNotebookProjection` 的 `entries` 覆盖完整 Session 历史，独立于已加载的对话分页。每个 `RequirementNotebookEvent` 包含事件类型、序列号、时间戳和类型化需求负载。`requirementNotebook` 投影保留文档修订、每个文档修订的最新任务列表、单元格值和执行记录。[Session Requirements](../../packages/session/session-requirements/README.zh.md)负责折叠，[Notebook 视图](../../packages/client/ui-requirements/README.zh.md)负责编辑和历史展示。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -779,6 +785,14 @@ Coordinates clarified requirement documents, executable Tasks, and serialized in
 @Remote('runTask') runTask(agent: Agent, request: RequirementTaskRunRequest): RequirementTaskRunResult
 
 /**
+ * Cancel the selected task without discarding unrelated queued messages.
+ * @param agent - exact live Agent owning the task.
+ * @param request - round and task to stop.
+ * @returns acknowledgement referencing the selected execution.
+ */
+@Remote('stopTask') stopTask(agent: Agent, request: RequirementTaskRunRequest): RequirementTaskRunResult
+
+/**
  * Insert one manually authored task, including an empty pending draft, into the current round.
  * @param agent - exact live Agent that owns the round.
  * @param request - task text and optional insertion point.
@@ -787,12 +801,13 @@ Coordinates clarified requirement documents, executable Tasks, and serialized in
 @Remote('addTask') addTask(agent: Agent, request: RequirementTaskAddRequest): RequirementTaskMutationResult
 
 /**
- * Persist a task's editable text, including empty drafts, and return it to the pending state.
+ * Rewrite execution instructions from a human edit, or translate changed Agent text.
+ * A successful change returns the task and Final Test to pending; stale results are rejected.
  * @param agent - exact live Agent that owns the round.
  * @param request - task identity and replacement text.
  * @returns the durable task identity and task-list event sequence.
  */
-@Remote('editTask') editTask(agent: Agent, request: RequirementTaskEditRequest): RequirementTaskMutationResult
+@Remote('editTask') async editTask(agent: Agent, request: RequirementTaskEditRequest): Promise<RequirementTaskMutationResult>
 
 /**
  * Move a pending task one position without crossing locked or final tasks.
@@ -819,7 +834,7 @@ Coordinates clarified requirement documents, executable Tasks, and serialized in
 @Remote('runAll') runAll(agent: Agent, request: RequirementRunAllRequest): RequirementRunAllResult
 
 /**
- * Stop Run All after the current task and its independent review settle.
+ * Stop Run All after the current task and any required review settle.
  * @param agent - exact live Agent that owns the ordered run.
  * @param request - round whose ordered run should stop.
  * @returns durable stop-request position.

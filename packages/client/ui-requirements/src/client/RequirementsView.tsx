@@ -15,7 +15,6 @@ import {
   IconChevronDownOutline14,
   IconChevronRightOutline14,
   IconChevronUpOutline14,
-  IconEditOutline16,
   IconEllipsisOutline16,
   IconLinkOutline14,
   IconPlayOutline16,
@@ -62,8 +61,9 @@ import type { RequirementsKey } from './locales.ts'
 import css from './RequirementsView.module.css'
 import { AutoGrowTextarea } from './AutoGrowTextarea.tsx'
 import { MarkdownNoteCell } from './MarkdownNoteCell.tsx'
+import { taskResult } from './task-result.ts'
 import { RequirementGraphPanel } from './RequirementGraphPanel.tsx'
-import { workspaceRequirementGraph, type WorkspaceRequirementNode } from './knowledge-graph.ts'
+import { sessionRequirementGraph, type SessionRequirementNode } from './knowledge-graph.ts'
 
 /** Result returned after one structured Notebook action. */
 export type RequirementActionOutcome<T> =
@@ -82,6 +82,8 @@ export interface RequirementsViewInjected {
   generateTasks: (request: RequirementTaskGenerateRequest) => Promise<RequirementActionOutcome<RequirementDocumentActionResult>>
   /** Run one task cell. */
   runTask: (request: RequirementTaskRunRequest) => Promise<RequirementActionOutcome<RequirementTaskRunResult>>
+  /** Cancel the selected task execution or review. */
+  stopTask: (request: RequirementTaskRunRequest) => Promise<RequirementActionOutcome<RequirementTaskRunResult>>
   /** Run pending task cells in order. */
   runAll: (request: RequirementRunAllRequest) => Promise<RequirementActionOutcome<RequirementRunAllResult>>
   /** Stop Run All after its current task and review settle. */
@@ -111,17 +113,13 @@ interface SelectedCell {
   readonly taskId?: RequirementTaskId
 }
 
-interface NoteDraft {
-  readonly roundId: RequirementRoundId
-  readonly kind: 'comment'
-  readonly content: string
-}
-
 interface TaskDraft {
   readonly roundId: RequirementRoundId
   readonly taskId: RequirementTaskId
   source: string
+  summary: string
   savedSource: string
+  savedSummary: string
   savedSeq: number
   pending?: Promise<string | undefined>
   error?: string
@@ -152,6 +150,20 @@ function taskParts(source: string): { readonly title: string; readonly statement
       .join('\n')
       .trim(),
   }
+}
+
+function taskHumanSummary(title: string, summary: string | undefined, statement: string): string {
+  const clean = (value: string) => value
+    .replace(/[（(]\s*AC\b[^）)]*[）)]/giu, '')
+    .replace(/\s+([。！？])/gu, '$1')
+    .trim()
+  const provided = clean(summary ?? '')
+  if (provided !== '') return provided
+  const detail = /^(?:\*\*目标\*\*|\*\*范围\*\*)[:：]\s*(\S.*)$/mu.exec(statement)?.[1]
+    ?.replaceAll('`', '').replaceAll('**', '').trim()
+  const firstSentence = detail === undefined ? undefined : /^.*?[。！？]/u.exec(detail)?.[0]
+  const fallback = clean(firstSentence ?? (detail === undefined || detail === '' ? title : detail))
+  return fallback.length <= 120 ? fallback : `${fallback.slice(0, 119)}…`
 }
 
 function latestBy<T>(nodes: readonly T[], keyOf: (node: T) => string): Map<string, T> {
@@ -206,11 +218,11 @@ function taskStatusKey(status: RequirementTaskListNode['data']['tasks'][number][
 export function RequirementsView({
   sessionId,
   useSessions,
-  useWorkspaces,
   useRequirements,
   editDocument,
   generateTasks,
   runTask,
+  stopTask,
   runAll,
   stopRunAll,
   addTask,
@@ -220,24 +232,22 @@ export function RequirementsView({
   addNote,
   editNote,
   requestReview,
-  openSession,
   openView,
   initialLanguage,
   t,
 }: ConvViewProps & InjectFace<RequirementsViewInjected> & PropsLocale<typeof NS>) {
   const snapshot = useRequirements(value => value)
   const sessionSnapshot = useSessions(value => value)
-  const workspaceSnapshot = useWorkspaces(value => value)
   const knowledgeGraph = useMemo(
-    () => workspaceRequirementGraph(sessionSnapshot, workspaceSnapshot, sessionId),
-    [sessionId, sessionSnapshot, workspaceSnapshot],
+    () => sessionRequirementGraph(sessionSnapshot, snapshot, sessionId),
+    [sessionId, sessionSnapshot, snapshot],
   )
   const rootRef = useRef<HTMLDivElement>(null)
   const [language, setLanguage] = useState<RequirementContentLanguage>(initialLanguage)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [collapsedOutputs, setCollapsedOutputs] = useState<Set<string>>(new Set())
+  const [expandedTaskSpecs, setExpandedTaskSpecs] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<SelectedCell | undefined>()
-  const [noteDraft, setNoteDraft] = useState<NoteDraft | undefined>()
   const [documentDraft, setDocumentDraft] = useState<DocumentDraft | undefined>()
   const taskDrafts = useRef(new Map<RequirementTaskId, TaskDraft>())
   const [draftRevision, renderDrafts] = useState(0)
@@ -264,7 +274,9 @@ export function RequirementsView({
     return grouped
   }, [snapshot.clarifications])
   const taskLists = useMemo(() => latestBy(snapshot.taskLists, node => String(node.data.roundId)), [snapshot.taskLists])
-  const validations = useMemo(() => latestBy(snapshot.validations, node => String(node.data.roundId)), [snapshot.validations])
+  const validations = useMemo(() => latestBy(snapshot.validations.filter(node =>
+    node.anchorSeq >= (taskLists.get(String(node.data.roundId))?.anchorSeq ?? -1)),
+  node => String(node.data.roundId)), [snapshot.validations, taskLists])
   const notes = useMemo(() => {
     const grouped = new Map<string, RequirementNoteNode[]>()
     for (const node of latestBy(snapshot.notes, note => `${note.data.roundId}:${note.data.noteId}`).values()) {
@@ -279,7 +291,7 @@ export function RequirementsView({
     node => `${node.data.roundId}:${node.data.taskId}`,
   ), [snapshot.taskExecutions])
   const runAlls = useMemo(() => latestBy(snapshot.runAlls, node => String(node.data.roundId)), [snapshot.runAlls])
-  const orderedRounds = [...rounds.values()].sort((left, right) => left.anchorSeq - right.anchorSeq)
+  const orderedRounds = [...rounds.values()].sort((left, right) => left.data.round - right.data.round)
   const latestRound = orderedRounds.at(-1)
   const latestRoundDocument = latestRound === undefined ? undefined : documents.get(String(latestRound.data.roundId))
   const latestRoundTaskList = latestRoundDocument === undefined
@@ -318,11 +330,11 @@ export function RequirementsView({
   useLayoutEffect(() => {
     for (const [taskId, draft] of taskDrafts.current) {
       const list = taskLists.get(String(draft.roundId))
-      if (draft.pending !== undefined || draft.source !== draft.savedSource || list === undefined
+      if (draft.pending !== undefined || draft.source !== draft.savedSource || draft.summary !== draft.savedSummary || list === undefined
         || list.anchorSeq < draft.savedSeq) continue
       const task = list.data.tasks.find(item => item.id === taskId)
       const saved = taskParts(draft.savedSource)
-      if (task === undefined || task.title !== saved.title || task.statement !== saved.statement) {
+      if (task === undefined || task.title !== saved.title || task.summary !== draft.savedSummary || task.statement !== saved.statement) {
         taskDrafts.current.delete(taskId)
         renderDrafts(value => value + 1)
       }
@@ -334,11 +346,19 @@ export function RequirementsView({
     draft.pending = Promise.resolve().then(async () => {
       try {
         delete draft.error
-        while (draft.source !== draft.savedSource) {
+        while (draft.source !== draft.savedSource || draft.summary !== draft.savedSummary) {
           const source = draft.source
-          const result = await editTask({ roundId: draft.roundId, taskId: draft.taskId, ...taskParts(source) })
+          const summary = draft.summary
+          const humanEdit = summary !== draft.savedSummary
+          const result = await editTask({ roundId: draft.roundId, taskId: draft.taskId, summary, humanEdit, ...taskParts(source) })
           if (!result.ok) throw new Error(result.error)
-          draft.savedSource = source
+          const committed = result.value.task
+          const savedSource = committed === undefined ? source : taskSource(committed.title, committed.statement)
+          const savedSummary = committed?.summary ?? summary
+          if (draft.source === source) draft.source = savedSource
+          if (draft.summary === summary) draft.summary = savedSummary
+          draft.savedSource = savedSource
+          draft.savedSummary = savedSummary
           draft.savedSeq = result.value.eventSeq
         }
         return undefined
@@ -425,23 +445,16 @@ export function RequirementsView({
   }
 
   const insertTask = async (roundId: RequirementRoundId): Promise<void> => {
-    setNoteDraft(undefined)
     setCollapsed(current => new Set([...current].filter(id => id !== String(roundId))))
-    const result = await invoke(`add-task:${String(roundId)}`, () => addTask({ roundId, title: '', statement: '' }))
+    const result = await invoke(`add-task:${String(roundId)}`, () => addTask({ roundId, title: '', summary: '', statement: '' }))
     if (result !== undefined) {
       setSelected({ roundId, taskId: result.taskId })
       setNewTaskId(result.taskId)
+      setExpandedTaskSpecs(current => new Set([...current, `${roundId}:${result.taskId}`]))
     }
   }
 
-  const saveNote = async (): Promise<void> => {
-    if (noteDraft === undefined || noteDraft.content.trim() === '') return
-    const result = await invoke(`note:${String(noteDraft.roundId)}`, () => addNote({ ...noteDraft, dispatch: false }))
-    if (result !== undefined) setNoteDraft(undefined)
-  }
-
   const insertMarkdownNote = async (roundId: RequirementRoundId): Promise<void> => {
-    setNoteDraft(undefined)
     setCollapsed(current => new Set([...current].filter(id => id !== String(roundId))))
     const result = await invoke(`add-note:${String(roundId)}`, () => addNote({ roundId, kind: 'text', content: '', dispatch: false }))
     if (result !== undefined) setNewNote(result)
@@ -485,11 +498,7 @@ export function RequirementsView({
     setInspector(mode)
   }
 
-  const revealGraphNode = (node: WorkspaceRequirementNode): void => {
-    if (node.sessionId !== sessionId) {
-      openSession(node.sessionId)
-      return
-    }
+  const revealGraphNode = (node: SessionRequirementNode): void => {
     const roundKey = String(node.roundId)
     const mappedTask = taskLists.get(roundKey)?.data.tasks.find(task => node.taskIds.includes(task.id))
     setCollapsed(current => new Set([...current].filter(id => id !== roundKey)))
@@ -507,14 +516,22 @@ export function RequirementsView({
     })
   }
 
-  const beginTaskEdit = (
+  const selectTask = (
     roundId: RequirementRoundId,
     task: RequirementTaskListNode['data']['tasks'][number],
   ): void => {
     setSelected({ roundId, taskId: task.id })
     setMoreOpen(undefined)
-    if (task.status === 'in_progress' || task.status === 'reviewing' || task.status === 'completed') return
-    setNoteDraft(undefined)
+  }
+
+  const toggleTaskSpec = (roundId: RequirementRoundId, taskId: RequirementTaskId): void => {
+    const key = `${roundId}:${taskId}`
+    setExpandedTaskSpecs((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
   }
 
   const renderCellToolbar = (roundId: RequirementRoundId, taskId: RequirementTaskId) => {
@@ -532,12 +549,6 @@ export function RequirementsView({
       <div className={css.cellToolbar} role="toolbar" aria-label={t('cell.toolbar')} onClick={(event) => { event.stopPropagation() }}>
         <button type="button" aria-label={t('cell.movePrevious')} disabled={!canMove || taskIndex <= 0 || taskList?.data.tasks[taskIndex - 1]?.status === 'completed'} onClick={() => { move('up') }}><IconChevronUpOutline14 size={13} /></button>
         <button type="button" aria-label={t('cell.moveNext')} disabled={!canMove || taskList === undefined || taskIndex < 0 || taskList.data.tasks[taskIndex + 1]?.kind === 'final-test'} onClick={() => { move('down') }}><IconChevronDownOutline14 size={13} /></button>
-        <button type="button" aria-label={t('cell.addComment')} onClick={() => { setNoteDraft({ roundId, kind: 'comment', content: '' }) }}>⌁</button>
-        <button type="button" aria-label={t('cell.edit')} disabled={!futureTask || listBusy} onClick={() => {
-          if (task !== undefined) {
-            beginTaskEdit(roundId, task)
-          }
-        }}><IconEditOutline16 size={13} /></button>
         <span className={css.moreAnchor}>
           <button type="button" aria-label={t('cell.more')} aria-expanded={moreOpen === menuKey} onClick={() => { setMoreOpen(current => current === menuKey ? undefined : menuKey) }}><IconEllipsisOutline16 size={14} /></button>
           {moreOpen === menuKey && (
@@ -563,28 +574,37 @@ export function RequirementsView({
   const renderTask = (
     round: RequirementRoundNode,
     task: RequirementTaskListNode['data']['tasks'][number],
+    historical = false,
   ) => {
     const roundId = round.data.roundId
-    const execution = taskExecutions.get(`${roundId}:${task.id}`)
+    const execution = task.status === 'pending' && task.humanInstruction !== undefined
+      ? undefined : taskExecutions.get(`${roundId}:${task.id}`)
     const taskRegression = validations.get(String(roundId))?.data.regressions.some(item => item.taskId === task.id) ?? false
     const taskFailure = task.status === 'failed'
     const taskWithdrawn = task.status === 'withdrawn'
     const taskList = taskLists.get(String(roundId))
     const listBusy = taskList?.data.tasks.some(item => item.status === 'in_progress' || item.status === 'reviewing') ?? false
-    const taskEditable = !listBusy && (task.status === 'pending' || task.status === 'failed')
+    const taskEditable = !historical && !listBusy && (task.status === 'pending' || task.status === 'failed')
     const priorTasksSettled = taskList?.data.tasks.every(item => item.order >= task.order
       || item.status === 'completed' || item.status === 'withdrawn') ?? false
-    const runnable = (task.status === 'pending' || task.status === 'failed')
+    const runnable = !historical && (task.status === 'pending' || task.status === 'failed')
       && (task.kind !== 'final-test' || priorTasksSettled)
     const isSelected = selected?.roundId === roundId && selected.taskId === task.id
     const busy = running === String(task.id) || isTaskRunning(execution)
     const mark = statusMark(task, execution)
     const draft = taskDrafts.current.get(task.id)
     const source = draft?.source ?? taskSource(task.title, task.statement)
+    const summary = draft?.summary ?? taskHumanSummary(task.title, task.summary, task.statement)
+    const summaryEditable = !historical && !listBusy && task.status !== 'in_progress'
+      && task.status !== 'reviewing' && task.status !== 'withdrawn'
     const label = task.title || t('cell.newTask')
     const outputKey = `${roundId}:${task.id}`
     const outputExpanded = !collapsedOutputs.has(outputKey)
-    const taskReview = snapshot.reviews.findLast(node => node.data.status === 'completed'
+    const specExpanded = expandedTaskSpecs.has(outputKey)
+    const outputs = [...latestBy(snapshot.taskExecutions.filter(node => node.data.roundId === roundId
+      && node.data.taskId === task.id && node.data.output !== undefined), node => String(node.data.messageId)).values()]
+    const results = outputs.map(node => taskResult(node.data.output ?? ''))
+    const taskReview = task.status === 'pending' ? undefined : snapshot.reviews.findLast(node => node.data.status === 'completed'
       && node.data.task?.taskId === task.id)
     return (
       <div className={css.taskCellGroup} data-task-group key={String(task.id)}>
@@ -594,50 +614,104 @@ export function RequirementsView({
           data-task-id={String(task.id)}
           data-selected={isSelected || undefined}
           data-status={taskRegression ? 'regression' : task.status}
-          onClick={() => { beginTaskEdit(roundId, task) }}
+          onClick={(event) => {
+            selectTask(roundId, task)
+            if (summaryEditable && !(event.target instanceof HTMLTextAreaElement)) {
+              event.currentTarget.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+            }
+          }}
         >
           <span className={css.executionMark} data-status={taskFailure ? 'failed' : task.status}>{`[${mark}]`}</span>
           <div className={css.cellGutter}>
             <button
               className={css.runButton}
               type="button"
-              aria-label={t(busy ? 'cell.running' : taskWithdrawn ? 'cell.withdrawn' : 'cell.run', { task: label })}
+              aria-label={t(busy ? 'cell.stop' : taskWithdrawn ? 'cell.withdrawn' : 'cell.run', { task: label })}
               aria-busy={busy}
-              disabled={!runnable || busy || taskWithdrawn || running !== undefined || source.trim() === ''}
-              onClick={(event) => { event.stopPropagation(); void runOne(roundId, task.id) }}
+              disabled={busy
+                ? running !== undefined || historical
+                : !runnable || taskWithdrawn || activeRunAll !== undefined || running !== undefined || source.trim() === ''}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (busy) void invoke(`stop-task:${task.id}`, () => stopTask({ roundId, taskId: task.id }))
+                else void runOne(roundId, task.id)
+              }}
             >
-              {busy ? <span className={css.spinner} /> : <IconPlayOutline16 size={13} />}
+              {busy ? <span aria-hidden>■</span> : <IconPlayOutline16 size={13} />}
             </button>
           </div>
           <div className={css.cellBody}>
-            <div className={css.taskSourceRow}>
-              <span>{t('cell.taskIndex', { task: task.order + 1 })}</span>
+            <div className={css.taskReadView}>
+              <div className={css.taskHeadingRow}>
+                <span>{t('cell.taskIndex', { task: task.order + 1 })}</span>
+                <strong>{label}</strong>
+              </div>
               <AutoGrowTextarea
-                autoFocus={newTaskId === task.id}
-                aria-label={t('cell.taskContent', { task: label })}
-                className={css.taskSource}
-                placeholder={t('cell.taskPlaceholder')}
-                readOnly={!taskEditable || running !== undefined}
-                spellCheck={false}
-                value={source}
-                onValueChange={(nextSource) => {
+                aria-label={t('cell.taskSummary')}
+                className={css.taskSummaryInput}
+                placeholder={t('cell.taskSummaryPlaceholder')}
+                readOnly={!summaryEditable}
+                onFocus={() => { selectTask(roundId, task) }}
+                onBlur={() => {
+                  const current = taskDrafts.current.get(task.id)
+                  if (current !== undefined) void persistTask(current)
+                }}
+                value={summary}
+                onValueChange={(nextSummary) => {
                   const current = taskDrafts.current.get(task.id) ?? {
-                    roundId, taskId: task.id, source, savedSource: source, savedSeq: 0,
+                    roundId, taskId: task.id, source, summary, savedSource: source, savedSummary: summary, savedSeq: 0,
                   }
-                  current.source = nextSource
+                  current.summary = nextSummary
                   taskDrafts.current.set(task.id, current)
                   renderDrafts(value => value + 1)
-                  void persistTask(current)
                 }}
               />
             </div>
             {draft?.error !== undefined && <div className={css.taskError} role="alert">{t('cell.autosaveFailed')} · {draft.error}</div>}
           </div>
+          {draft?.pending !== undefined && <span role="status">{t('cell.updatingTask')}</span>}
           <span className={css.statusRail} aria-hidden />
-          {isSelected && renderCellToolbar(roundId, task.id)}
+          {historical && <span>{t('cell.previousTasks')}</span>}
+          {isSelected && !historical && renderCellToolbar(roundId, task.id)}
           {isSelected && <button className={css.assistButton} type="button" aria-label={t('cell.assist')} onClick={(event) => { event.stopPropagation(); void askAgentAboutTask(roundId, task.id, task.statement) }}><IconSparkle16 size={15} /></button>}
         </article>
-        {(execution?.data.output !== undefined || taskReview !== undefined || taskFailure || taskWithdrawn) && (
+        <section className={css.taskAgentSpec} aria-label={t('cell.taskExecutionSpecRegion', { task: label })} data-task-agent-spec data-expanded={specExpanded || undefined}>
+          <button
+            className={css.taskAgentSpecToggle}
+            type="button"
+            aria-expanded={specExpanded}
+            aria-label={t(specExpanded ? 'cell.collapseTaskExecutionSpec' : 'cell.expandTaskExecutionSpec', { task: label })}
+            onClick={() => { toggleTaskSpec(roundId, task.id) }}
+          >
+            {specExpanded ? <IconChevronDownOutline14 size={13} /> : <IconChevronRightOutline14 size={13} />}
+            <span>{t('cell.taskExecutionSpec')}</span>
+          </button>
+          {specExpanded && (
+            <div className={css.taskAgentSpecBody}>
+              {taskEditable
+                ? <AutoGrowTextarea
+                  autoFocus={newTaskId === task.id}
+                  aria-label={t('cell.taskContent', { task: label })}
+                  className={css.taskSource}
+                  placeholder={t('cell.taskPlaceholder')}
+                  readOnly={running !== undefined}
+                  spellCheck={false}
+                  value={source}
+                  onValueChange={(nextSource) => {
+                    const current = taskDrafts.current.get(task.id) ?? {
+                      roundId, taskId: task.id, source, summary, savedSource: source, savedSummary: summary, savedSeq: 0,
+                    }
+                    current.source = nextSource
+                    taskDrafts.current.set(task.id, current)
+                    renderDrafts(value => value + 1)
+                    void persistTask(current)
+                  }}
+                />
+                : <div className={css.taskAgentSpecReadonly}><MarkdownText text={task.statement} labels={markdownLabels} /></div>}
+            </div>
+          )}
+        </section>
+        {(results.length > 0 || taskReview !== undefined || taskFailure || taskWithdrawn) && (
           <section className={css.cellOutput} aria-label={t('cell.output', { task: task.title })} data-cell-output data-collapsed={!outputExpanded || undefined}>
             <button
               className={css.outputToggle}
@@ -657,15 +731,10 @@ export function RequirementsView({
             </button>
             {outputExpanded && (
               <div className={css.outputContent}>
-                {execution?.data.output !== undefined && <MarkdownText text={execution.data.output} labels={markdownLabels} />}
-                {taskReview?.data.status === 'completed' && taskReview.data.task !== undefined && (
-                  <div className={css.reviewVerdict} data-verdict={taskReview.data.task.verdict}>
-                    <strong>{t(`review.${taskReview.data.task.verdict}`)}</strong>
-                    <span>{text(taskReview.data.task.summary)}</span>
-                  </div>
-                )}
-                {taskFailure && <div className={css.taskError}>{t('cell.taskFailed')}</div>}
-                {taskWithdrawn && <div className={css.taskError}>{t('cell.taskWithdrawn')}</div>}
+                <h3>{t('cell.deliverables')}</h3>
+                {results.length === 0
+                  ? <MarkdownText text={t('cell.noDeliverables')} labels={markdownLabels} />
+                  : results.map((result, index) => <MarkdownText key={outputs[index]?.key} text={result.deliverables || t('cell.noDeliverables')} labels={markdownLabels} />)}
               </div>
             )}
           </section>
@@ -674,27 +743,6 @@ export function RequirementsView({
     )
   }
 
-  const renderNoteEditor = (draft: NoteDraft) => (
-    <article className={`${css.cell} ${css.editorCell} ${css.selected}`} data-cell="note-editor" data-note-editor>
-      <span className={css.executionMark}>[ ]</span>
-      <div className={css.cellGutter}><span className={css.editorPrompt}>{t('cell.textIcon')}</span></div>
-      <div className={css.editorBody}>
-        <AutoGrowTextarea
-          autoFocus
-          aria-label={t('cell.notePlaceholder')}
-          placeholder={t('cell.notePlaceholder')}
-          value={draft.content}
-          onValueChange={(content) => { setNoteDraft(current => current === undefined ? current : { ...current, content }) }}
-        />
-        <div className={css.editorActions}>
-          <button type="button" onClick={() => { void saveNote() }} disabled={draft.content.trim() === '' || running !== undefined}>{t('cell.save')}</button>
-          <button type="button" onClick={() => { setNoteDraft(undefined) }}>{t('cell.cancel')}</button>
-        </div>
-      </div>
-      <span className={css.statusRail} aria-hidden />
-    </article>
-  )
-
   const renderRound = (round: RequirementRoundNode) => {
     const roundId = round.data.roundId
     const document = documents.get(String(roundId))
@@ -702,12 +750,16 @@ export function RequirementsView({
     const taskList = document !== undefined && projectedTaskList?.data.documentRevision === document.data.revision
       ? projectedTaskList
       : undefined
+    const currentTaskIds = new Set(taskList?.data.tasks.map(task => task.id))
+    const previousTaskLists = [...latestBy(snapshot.taskLists.filter(node => node.data.roundId === roundId),
+      node => String(node.data.documentRevision)).values()]
+    const previousTasks = [...latestBy(previousTaskLists.flatMap(node => node.data.tasks), task => String(task.id)).values()]
+      .filter(task => !currentTaskIds.has(task.id))
     const clarification = clarifications.get(String(roundId)) ?? []
     const validation = validations.get(String(roundId))
-    const roundNotes = notes.get(String(roundId)) ?? []
+    const roundNotes = (notes.get(String(roundId)) ?? []).filter(note => note.data.kind === 'text')
     const isCollapsed = collapsed.has(String(roundId))
     const roundRegression = (validation?.data.regressions.length ?? 0) > 0
-    const activeNoteDraft = noteDraft?.roundId === roundId ? noteDraft : undefined
     const activeDocumentDraft = documentDraft?.roundId === roundId ? documentDraft : undefined
     const documentLocked = snapshot.taskExecutions.some(node => node.data.roundId === roundId)
     const roundStatusKey = `round.status.${round.data.status}` as RequirementsKey
@@ -724,7 +776,6 @@ export function RequirementsView({
         </header>
         {!isCollapsed && (
           <div className={css.cells}>
-            {activeNoteDraft !== undefined && renderNoteEditor(activeNoteDraft)}
             <details className={css.clarificationRecord} data-cell="clarification-record">
               <summary>{t('cell.clarificationRecord')}</summary>
               <div><strong>{t('cell.rawRequirement')}</strong><p>{round.data.input}</p></div>
@@ -774,6 +825,7 @@ export function RequirementsView({
                 <span className={css.statusRail} aria-hidden />
               </article>
             )}
+            {previousTasks.map(task => renderTask(round, task, true))}
             {taskList?.data.tasks.map(task => renderTask(round, task))}
             {roundNotes.map(note => note.data.kind === 'text' && !note.data.dispatched ? (
               <MarkdownNoteCell
@@ -791,8 +843,8 @@ export function RequirementsView({
                 key={note.key}
               >
                 <span className={css.executionMark}>[ ]</span>
-                <span className={css.noteIcon}>{note.data.kind === 'comment' ? '⌁' : t('cell.textIcon')}</span>
-                <div><strong>{t(note.data.kind === 'comment' ? 'cell.comment' : 'cell.text')}</strong><p>{note.data.content}</p></div>
+                <span className={css.noteIcon}>{t('cell.textIcon')}</span>
+                <div><strong>{t('cell.text')}</strong><p>{note.data.content}</p></div>
               </article>
             ))}
             {validation !== undefined && (
@@ -879,8 +931,8 @@ export function RequirementsView({
           )}
         {graphOpen && (
           <RequirementGraphPanel
+            key={sessionId}
             graph={knowledgeGraph}
-            currentSessionId={sessionId}
             onClose={() => { setGraphOpen(false) }}
             onSelect={revealGraphNode}
             t={t}
@@ -897,7 +949,7 @@ export function RequirementsView({
                 {selectedTask !== undefined ? (
                   <section>
                     <h3>{selectedTask.title}</h3>
-                    <p>{selectedTask.statement}</p>
+                    <p>{taskHumanSummary(selectedTask.title, selectedTask.summary, selectedTask.statement)}</p>
                     <dl>
                       <dt>{t('details.status')}</dt><dd>{t(taskStatusKey(selectedTask.status))}</dd>
                       <dt>{t('details.taskId')}</dt><dd>{selectedTask.id}</dd>

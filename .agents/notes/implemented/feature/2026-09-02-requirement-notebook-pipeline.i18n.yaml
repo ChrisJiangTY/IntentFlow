@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-02-requirement-notebook-pipeline.md
-2026-09-02-requirement-notebook-pipeline.md: b583a54c170057a8fa1340b2e683b3244f86c80d
-2026-09-02-requirement-notebook-pipeline.zh.md: 394e1cecb70cc72717ed13d20fb39f2ad0928fec
+2026-09-02-requirement-notebook-pipeline.md: 3469369d9e3ddcc0b16d8a875473dfdf34ea3e15
+2026-09-02-requirement-notebook-pipeline.zh.md: e25600ac39b7bd0993a450cbf6596c7f2fc2faf9

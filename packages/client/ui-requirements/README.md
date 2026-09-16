@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-client-ui-requirements` registers the Requirements tab beside Chat and Trajectory. It presents each raw request as a summarized product round with collapsed clarification history, an editable Chinese requirement document, executable Task blocks, per-Task reviews, and final validation. A collapsible right sidebar combines every requirement round from the current Workspace into one knowledge graph.
+`dsh-client-ui-requirements` registers the Requirements tab beside Chat and Trajectory. It presents each raw request as a summarized product round with collapsed clarification history, an editable Chinese requirement document, executable Task blocks, checkpoint reviews, and final validation. A collapsible right sidebar traces the current Session's requirements through Tasks to recorded file modifications.
 
 ## Table of Contents
 
@@ -27,21 +27,23 @@ English | [中文](README.zh.md)
 
 Submit a new requirement through the DSH bottom composer while the Requirements tab is active. The composer routes the raw text to `sessionRequirements.startRound`. The round header later displays the Agent-generated summary as read-only text. The original input and every clarification question and answer remain available inside the collapsed clarification record.
 
-When ambiguity is resolved, the Notebook renders the complete requirement document as Markdown. Edit opens the source in place with explicit Save and Cancel controls. Saving creates a new document revision; an invalid revision displays its validation issues and disables Generate Tasks. A saved revision hides Tasks generated from an older document revision. The document cannot change while generation is running or after Task execution begins.
+When ambiguity is resolved, the Notebook renders the complete requirement document as Markdown. Edit opens the source in place with explicit Save and Cancel controls. Saving creates a new document revision; an invalid revision displays its validation issues and disables Generate Tasks. Tasks generated from older document revisions remain visible and read-only. The document cannot change while generation is running or after Task execution begins.
 
-Generate Tasks is the document block's execution action. It asks the main Agent to inspect the repository and produce ordered top-level Task blocks from the exact document revision. The Requirements view contains no Plan card and no Plan approval action. Each generated Task keeps all child checklist items inside its top-level block and displays Chinese requirement references. Every Task is required; Final Test is always the last block.
+Generate Tasks is the document block's execution action. It asks the main Agent to inspect the repository and first produce ordered top-level technical Task blocks from the exact document revision, then translate each finished Agent Task into a concise human task description. The Requirements view contains no Plan card and no Plan approval action. Every Task is required; Final Test is always the last block.
 
-Before execution, users can add, edit, move, or withdraw ordinary pending Tasks. Final Test remains editable but cannot be moved or withdrawn. Once a Task starts, completed, in-progress, and reviewing cells are locked. Future pending Tasks become editable after the current Task and review settle and Run All is stopped.
+The left Notebook shows Task titles, directly editable human descriptions, and status. Complete execution instructions remain outside each cell in a default-collapsed disclosure. Leaving the human editor or running a task saves the latest input and rewrites its execution instructions. Pending saves show Updating task; failures retain the draft and block execution. Human edits to completed Tasks reopen them for execution. Editing or adding nonempty work also returns a completed Final Test to pending. Final Test cannot be moved or withdrawn.
 
-Run All executes one Task at a time and waits for its independent review. A passed or warning review continues to the next Task; a blocking or failed review stops. Stop Run All remains visible during ordered execution and takes effect after the current Task and review settle. Final Test runs only after every preceding Task completes and produces the final validation after its own review passes.
+Run All executes one Task at a time and disables individual Task starts while it is active. A normal implementation Task advances directly after its Agent Turn completes and the Agent becomes idle; abnormal Turn endings, cancellations, and command/tool errors stop the sequence. Checkpoints wait for an independent review, where a passed or warning result continues and a blocking or failed result stops. Stop Run All remains visible during ordered execution and takes effect after the current Task and any required review settle. Final Test runs only after every preceding Task completes, then one comprehensive reviewer checks all requirements, regressions, Task results, and code evidence before producing final validation.
 
-The selected Task retains run, move, comment, edit, details, withdrawal, and Agent-assistance actions when their state permits. Agent output renders below the input cell as Markdown and can be collapsed independently. Passive text notes and comments remain replayable Notebook events. Zoom stays at the bottom of the Notebook canvas. The requirement graph stays open beside the Notebook until the user closes it; on narrow screens it becomes an overlay drawer.
+The selected Task provides run, move, details, withdrawal, and assistance actions when allowed. The collapsible result below the instruction disclosure shows only Deliverables and retains links. Task status markers remain visible; notes, review summaries, and execution details stay outside the result display. Recognized delivery sections are extracted from historical Markdown; unstructured output stays in details and Trajectory instead of becoming an invented result. The Notebook displays text notes but hides comments and their creation control; saved comments remain in the Session log. The requirement graph stays beside the Notebook until closed and becomes an overlay on narrow screens.
 
-The graph uses the current Workspace's ordered `sessionIds` as its membership source and preserves each node by Session, round, and requirement number. Historical documents recorded before graph events contribute deterministically reconstructed nodes without invented relations. Gray means no mapped implementation work has completed, blue means mapped work is active or partially complete, green means every acceptance criterion has a completed independently reviewed Task, and red means a mapped Task failed or validation recorded a failure or regression. A node click locates its mapped Task or document in the current Session. A node from another Session opens that Session, where the same node can then locate its cell.
+The graph has three fixed columns: user requirements, Tasks, and modified files. It reads only the current Session. Acceptance references connect requirements to Tasks; execution Turn ids connect Tasks to successful recorded file mutations. Shared files appear once. Requirements stay in progress after mapped Tasks complete and become verified only after successful final validation; a Task's completed label does not claim that its requirement is verified. Selecting a node highlights its directed ancestors and descendants; selecting a file opens its historical before/after snippets. Requirement selection and the Task inspector can locate Notebook cells. Zoom and Show all affect only this panel. Drag the left edge to resize the panel; its content scrolls vertically independently of the Notebook.
 
-Task execution failure uses `[!]` and an amber state. A warning review has its own warning presentation without blocking ordered execution. A confirmed accidental regression uses red only when the reviewer records that evidence; Task attribution appears only when the reviewer can support it.
+A running Task exposes a stop button in place of Run. Stop cancels its queued message, active execution, or required review, and prevents Run All from advancing. After cancellation settles, the failed Task can run again. Cancellation does not undo file modifications.
 
-The Notebook projection consumes append-only `requirement/round`, `requirement/clarification`, `requirement/document`, `requirement/task-list`, `requirement/task-execution`, `requirement/run-all`, `requirement/note`, `requirement/review`, and `requirement/validation` events, together with user-version and execution events. The graph reads the host-computed `requirementGraph` values already carried by the Session list for live and unopened Sessions. React state contains only selection, folding, drafts, zoom, graph visibility, and transient action state.
+Task execution failure uses `[!]` and an amber state. A checkpoint or Final Test warning has its own warning presentation without blocking ordered execution. A confirmed accidental regression uses red only when the reviewer records that evidence; Task attribution appears only when the reviewer can support it.
+
+The Notebook projection consumes append-only `requirement/round`, `requirement/clarification`, `requirement/document`, `requirement/task-list`, `requirement/task-execution`, `requirement/run-all`, `requirement/note`, `requirement/review`, and `requirement/validation` events, together with user-version and execution events. The graph reads only the current row's `requirementGraph` and `requirementChanges` projections and joins them with the complete Notebook. React state contains only selection, folding, drafts, zoom, graph visibility, and transient action state.
 
 -----
 
@@ -53,7 +55,7 @@ The Notebook projection consumes append-only `requirement/round`, `requirement/c
 
 The package contributes target-specific Event Definitions, an append-only snapshot builder, a Session selector hook, a `conversation.view` registration, and a composer route supplied to `ui-conversation`. The native DSH composer remains the only entry point for a new product round. Notebook mutations call generated `sessionRequirements` Remotes, so document revisions, Task order, edits, withdrawals, notes, executions, and Run All state are replayable Session facts.
 
-The view selects the latest event revision for each round, document, Task list, Task execution, review, Run All request, and note. A Task list renders only when its `documentRevision` equals the current document revision. Workspace aggregation reads no foreign Session log in React: it combines each Session summary's graph projection and filters by Workspace membership. Product copy belongs to the typed `requirements` locale namespace; reviewer-authored bilingual content comes from durable review and validation events.
+The Notebook reads the host's complete `requirementNotebook` projection through the Session projection subscription. Chat pagination, refreshes, and stream reconnection cannot remove saved cells. Each document revision retains its task list, and each execution attempt retains its delivery output, including while a revised task runs again. Current tasks remain editable under the normal locks; older document tasks are read-only. The graph joins current-document Tasks and their execution attempts without reading other Session logs. Product copy belongs to the typed `requirements` locale namespace.
 
 </details>
 
@@ -81,7 +83,7 @@ Host-owned prompts follow normal provider caching rules. Local selection, foldin
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Unacknowledged edits are tab-local** — closing the tab can lose a pending or failed autosave, an unsaved document edit, or an unsubmitted comment.
+- **Unacknowledged edits are tab-local** — closing the tab can lose a pending or failed autosave or an unsaved document edit.
 - **Task output is bounded** — each Task retains a bounded final Agent response; detailed tool evidence remains in Trajectory and the Session log.
 - **Task attribution is reviewer evidence** — the reviewer assigns a regression to a Task only when the evidence supports that relationship; otherwise final validation reports the regression without guessing.
 - **Relations stay inside one Session** — the authoring Agent can link rounds from its own Notebook history; the Workspace view combines Sessions but does not infer dependencies between separate Sessions.
@@ -92,6 +94,6 @@ Host-owned prompts follow normal provider caching rules. Local selection, foldin
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-See the [Workspace requirement knowledge graph Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.md).
+See the [batched requirement review Agent Note](../../../.agents/notes/implemented/feature/2026-09-16-batched-requirement-review.md) and the [Workspace requirement knowledge graph Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.md).
 
 </details>

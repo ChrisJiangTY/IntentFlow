@@ -103,12 +103,16 @@ export interface RequirementTaskRunResult {
   readonly eventSeq: number
 }
 
-/** Browser request that persists task text, including empty drafts, without executing it. */
+/** Browser request that persists human-facing and Agent-facing task text without executing it. */
 export interface RequirementTaskEditRequest {
   readonly roundId: RequirementRoundId
   readonly taskId: RequirementTaskId
   readonly title: string
+  /** Editable human translation of the Agent execution statement. */
+  readonly summary: string
   readonly statement: string
+  /** Human edits rewrite execution instructions; false translates an Agent-side edit. */
+  readonly humanEdit?: boolean
 }
 
 /** Browser request that changes one task's position in the current generated task list. */
@@ -124,11 +128,13 @@ export interface RequirementTaskWithdrawRequest {
   readonly taskId: RequirementTaskId
 }
 
-/** Browser request that inserts a manually authored task; both text fields may be empty. */
+/** Browser request that inserts a manually authored task; all text fields may be empty. */
 export interface RequirementTaskAddRequest {
   readonly roundId: RequirementRoundId
   readonly afterTaskId?: RequirementTaskId
   readonly title: string
+  /** Editable human translation of the Agent execution statement. */
+  readonly summary: string
   readonly statement: string
 }
 
@@ -137,6 +143,8 @@ export interface RequirementTaskMutationResult {
   readonly roundId: RequirementRoundId
   readonly taskId: RequirementTaskId
   readonly eventSeq: number
+  /** Committed text after asynchronous task revision, for rebasing subsequent editor drafts. */
+  readonly task?: RequirementTask
 }
 
 /** Browser request that runs the pending task cells in order. */
@@ -330,12 +338,17 @@ export interface RequirementGraphProjection {
 /** Semantic role of one top-level executable task block. */
 export type RequirementTaskKind = 'implementation' | 'checkpoint' | 'final-test'
 
-/** One task shown in a requirement Notebook; empty pending drafts cannot execute. */
+/** One task shown in a requirement Notebook; the technical statement remains Agent-facing by default. */
 export interface RequirementTask {
+  /** Latest user-authored task direction; overrides conflicting earlier generated requirements. */
+  readonly humanInstruction?: string
   readonly id: RequirementTaskId
   readonly order: number
   readonly kind: RequirementTaskKind
   readonly title: string
+  /** Concise human translation derived from the complete Agent execution statement. */
+  readonly summary: string
+  /** Complete execution specification passed to the Agent and exposed in a collapsed region outside the Notebook cell. */
   readonly statement: string
   /** Acceptance criteria such as `1.1` that this block implements or verifies. */
   readonly requirementRefs: readonly string[]
@@ -560,6 +573,32 @@ export interface RequirementReviewFailed {
 /** Append-only review record projected by the requirements view. */
 export type RequirementReviewEvent = RequirementReviewCompleted | RequirementReviewFailed
 
+interface NotebookRecord<K extends string, T> {
+  readonly type: K
+  readonly seq: number
+  readonly time: number
+  readonly data: T
+}
+
+/** Durable Notebook records retained independently of the paginated conversation window. */
+export type RequirementNotebookEvent =
+  | NotebookRecord<'requirement/round', RequirementRoundEvent>
+  | NotebookRecord<'requirement/clarification', RequirementClarificationEvent>
+  | NotebookRecord<'requirement/document', RequirementDocumentEvent>
+  | NotebookRecord<'requirement/task-list', RequirementTaskListEvent>
+  | NotebookRecord<'requirement/task-execution', RequirementTaskExecutionEvent>
+  | NotebookRecord<'requirement/run-all', RequirementRunAllEvent>
+  | NotebookRecord<'requirement/note', RequirementNoteEvent>
+  | NotebookRecord<'requirement/validation', RequirementValidationEvent>
+  | NotebookRecord<'requirement/review', RequirementReviewEvent>
+  | NotebookRecord<'requirement/user-version', RequirementUserVersionEvent>
+  | NotebookRecord<'requirement/execution', RequirementExecutionEvent>
+
+/** Latest cell values across all rounds, including each execution attempt and document revision. */
+export interface RequirementNotebookProjection {
+  readonly entries: readonly RequirementNotebookEvent[]
+}
+
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /**
@@ -597,7 +636,25 @@ declare module '@deepseek-ai/dsh-session/types' {
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
+    /** Successful file mutations recorded in this Session, grouped by execution Turn. */
+    requirementChanges: RequirementChangesProjection
     /** Requirement knowledge graph and Task-derived node states for one Session. */
     requirementGraph: RequirementGraphProjection
+    /** Complete Notebook state, unaffected by conversation pagination or reconnects. */
+    requirementNotebook: RequirementNotebookProjection
   }
+}
+
+/** Recorded file mutation; snippets describe that execution, not current file contents. */
+export interface RequirementCodeChange {
+  readonly seq: number
+  readonly turn: number
+  readonly path: string
+  readonly oldText: string | null
+  readonly newText: string
+}
+
+/** Complete mutation evidence used exclusively by the Session requirement graph. */
+export interface RequirementChangesProjection {
+  readonly changes: readonly RequirementCodeChange[]
 }

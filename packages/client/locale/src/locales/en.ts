@@ -30,6 +30,7 @@ export const en = {
   'collapse': 'Collapse',
   'expand': 'Expand',
   'back': 'Back',
+  'brand.name': 'IntentFlow',
   'brand.localBuild': 'IntentFlow Local Build',
   'unknown': 'Unknown',
   'none': 'None',

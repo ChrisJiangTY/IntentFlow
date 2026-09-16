@@ -171,18 +171,17 @@ function nodeStatus(
       ? mappedIds.has(regression.taskId)
       : true)
   if (validationBlocks || mapped.some(task => task.status === 'failed')) return 'blocked'
-  const implementation = mapped.filter(task => task.kind !== 'final-test')
-  if (implementation.some(task => task.status === 'in_progress' || task.status === 'reviewing')) return 'in-progress'
-  const completedRefs = new Set(implementation.flatMap(task => task.status === 'completed' ? task.requirementRefs : []))
-  if (node.acceptanceRefs.every(ref => completedRefs.has(ref))) return 'verified'
-  if (completedRefs.size > 0) return 'in-progress'
+  if (validation?.status === 'completed') return 'verified'
+  if (validation !== undefined || mapped.some(task => (
+    task.status === 'in_progress' || task.status === 'reviewing' || task.status === 'completed'
+  ))) return 'in-progress'
   return 'pending'
 }
 
 /** Pure projection definition registered by the host Requirements plugin. */
 export const requirementGraphProjectionDefinition = {
   key: 'requirementGraph',
-  stateVersion: 2,
+  stateVersion: 3,
   stateSchema,
   init: (): RequirementGraphProjectionState => ({ metadata: {}, rounds: [] }),
   apply: (state, event) => {
@@ -246,6 +245,7 @@ export const requirementGraphProjectionDefinition = {
           ? round
           : {
             ...round,
+            validation: undefined,
             tasks: event.data.tasks.map(task => ({
               id: String(task.id),
               kind: task.kind,

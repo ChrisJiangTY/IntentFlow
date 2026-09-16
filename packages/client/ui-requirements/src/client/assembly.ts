@@ -18,6 +18,7 @@ import type {
   RequirementTaskListEvent,
   RequirementUserVersionEvent,
   RequirementValidationEvent,
+  RequirementNotebookProjection,
 } from '@deepseek-ai/dsh-session-requirements/client'
 import type { RequirementViewNode, RequirementsSnapshot } from './contract.ts'
 
@@ -115,6 +116,25 @@ export class RequirementsSnapshotBuilder implements ConversationViewBuilder<Requ
       validations: nodes.flatMap(node => node.kind === 'requirements-validation' ? [node] : []),
     }
   }
+}
+
+/**
+ * Materialize the full persisted Notebook without consulting the Chat event window.
+ * @param projection - Whole Session Notebook value, absent before its baseline arrives.
+ * @returns Cell snapshot across every recorded round and execution attempt.
+ */
+export function notebookSnapshot(projection: RequirementNotebookProjection | undefined): RequirementsSnapshot {
+  if (projection === undefined) return EMPTY_REQUIREMENTS_SNAPSHOT
+  const nodes = projection.entries.map(event => ({
+    key: `${event.type}:${event.seq}`,
+    id: `${event.type}:${event.seq}`,
+    kind: event.type.replace('requirement/', 'requirements-'),
+    target: 'requirements',
+    anchorSeq: event.seq,
+    time: event.time,
+    data: event.data,
+  } as RequirementViewNode))
+  return new RequirementsSnapshotBuilder().replace({ nodes })
 }
 
 /** Requirements target factory. */

@@ -19,8 +19,9 @@ import type {
   RequirementTaskMoveRequest,
   RequirementTaskWithdrawRequest,
   RequirementTaskRunRequest,
+  RequirementNotebookProjection,
 } from '@deepseek-ai/dsh-session-requirements/client'
-import { EMPTY_REQUIREMENTS_SNAPSHOT, registerRequirementsAssembly } from './assembly.ts'
+import { EMPTY_REQUIREMENTS_SNAPSHOT, notebookSnapshot, registerRequirementsAssembly } from './assembly.ts'
 import type { RequirementsSnapshot } from './contract.ts'
 import { en, NS, zh, type RequirementsKey } from './locales.ts'
 import { RequirementsView, type RequirementsViewInjected } from './RequirementsView.tsx'
@@ -53,9 +54,20 @@ export function apply(ctx: Context): void {
   const sourceFor = (sessionId: SessionId): ObservableSnapshot<RequirementsSnapshot> => {
     let source = sources.get(sessionId)
     if (source === undefined) {
-      const target = ctx.uiConversation.binding(sessionId).target('requirements')
+      const binding = ctx.sessions.binding(sessionId)
+      if (binding === undefined) throw new Error(`Notebook Session ${sessionId} has no binding`)
+      const target = binding.session.projections.faceOf('requirementNotebook')
+      let previous: RequirementNotebookProjection | undefined
+      let snapshot = EMPTY_REQUIREMENTS_SNAPSHOT
       source = {
-        getSnapshot: () => target.getSnapshot() ?? EMPTY_REQUIREMENTS_SNAPSHOT,
+        getSnapshot: () => {
+          const value = target.getSnapshot() as RequirementNotebookProjection | undefined
+          if (value !== previous) {
+            previous = value
+            snapshot = notebookSnapshot(value)
+          }
+          return snapshot
+        },
         subscribe: listener => target.subscribe(listener),
       }
       sources.set(sessionId, source)
@@ -93,6 +105,10 @@ export function apply(ctx: Context): void {
         return result.ok
           ? { ok: true, value: result.value }
           : { ok: false, error: result.error.message }
+      },
+      stopTask: async (request: RequirementTaskRunRequest) => {
+        const result = await ctx.remote.sessionRequirements.stopTask(sessionId, request)
+        return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
       },
       runTask: async (request: RequirementTaskRunRequest) => {
         const result = await ctx.remote.sessionRequirements.runTask(sessionId, request)

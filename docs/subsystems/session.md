@@ -583,6 +583,12 @@ The backends that consume this contract are on [persistence.md](persistence.md).
 
 `SessionOpenWorkspacePathRequest` carries an absolute or workspace-resolved `path`. `SessionOpenWorkspacePathValue` confirms that the Host accepted the native handoff. A Session-aware Client resolves relative paths against its current Session cwd when known; the controller hands the path to the opener unchanged and reports invalid requests, cancellation, and opener failures through the Session Remote error vocabulary.
 
+## Notebook state
+
+`RequirementChangesProjection` carries recorded file mutations as `RequirementCodeChange` entries with an event sequence, execution Turn, path, and before/after snippets. Its `requirementChanges` projection is independent of Chat pagination; the requirement graph joins it with Task execution Turns. Snippets describe recorded executions, not current file contents.
+
+`RequirementNotebookProjection` carries `entries` across the complete Session history, independently of the loaded conversation page. Each `RequirementNotebookEvent` contains its event type, sequence, timestamp, and typed requirement payload. The `requirementNotebook` projection retains document revisions, the latest task list per document revision, cell values, and execution attempts. [Session Requirements](../../packages/session/session-requirements/README.md) owns the fold and [the Notebook view](../../packages/client/ui-requirements/README.md) owns editing and historical display.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -775,6 +781,14 @@ Coordinates clarified requirement documents, executable Tasks, and serialized in
 @Remote('runTask') runTask(agent: Agent, request: RequirementTaskRunRequest): RequirementTaskRunResult
 
 /**
+ * Cancel the selected task without discarding unrelated queued messages.
+ * @param agent - exact live Agent owning the task.
+ * @param request - round and task to stop.
+ * @returns acknowledgement referencing the selected execution.
+ */
+@Remote('stopTask') stopTask(agent: Agent, request: RequirementTaskRunRequest): RequirementTaskRunResult
+
+/**
  * Insert one manually authored task, including an empty pending draft, into the current round.
  * @param agent - exact live Agent that owns the round.
  * @param request - task text and optional insertion point.
@@ -783,12 +797,13 @@ Coordinates clarified requirement documents, executable Tasks, and serialized in
 @Remote('addTask') addTask(agent: Agent, request: RequirementTaskAddRequest): RequirementTaskMutationResult
 
 /**
- * Persist a task's editable text, including empty drafts, and return it to the pending state.
+ * Rewrite execution instructions from a human edit, or translate changed Agent text.
+ * A successful change returns the task and Final Test to pending; stale results are rejected.
  * @param agent - exact live Agent that owns the round.
  * @param request - task identity and replacement text.
  * @returns the durable task identity and task-list event sequence.
  */
-@Remote('editTask') editTask(agent: Agent, request: RequirementTaskEditRequest): RequirementTaskMutationResult
+@Remote('editTask') async editTask(agent: Agent, request: RequirementTaskEditRequest): Promise<RequirementTaskMutationResult>
 
 /**
  * Move a pending task one position without crossing locked or final tasks.
@@ -815,7 +830,7 @@ Coordinates clarified requirement documents, executable Tasks, and serialized in
 @Remote('runAll') runAll(agent: Agent, request: RequirementRunAllRequest): RequirementRunAllResult
 
 /**
- * Stop Run All after the current task and its independent review settle.
+ * Stop Run All after the current task and any required review settle.
  * @param agent - exact live Agent that owns the ordered run.
  * @param request - round whose ordered run should stop.
  * @returns durable stop-request position.

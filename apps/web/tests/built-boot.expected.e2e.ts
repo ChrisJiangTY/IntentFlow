@@ -57,7 +57,7 @@ function clientBuildValue(name: string): string | undefined {
 }
 
 it('boots the built plugin graph and renders a fixture session end to end', async () => {
-  mountAssembledApp()
+  mountAssembledApp('?fixture', { selectedView: 'chat' })
 
   // The sidebar renders from the boot graph: every inject layer activated.
   const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
@@ -65,15 +65,9 @@ it('boots the built plugin graph and renders a fixture session end to end', asyn
     expect(document.querySelector('svg[viewBox="26 0 156 24"]')).not.toBeNull()
     expect(screen.queryByText('IntentFlow Local Build')).toBeNull()
   } else {
-    expect(document.querySelector('svg[viewBox="0 0 23.16 17.04"]')).not.toBeNull()
-    const version = clientBuildValue('DSH_CLIENT_VERSION')
-    if (version === undefined) throw new Error('default client build record must carry DSH_CLIENT_VERSION')
-    const commit = clientBuildValue('DSH_CLIENT_COMMIT_HASH')
-    const buildVersion = version
-      + (commit === undefined ? '' : `-${commit}`)
-      + (clientBuildValue('DSH_CLIENT_GIT_DIRTY') === 'true' ? '-dirty' : '')
-    screen.getByText('IntentFlow Local Build')
-    screen.getByText(buildVersion)
+    expect(document.querySelector('svg[viewBox="0 0 32 32"]')).not.toBeNull()
+    screen.getByText('IntentFlow')
+    expect(screen.queryByText('IntentFlow Local Build')).toBeNull()
   }
   // The compact layout dropped group session counts; the fixture workspace
   // group row renders immediately with its sessions beneath it.
@@ -161,7 +155,7 @@ it('boots the built plugin graph and renders a fixture session end to end', asyn
   }
 })
 
-it('boots without ui-chat and does not select another conversation view implicitly', async () => {
+it('boots without ui-chat and selects the Requirements view by default', async () => {
   mountAssembledApp('?fixture', { exclude: ['@deepseek-ai/dsh-client-ui-chat'] })
 
   const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
@@ -172,5 +166,6 @@ it('boots without ui-chat and does not select another conversation view implicit
   await waitFor(() => {
     expect(document.querySelector('[data-slot="conversation.session"]')).not.toBeNull()
   }, { timeout: 10_000 })
-  expect(document.querySelector('[data-slot="conversation.view"]')).toBeNull()
+  expect(screen.getByRole('tab', { name: 'Requirements' }).getAttribute('aria-selected')).toBe('true')
+  expect(document.querySelector('[data-slot="conversation.view"]')).not.toBeNull()
 })

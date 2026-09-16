@@ -3,13 +3,14 @@
  * @module @deepseek-ai/dsh-session-requirements
  */
 
+import { isDeepStrictEqual } from 'node:util'
 import { Context } from '@deepseek-ai/cordis'
 import s from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { assertNever, createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
-import { defineTool, type ObjectJsonSchema, type ToolRunContext } from '@deepseek-ai/dsh-tools'
+import { defineTool, type ObjectJsonSchema, type ToolExecutionResult, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { SubagentRun } from '@deepseek-ai/dsh-subagent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-user-questions'
@@ -50,6 +51,7 @@ import type {
   RequirementTaskEditRequest,
   RequirementTaskExecutionEvent,
   RequirementTaskId,
+  RequirementTaskKind,
   RequirementTaskMoveRequest,
   RequirementTaskMutationResult,
   RequirementTaskRunRequest,
@@ -62,6 +64,9 @@ import type {
 } from './types.ts'
 import { requirementAcceptanceRefs, requirementGraphNodes } from './document-graph.ts'
 import { requirementGraphProjectionDefinition } from './projection.ts'
+import { requirementNotebookProjectionDefinition } from './notebook-projection.ts'
+import { requirementChangesProjectionDefinition } from './change-projection.ts'
+import { TASK_TEXT_POLICY, TASK_TEXT_SCHEMA, validateTaskText, type TaskText } from './task-text.ts'
 
 export type * from './types.ts'
 
@@ -332,6 +337,7 @@ function reviewerPrompt(
   const body = 'You are the independent requirements reviewer for a coding session.\n\n'
     + `Reconstruct how the user's requirements stand after turn ${turn}, then inspect the current workspace to audit their real implementation. `
     + 'Treat user prompts as primary requirements. Assistant replies and plans are evidence of interpretation, never proof of completion. '
+    + 'The latest task humanInstruction is direct user direction and overrides conflicting earlier generated requirements. Evaluate the updated task, and do not classify an authorized change as a regression. '
     + 'A requirement/user-version row is a direct user-confirmed record: preserve its requirementId and source-language title and statement verbatim, and translate only the other language. Never let an inferred review redefine it. '
     + 'Reuse stable requirement ids from the previous snapshot. Create R1, R2, ... only for genuinely new requirements. '
     + 'Use refined when wording becomes more precise without changing intent; replaced only when the new intent invalidates the old one; withdrawn only with clear user evidence. '
@@ -411,7 +417,7 @@ function normalizedRequirementText(value: string, field: 'title' | 'statement'):
   return value.trim()
 }
 
-function normalizedTaskText(value: string, field: 'title' | 'statement'): string {
+function normalizedTaskText(value: string, field: 'title' | 'summary' | 'statement'): string {
   if (typeof value !== 'string') throw new TypeError(`task ${field} must be a string`)
   return value.trim()
 }
@@ -781,6 +787,7 @@ function submittedTask(
     order,
     kind,
     title,
+    summary: '',
     statement,
     requirementRefs,
     status: 'pending',
@@ -805,6 +812,44 @@ function taskListWithStatus(
   status: RequirementTask['status'],
 ): RequirementTask[] {
   return list.tasks.map(task => task.id === taskId ? { ...task, status } : { ...task })
+}
+
+function taskRequiresReview(kind: RequirementTaskKind): boolean {
+  switch (kind) {
+    case 'implementation': return false
+    case 'checkpoint':
+    case 'final-test': return true
+    default: return assertNever(kind, 'RequirementTaskKind')
+  }
+}
+
+function failedToolDiagnostic(
+  toolName: string,
+  result: Readonly<ToolExecutionResult>,
+): string | undefined {
+  const rendered = textOf(result.content).trim()
+  if (result.isError) return rendered === '' ? `${toolName} failed: ${result.error.message}` : rendered
+  if (toolName !== 'bash' && toolName !== 'pwsh') return undefined
+  const value: unknown = result.value
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const outcome = value as Record<string, unknown>
+  if (outcome.kind !== 'foreground') return undefined
+  const exitCode = typeof outcome.exitCode === 'number' ? outcome.exitCode : undefined
+  const signal = typeof outcome.signal === 'string' && outcome.signal !== '' ? outcome.signal : undefined
+  const timedOut = outcome.timedOut === true
+  const aborted = outcome.aborted === true
+  const sandbox = typeof outcome.sandbox === 'object' && outcome.sandbox !== null && !Array.isArray(outcome.sandbox)
+    ? outcome.sandbox as Record<string, unknown>
+    : undefined
+  const runnerFailed = sandbox?.runnerFailed === true
+  if (!timedOut && !aborted && !runnerFailed && signal === undefined
+    && (exitCode === undefined || exitCode === 0)) return undefined
+  if (rendered !== '') return rendered
+  if (timedOut) return `${toolName} command timed out`
+  if (aborted) return `${toolName} command was cancelled`
+  if (runnerFailed) return `${toolName} sandbox runner failed`
+  if (signal !== undefined) return `${toolName} command was killed by ${signal}`
+  return `${toolName} command exited with code ${String(exitCode)}`
 }
 
 function localizedSummary(
@@ -836,7 +881,9 @@ export class SessionRequirements extends TypertRemoteService {
   })
 
   private readonly states = new WeakMap<Session, ReviewState>()
+  private readonly taskReviewControllers = new WeakMap<Session, Map<number, AbortController>>()
   private readonly liveStates = new Set<ReviewState>()
+  private readonly taskTextShutdown = new AbortController()
   private readonly runAllStates = new WeakMap<Session, RunAllState>()
 
   /**
@@ -847,6 +894,8 @@ export class SessionRequirements extends TypertRemoteService {
     super(ctx, 'sessionRequirements')
     ctx.inject(['sessionProjections'], (projectionCtx) => {
       projectionCtx.sessionProjections.register(requirementGraphProjectionDefinition)
+      projectionCtx.sessionProjections.register(requirementNotebookProjectionDefinition)
+      projectionCtx.sessionProjections.register(requirementChangesProjectionDefinition)
     })
     ctx.tools.register(defineTool({
       name: 'clarify_requirements',
@@ -956,6 +1005,7 @@ export class SessionRequirements extends TypertRemoteService {
       execute: (args, exec) => Promise.resolve(this.submitTasks(args.tasks, args.final_test, exec)),
     }))
     ctx.effect(() => async () => {
+      this.taskTextShutdown.abort('session-requirements disposed')
       for (const state of this.liveStates) {
         for (const controller of state.controllers) controller.abort('session-requirements disposed')
       }
@@ -968,15 +1018,19 @@ export class SessionRequirements extends TypertRemoteService {
         try {
           this.trackExecution(session, event)
           this.trackPipeline(session, event)
+          if (event.type === 'tool/result') {
+            this.failTaskOnToolError(session, event)
+            return
+          }
           if (event.type !== 'turn/end' || session.header.origin === 'subagent') return
           const agent = ctx.agents.get(session.id)
           if (agent === undefined || agent.session !== session) return
-          const round = roundForTurn(session, event.data.turn)
-          if (round !== undefined) {
-            const task = session.events.findLast(candidate => candidate.type === 'requirement/task-execution'
-              && candidate.data.turn === event.data.turn && candidate.data.status === 'reviewing')
-            if (task?.type !== 'requirement/task-execution') return
-          }
+          const execution = session.events.findLast(candidate => candidate.type === 'requirement/task-execution'
+            && candidate.data.turn === event.data.turn && candidate.data.status === 'reviewing')
+          if (execution?.type !== 'requirement/task-execution') return
+          const task = latestTaskList(session, execution.data.roundId)?.tasks
+            .find(candidate => candidate.id === execution.data.taskId)
+          if (task === undefined || !taskRequiresReview(task.kind)) return
           void this.review(agent, event.data.turn)
         } catch (error: unknown) {
           ctx.logger.warn('dsh-session-requirements: failed to project Session event: %o', error)
@@ -984,10 +1038,37 @@ export class SessionRequirements extends TypertRemoteService {
       })
     })
 
+    ctx.on('tools/result', (exec, result) => {
+      const agent = exec.agent
+      if (agent === undefined || agent.session.header.origin === 'subagent'
+        || this.ctx.agents.get(agent.id) !== agent) return
+      const diagnostic = failedToolDiagnostic(exec.name, result)
+      if (diagnostic === undefined) return
+      const call = agent.session.events.findLast(event => event.type === 'tool/call'
+        && event.data.callId === exec.rootCallId)
+      if (call?.type !== 'tool/call') return
+      this.failProcessingTask(agent.session, call.data.turn, diagnostic)
+    })
+
     ctx.on('session/disposed', (session) => {
+      this.runAllStates.delete(session)
       const state = this.states.get(session)
       if (state === undefined) return
       for (const controller of state.controllers) controller.abort('parent session disposed')
+    })
+
+    ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
+      const execution = this.taskExecutionForMessage(agent.session, message.id)
+      if (execution?.status !== 'submitted') return
+      this.appendTaskExecution(agent.session, execution, {
+        roundId: execution.roundId,
+        taskId: execution.taskId,
+        messageId: execution.messageId,
+        status: 'processing',
+        turn,
+      })
+      const round = latestRound(agent.session, execution.roundId)
+      if (round?.turn !== turn) this.updateRound(agent.session, execution.roundId, { turn })
     })
 
     ctx.on('agent/inbox/discarded', ({ agent, message }) => {
@@ -1179,11 +1260,11 @@ export class SessionRequirements extends TypertRemoteService {
     return { accepted: true, revision: document.data.revision }
   }
 
-  private submitTasks(
+  private async submitTasks(
     inputs: readonly SubmittedTask[],
     finalInput: SubmittedFinalTask,
     exec: ToolRunContext,
-  ): { accepted: true; documentRevision: number; taskCount: number } {
+  ): Promise<{ accepted: true; documentRevision: number; taskCount: number }> {
     const round = this.activeToolRound(exec, ['generating-tasks'])
     const agent = exec.agent
     if (agent === undefined) throw new Error('requirement task submission requires an owning agent session')
@@ -1202,7 +1283,18 @@ export class SessionRequirements extends TypertRemoteService {
     const finalRefs = new Set(finalTask.requirementRefs)
     const missing = [...knownRefs].filter(ref => !finalRefs.has(ref))
     if (missing.length > 0) throw new TypeError(`final-test must verify every acceptance criterion; missing ${missing.join(', ')}`)
-    this.appendTaskList(agent.session, round.roundId, [...tasks, finalTask], document.revision)
+    const translated: RequirementTask[] = []
+    for (const task of [...tasks, finalTask]) {
+      const text = await this.transformTask(agent, task, undefined, exec.signal)
+      if (text.markdown !== task.statement) throw new TypeError('translation must preserve the complete Agent task verbatim')
+      translated.push({ ...task, title: text.title, summary: text.summary })
+    }
+    this.requireLiveAgent(agent)
+    if (latestDocument(agent.session, round.roundId)?.revision !== document.revision
+      || latestRound(agent.session, round.roundId)?.status !== 'generating-tasks') {
+      throw new Error('task translation is stale; generate tasks again')
+    }
+    this.appendTaskList(agent.session, round.roundId, translated, document.revision)
     this.updateRound(agent.session, round.roundId, { status: 'tasks-ready' })
     exec.concludeTurn()
     return { accepted: true, documentRevision: document.revision, taskCount: tasks.length + 1 }
@@ -1353,6 +1445,13 @@ export class SessionRequirements extends TypertRemoteService {
   @Remote('runTask')
   runTask(agent: Agent, request: RequirementTaskRunRequest): RequirementTaskRunResult {
     this.requireLiveAgent(agent)
+    if (this.runAllStates.has(agent.session)) {
+      throw new Error('individual tasks cannot start while Run All is active')
+    }
+    return this.queueTask(agent, request)
+  }
+
+  private queueTask(agent: Agent, request: RequirementTaskRunRequest): RequirementTaskRunResult {
     const session = agent.session
     const round = latestRound(session, request.roundId)
     if (round === undefined) throw new Error(`requirement round "${request.roundId}" does not exist`)
@@ -1379,7 +1478,7 @@ export class SessionRequirements extends TypertRemoteService {
       throw new Error(`requirement task "${request.taskId}" is already running`)
     }
     const message = createUserMessage({
-      content: [{ type: 'text', text: this.taskPrompt(round, task) }],
+      content: [{ type: 'text', text: this.taskPrompt(round, task, list.tasks) }],
       source: { kind: 'user' },
     })
     session.append('requirement/task-list', {
@@ -1417,9 +1516,43 @@ export class SessionRequirements extends TypertRemoteService {
         documentRevision: list.documentRevision,
         tasks: taskListWithStatus(list, request.taskId, 'failed'),
       })
+      this.updateRound(session, request.roundId, { status: 'failed' })
       throw error
     }
     return { roundId: request.roundId, taskId: request.taskId, eventSeq: execution.seq }
+  }
+
+  /**
+   * Cancel the selected task without discarding unrelated queued messages.
+   * @param agent - exact live Agent owning the task.
+   * @param request - round and task to stop.
+   * @returns acknowledgement referencing the selected execution.
+   */
+  @Remote('stopTask')
+  stopTask(agent: Agent, request: RequirementTaskRunRequest): RequirementTaskRunResult {
+    this.requireLiveAgent(agent)
+    const session = agent.session
+    const execution = latestTaskExecution(session, request.roundId, request.taskId)
+    if (execution === undefined) throw new Error('Task has no execution to stop')
+    if (execution.status === 'submitted' || execution.status === 'processing' || execution.status === 'reviewing') {
+      if (this.runAllStates.get(session)?.roundId === request.roundId) {
+        this.runAllStates.delete(session)
+        this.appendRunAll(session, request.roundId, 'stopped')
+      }
+      if (execution.status === 'reviewing') {
+        if (execution.turn !== undefined) this.taskReviewControllers.get(session)?.get(execution.turn)?.abort('Task stopped by user')
+        const list = this.currentTaskList(session, request.roundId)
+        this.appendTaskExecution(session, execution, {
+          roundId: execution.roundId, taskId: execution.taskId, messageId: execution.messageId,
+          status: 'failed', ...(execution.turn === undefined ? {} : { turn: execution.turn }),
+        })
+        this.appendTaskList(session, request.roundId, taskListWithStatus(list, request.taskId, 'failed'), list.documentRevision)
+        this.updateRound(session, request.roundId, { status: 'failed' })
+      } else if (!agent.inbox.remove(execution.messageId) && execution.turn === currentOpenTurn(session)) {
+        agent.cancel({ kind: 'user' }, { keepInbox: true })
+      }
+    }
+    return { ...request, eventSeq: session.events.at(-1)?.seq ?? 0 }
   }
 
   /**
@@ -1432,6 +1565,8 @@ export class SessionRequirements extends TypertRemoteService {
   addTask(agent: Agent, request: RequirementTaskAddRequest): RequirementTaskMutationResult {
     this.requireLiveAgent(agent)
     const title = normalizedTaskText(request.title, 'title')
+    const summary = normalizedTaskText(request.summary, 'summary')
+    if (summary.length > 120) throw new TypeError('task summary must not exceed 120 characters')
     const statement = normalizedTaskText(request.statement, 'statement')
     const session = agent.session
     const list = this.currentTaskList(session, request.roundId)
@@ -1447,7 +1582,7 @@ export class SessionRequirements extends TypertRemoteService {
       throw new Error(`requirement task "${request.afterTaskId}" does not exist`)
     }
     if (afterIndex >= finalIndex) throw new Error('tasks cannot be inserted after Final Test')
-    const taskId = stableTaskId(request.roundId, `manual-${list.revision + 1}`, `${title}\n${statement}`)
+    const taskId = stableTaskId(request.roundId, `manual-${list.revision + 1}`, `${title}\n${summary}\n${statement}`)
     const knownRefs = requirementAcceptanceRefs(document.markdown)
     const parsedRefs = taskRefsFromStatement(statement, knownRefs)
     const requirementRefs = title === '' && statement === '' ? [] : parsedRefs.length > 0 ? parsedRefs : [...knownRefs]
@@ -1456,34 +1591,44 @@ export class SessionRequirements extends TypertRemoteService {
       order: 0,
       kind: 'implementation',
       title,
+      summary,
       statement: taskStatementWithRefs(statement, requirementRefs),
       requirementRefs,
       status: 'pending',
     }
     const tasks = [...list.tasks]
     tasks.splice(afterIndex + 1, 0, task)
-    const ordered = tasks.map((item, order) => ({ ...item, order }))
+    const invalidatesFinal = hasTaskContent(task)
+    const ordered = tasks.map((item, order) => item.kind === 'final-test'
+      && item.status === 'completed' && invalidatesFinal
+      ? { ...item, order, status: 'pending' as const }
+      : { ...item, order })
     const event = this.appendTaskList(session, request.roundId, ordered, list.documentRevision)
+    if (invalidatesFinal) this.updateRound(session, request.roundId, { status: 'tasks-ready' })
     return { roundId: request.roundId, taskId, eventSeq: event.seq }
   }
 
   /**
-   * Persist a task's editable text, including empty drafts, and return it to the pending state.
+   * Rewrite execution instructions from a human edit, or translate changed Agent text.
+   * A successful change returns the task and Final Test to pending; stale results are rejected.
    * @param agent - exact live Agent that owns the round.
    * @param request - task identity and replacement text.
    * @returns the durable task identity and task-list event sequence.
    */
   @Remote('editTask')
-  editTask(agent: Agent, request: RequirementTaskEditRequest): RequirementTaskMutationResult {
+  async editTask(agent: Agent, request: RequirementTaskEditRequest): Promise<RequirementTaskMutationResult> {
     this.requireLiveAgent(agent)
     const title = normalizedTaskText(request.title, 'title')
+    const summary = normalizedTaskText(request.summary, 'summary')
     const statement = normalizedTaskText(request.statement, 'statement')
     const session = agent.session
     const list = this.currentTaskList(session, request.roundId)
     const task = list.tasks.find(item => item.id === request.taskId)
     if (task === undefined) throw new Error(`requirement task "${request.taskId}" does not exist`)
     this.requireTaskListEditable(list)
-    if (task.status === 'completed') throw new Error(`requirement task "${request.taskId}" is completed and locked`)
+    if (task.status === 'withdrawn') throw new Error(`requirement task "${request.taskId}" is withdrawn and locked`)
+    const humanEdit = request.humanEdit ?? summary !== task.summary
+    if (!humanEdit && task.status === 'completed') throw new Error(`requirement task "${request.taskId}" is completed and locked`)
     const document = latestDocument(session, request.roundId)
     if (document === undefined) throw new Error(`requirement document for round "${request.roundId}" does not exist`)
     const knownRefs = requirementAcceptanceRefs(document.markdown)
@@ -1491,10 +1636,67 @@ export class SessionRequirements extends TypertRemoteService {
     const requirementRefs = title === '' && statement === ''
       ? []
       : parsedRefs.length > 0 ? parsedRefs : task.requirementRefs.length > 0 ? [...task.requirementRefs] : [...knownRefs]
-    const event = this.appendTaskList(session, request.roundId, list.tasks.map(item => item.id === request.taskId
-      ? { ...item, title, statement: taskStatementWithRefs(statement, requirementRefs), requirementRefs, status: 'pending' }
-      : { ...item }), list.documentRevision)
-    return { roundId: request.roundId, taskId: request.taskId, eventSeq: event.seq }
+    const candidate = { ...task, title, summary, statement: taskStatementWithRefs(statement, requirementRefs), requirementRefs }
+    let rewritten = candidate
+    if (humanEdit && summary.trim() === '') throw new TypeError('human task instruction must not be empty')
+    if (humanEdit || (title !== '' && statement !== '')) {
+      const text = await this.transformTask(agent, candidate, humanEdit ? summary : undefined)
+      if (!humanEdit && text.markdown !== candidate.statement) throw new TypeError('translation must preserve the complete Agent task verbatim')
+      rewritten = { ...candidate, title: text.title, summary: humanEdit ? summary : text.summary,
+        statement: taskStatementWithRefs(text.markdown, requirementRefs) }
+    }
+    this.requireLiveAgent(agent)
+    const current = this.currentTaskList(session, request.roundId)
+    if (current.documentRevision !== list.documentRevision
+      || !isDeepStrictEqual(current.tasks.find(item => item.id === request.taskId), task)) {
+      throw new Error('task changed during translation; retry with the latest task')
+    }
+    this.requireTaskListEditable(current)
+    const updated = { ...rewritten, ...(humanEdit ? { humanInstruction: summary } : {}), status: 'pending' as const }
+    const event = this.appendTaskList(session, request.roundId, current.tasks.map(item => item.id === request.taskId
+      ? updated
+      : item.kind === 'final-test' && item.status === 'completed' ? { ...item, status: 'pending' } : { ...item }), list.documentRevision)
+    this.updateRound(session, request.roundId, { status: 'tasks-ready' })
+    return { roundId: request.roundId, taskId: request.taskId, eventSeq: event.seq, task: updated }
+  }
+
+  private transformTask(agent: Agent, task: RequirementTask, humanInstruction?: string, signal?: AbortSignal): Promise<TaskText> {
+    let state = this.states.get(agent.session)
+    if (state === undefined) {
+      state = { controllers: new Set(), tail: Promise.resolve() }
+      this.states.set(agent.session, state)
+    }
+    const owner = state
+    this.liveStates.add(owner)
+    const operation = owner.tail.catch(() => {}).then(async () => {
+      const controller = new AbortController()
+      owner.controllers.add(controller)
+      let run: SubagentRun | undefined
+      try {
+        this.requireLiveAgent(agent)
+        const prompt = `${humanInstruction === undefined
+          ? '将已确定的完整Agent任务翻译成人类标题和摘要。markdown必须逐字返回原文，禁止改写。'
+          : '根据人类最新指令重新编写完整Agent任务。人类指令优先于旧任务及旧需求；删除冲突或已取消的步骤，保留未冲突的必要上下文。只改写任务，不执行任务。markdown包含目标、输入与范围、约束、具体动作、验收与验证、产出和失败处理；沿用任务编号。summary可以简述意图，系统会保存人类原文。'}\n${TASK_TEXT_POLICY}\n\n${JSON.stringify({ task, ...(humanInstruction === undefined ? {} : { humanInstruction }) })}`
+        if (prompt.length > this.config.maxInputChars) throw new Error('complete task exceeds configured maxInputChars; increase the limit before translating')
+        const combined = AbortSignal.any([this.taskTextShutdown.signal, controller.signal, ...(signal === undefined ? [] : [signal])])
+        combined.throwIfAborted()
+        run = await this.ctx.subagents.start(this.config.reviewerProvider, {
+          label: humanInstruction === undefined ? 'Translate task for human' : 'Revise task from human instruction',
+          prompt: [{ type: 'text', text: prompt }], parent: agent, signal: combined,
+          maxDepth: 1, toolFilter: { allow: [] }, outputSchema: TASK_TEXT_SCHEMA,
+        })
+        const result = await run.result
+        combined.throwIfAborted()
+        if (result.stopReason !== 'completed') throw new Error(`task translation failed: ${result.stopReason}`)
+        return validateTaskText(result.structured)
+      } finally {
+        try { await run?.dispose() } finally { owner.controllers.delete(controller) }
+      }
+    })
+    owner.tail = operation.then(() => {}, () => {})
+    const tail = owner.tail
+    void tail.finally(() => { if (owner.tail === tail) this.liveStates.delete(owner) })
+    return operation
   }
 
   /**
@@ -1571,7 +1773,7 @@ export class SessionRequirements extends TypertRemoteService {
     this.runAllStates.set(agent.session, { agent, roundId: request.roundId, stopRequested: false })
     this.appendRunAll(agent.session, request.roundId, 'running')
     try {
-      return this.runTask(agent, { roundId: request.roundId, taskId: next.id })
+      return this.queueTask(agent, { roundId: request.roundId, taskId: next.id })
     } catch (error: unknown) {
       this.runAllStates.delete(agent.session)
       this.appendRunAll(agent.session, request.roundId, 'failed')
@@ -1580,7 +1782,7 @@ export class SessionRequirements extends TypertRemoteService {
   }
 
   /**
-   * Stop Run All after the current task and its independent review settle.
+   * Stop Run All after the current task and any required review settle.
    * @param agent - exact live Agent that owns the ordered run.
    * @param request - round whose ordered run should stop.
    * @returns durable stop-request position.
@@ -1683,14 +1885,16 @@ export class SessionRequirements extends TypertRemoteService {
   }
 
   private taskGenerationPrompt(round: RequirementRoundEvent, document: RequirementDocumentEvent): string {
-    return `为第 ${round.round} 轮需求 Notebook 生成完整的中文实施任务。先只读检查实际仓库、仓库说明和可用命令，不要修改文件，不要进入 Plan 模式，也不要调用 todo_write。最终只调用 submit_requirement_tasks。\n\n需求文档 v${document.revision}：\n${document.markdown}\n\n每个 tasks 数组元素对应一个顶级可执行 Task 块，按依赖顺序排列；不要把 1.1、1.2 等子项拆成独立块。title 是简洁中文阶段标题，markdown 包含该阶段全部 \`- [ ] N.x\` 子任务、文件、命令、配置、实现细节和验证条件。所有项目都是必做项，不得使用 \`- [ ]*\`。requirement_refs 必须引用文档中真实存在的验收标准编号。\n\nfinal_test 单独提交，由后台固定放在最后；它必须覆盖文档的每一条验收标准，并包含相关测试、类型检查、构建和必要的界面验收。Final Test 执行时可以修复本轮引入的问题并重新验证，但不得删除测试、放宽断言或隐藏失败。`
+    return `为第 ${round.round} 轮需求 Notebook 生成完整的中文实施任务。先只读检查实际仓库和可用命令，不要修改文件，不要进入 Plan 模式。最终调用 submit_requirement_tasks。\n\n需求文档 v${document.revision}：\n${document.markdown}\n\n每个任务对应一个可交付结果，按依赖顺序排列。先完成 markdown，包含目标、输入和范围、约束、连续编号的 - [ ] N.x 具体动作、验收与验证、产出、失败处理。所有项目必做，不得提前勾选。title 为中文动作标题；此阶段不生成 summary，提交后由独立翻译器读取完整任务并生成人类说明。requirement_refs 引用真实验收编号。final_test 单独提交并覆盖全部验收要求；允许修复本轮问题并重新验证，不得删除测试、放宽断言或隐藏失败。`
   }
 
-  private taskPrompt(round: RequirementRoundEvent, task: RequirementTask): string {
+  private taskPrompt(round: RequirementRoundEvent, task: RequirementTask, tasks: readonly RequirementTask[]): string {
     const finalInstruction = task.kind === 'final-test'
       ? '\n\n这是最后的 Final Test。运行完整验证；发现由本轮修改引入的问题时可以修复并重新验证，但不得删除测试、放宽断言或隐藏失败。'
       : ''
-    return `继续执行第 ${round.round} 轮需求 Notebook 的任务 ${task.order + 1}：${task.title}\n\n任务说明：\n${task.statement}\n\n只完成这个任务，保留当前 Notebook 中已确认的其他需求，并在完成后给出可验证结果。${finalInstruction}`
+    const directions = tasks.filter(item => item.humanInstruction !== undefined)
+      .map(item => ({ task: item.title, instruction: item.humanInstruction }))
+    return `继续执行第 ${round.round} 轮需求 Notebook 的任务 ${task.order + 1}：${task.title}\n\n任务说明：\n${task.statement}\n\n本轮人类最新修改（优先于冲突的旧需求、旧任务和旧验收标准；Final Test 必须按修改后的意图验证）：\n${JSON.stringify(directions)}\n\n只完成这个任务，保留未冲突的其他需求，并在完成后给出可验证结果。${finalInstruction}\n\n最终回复仅含两个二级标题：\n## 交付结果\n列出实际完成的产物，用可点击的文件或页面链接加一句用途说明；没有文件时直接描述实际结果，未交付则如实说明。\n## 说明\n用简短自然语言说明如何使用、完成范围、必要限制、失败或待处理事项；无补充则写“无”。不得把计划写成已完成，不得隐瞒失败。不要附加开场白、执行过程、命令日志、步骤统计、验收对照表、测试明细或其他章节；这些证据留在工具与轨迹记录中。`
   }
 
   private notePrompt(round: RequirementRoundEvent, kind: 'text' | 'comment', content: string): string {
@@ -1821,20 +2025,66 @@ export class SessionRequirements extends TypertRemoteService {
   }
 
   private assistantOutput(session: Session, turn: number): string | undefined {
-    const output = session.events.flatMap(event => event.type === 'assistant/message' && event.data.turn === turn
-      ? [textOf(event.data.message.content)]
-      : []).filter(text => text.trim() !== '').join('\n')
+    const final = session.events.findLast(event => event.type === 'assistant/message' && event.data.turn === turn
+      && textOf(event.data.message.content).trim() !== '')
+    const output = final?.type === 'assistant/message' ? textOf(final.data.message.content) : ''
     if (output === '') return undefined
     return output.length <= 4000 ? output : `${output.slice(0, 3997)}...`
+  }
+
+  private failTaskOnToolError(
+    session: Session,
+    event: Extract<SessionEvent, { readonly type: 'tool/result' }>,
+  ): void {
+    const failed = event.data.message.content.some(block => block.isError)
+    if (!failed) return
+    const detail = event.data.message.content
+      .map(block => textOf(block.content))
+      .filter(Boolean)
+      .join('\n')
+    this.failProcessingTask(session, event.data.turn,
+      detail === '' ? 'Task stopped after a command or tool failed.' : detail)
+  }
+
+  private failProcessingTask(session: Session, turn: number, detail: string): void {
+    const execution = session.events.findLast(candidate => candidate.type === 'requirement/task-execution'
+      && candidate.data.turn === turn && candidate.data.status === 'processing')
+    if (execution?.type !== 'requirement/task-execution') return
+    const latest = latestTaskExecution(session, execution.data.roundId, execution.data.taskId)
+    if (latest?.status !== 'processing' || latest.revision !== execution.data.revision) return
+    const list = latestTaskList(session, execution.data.roundId)
+    if (list === undefined || !list.tasks.some(task => task.id === execution.data.taskId)) return
+    this.appendTaskExecution(session, execution.data, {
+      roundId: execution.data.roundId,
+      taskId: execution.data.taskId,
+      messageId: execution.data.messageId,
+      status: 'failed',
+      turn,
+      output: boundedDiagnostic(detail),
+    })
+    this.appendTaskList(session, execution.data.roundId,
+      taskListWithStatus(list, execution.data.taskId, 'failed'), list.documentRevision)
+    const runAll = this.runAllStates.get(session)
+    if (runAll?.roundId === execution.data.roundId) {
+      this.appendRunAll(session, execution.data.roundId, 'failed')
+      this.runAllStates.delete(session)
+    }
+    this.updateRound(session, execution.data.roundId, { status: 'failed' })
+    const agent = this.ctx.agents.get(session.id)
+    if (agent?.session === session) {
+      agent.cancel({ kind: 'hook', reason: 'requirement task command failed' }, { keepInbox: true })
+    }
   }
 
   private trackPipeline(session: Session, event: SessionEvent): void {
     if (event.type === 'user/message') {
       const round = this.roundForMessage(session, event.data.id)
       const turn = currentOpenTurn(session)
-      if (round !== undefined && turn !== undefined) this.updateRound(session, round.roundId, { turn })
+      if (round !== undefined && turn !== undefined && round.turn !== turn) {
+        this.updateRound(session, round.roundId, { turn })
+      }
       const execution = this.taskExecutionForMessage(session, event.data.id)
-      if (execution !== undefined && turn !== undefined) {
+      if (execution?.status === 'submitted' && turn !== undefined) {
         this.appendTaskExecution(session, execution, {
           roundId: execution.roundId,
           taskId: execution.taskId,
@@ -1850,32 +2100,42 @@ export class SessionRequirements extends TypertRemoteService {
     if (round === undefined) return
     const completed = event.data.reason.kind === 'completed'
     const output = this.assistantOutput(session, event.data.turn)
-    const taskExecutions = session.events.filter(candidate => candidate.type === 'requirement/task-execution'
-      && candidate.data.turn === event.data.turn && candidate.data.status === 'processing')
+    const taskExecutions = session.events.filter((candidate) => {
+      if (candidate.type !== 'requirement/task-execution'
+        || candidate.data.turn !== event.data.turn || candidate.data.status !== 'processing') return false
+      const latest = latestTaskExecution(session, candidate.data.roundId, candidate.data.taskId)
+      return latest?.status === 'processing' && latest.revision === candidate.data.revision
+    })
     for (const candidate of taskExecutions) {
       if (candidate.type !== 'requirement/task-execution') continue
+      const list = latestTaskList(session, candidate.data.roundId)
+      const task = list?.tasks.find(item => item.id === candidate.data.taskId)
+      const succeeded = completed && task !== undefined
+      const reviewRequired = succeeded && taskRequiresReview(task.kind)
+      const status = !succeeded ? 'failed' : reviewRequired ? 'reviewing' : 'completed'
       this.appendTaskExecution(session, candidate.data, {
         roundId: candidate.data.roundId,
         taskId: candidate.data.taskId,
         messageId: candidate.data.messageId,
-        status: completed ? 'reviewing' : 'failed',
+        status,
         turn: event.data.turn,
         ...(output === undefined ? {} : { output }),
       })
-      const list = latestTaskList(session, candidate.data.roundId)
       if (list !== undefined) {
         this.appendTaskList(session, candidate.data.roundId,
-          taskListWithStatus(list, candidate.data.taskId, completed ? 'reviewing' : 'failed'), list.documentRevision)
+          taskListWithStatus(list, candidate.data.taskId, status), list.documentRevision)
       }
-      if (completed) {
+      if (reviewRequired) {
         this.updateRound(session, candidate.data.roundId, { status: 'reviewing' })
-      } else {
+      } else if (!succeeded) {
         const runAll = this.runAllStates.get(session)
         if (runAll?.roundId === candidate.data.roundId) {
           this.appendRunAll(session, candidate.data.roundId, 'failed')
           this.runAllStates.delete(session)
         }
         this.updateRound(session, candidate.data.roundId, { status: 'failed' })
+      } else {
+        void this.continueRunAllAfterIdle(session, candidate.data.roundId)
       }
     }
     if (taskExecutions.length !== 0) return
@@ -2045,7 +2305,17 @@ export class SessionRequirements extends TypertRemoteService {
     const taskExecution = reviewingExecution?.type === 'requirement/task-execution'
       ? reviewingExecution.data
       : undefined
+    if (taskExecution !== undefined) {
+      const latest = latestTaskExecution(session, taskExecution.roundId, taskExecution.taskId)
+      if (latest?.status !== 'reviewing' || latest.messageId !== taskExecution.messageId) return
+    }
     const controller = new AbortController()
+    let controllers = this.taskReviewControllers.get(session)
+    if (controllers === undefined) {
+      controllers = new Map()
+      this.taskReviewControllers.set(session, controllers)
+    }
+    controllers.set(turn, controller)
     state.controllers.add(controller)
     let run: SubagentRun | undefined
     let reviewAppended = false
@@ -2060,6 +2330,7 @@ export class SessionRequirements extends TypertRemoteService {
         outputSchema: REVIEW_OUTPUT_SCHEMA,
       })
       const result = await run.result
+      if (controller.signal.aborted) return
       if (result.stopReason !== 'completed') {
         const failure = this.appendFailure(session, turn, reviewedThroughSeq, 'reviewer-failed', result.diagnostic ?? result.stopReason, run)
         reviewAppended = true
@@ -2105,6 +2376,7 @@ export class SessionRequirements extends TypertRemoteService {
         await run?.dispose()
       } finally {
         state.controllers.delete(controller)
+        if (controllers.get(turn) === controller) controllers.delete(turn)
       }
     }
   }
@@ -2172,32 +2444,51 @@ export class SessionRequirements extends TypertRemoteService {
       return
     }
 
-    if (runAll?.roundId === execution.data.roundId) {
+    this.continueRunAll(session, execution.data.roundId)
+  }
+
+  private continueRunAll(session: Session, roundId: RequirementRoundId): void {
+    const runAll = this.runAllStates.get(session)
+    if (runAll?.roundId === roundId) {
       if (runAll.stopRequested) {
-        this.appendRunAll(session, execution.data.roundId, 'stopped')
+        this.appendRunAll(session, roundId, 'stopped')
         this.runAllStates.delete(session)
-        this.updateRound(session, execution.data.roundId, { status: 'tasks-ready' })
+        this.updateRound(session, roundId, { status: 'tasks-ready' })
         return
       }
-      const next = latestTaskList(session, execution.data.roundId)?.tasks.find(item => (
-        item.status === 'pending' && hasTaskContent(item)
+      const next = latestTaskList(session, roundId)?.tasks.find(item => (
+        (item.status === 'pending' || item.status === 'failed') && hasTaskContent(item)
       ))
       if (next !== undefined) {
         try {
-          this.runTask(runAll.agent, { roundId: execution.data.roundId, taskId: next.id })
+          this.queueTask(runAll.agent, { roundId, taskId: next.id })
           return
         } catch (error: unknown) {
           this.ctx.logger.warn('dsh-session-requirements: failed to queue next task: %o', error)
-          this.appendRunAll(session, execution.data.roundId, 'failed')
+          this.appendRunAll(session, roundId, 'failed')
           this.runAllStates.delete(session)
-          this.updateRound(session, execution.data.roundId, { status: 'failed' })
           return
         }
       }
-      this.appendRunAll(session, execution.data.roundId, 'completed')
+      this.appendRunAll(session, roundId, 'completed')
       this.runAllStates.delete(session)
     }
-    this.updateRound(session, execution.data.roundId, { status: 'tasks-ready' })
+    this.updateRound(session, roundId, { status: 'tasks-ready' })
+  }
+
+  private async continueRunAllAfterIdle(session: Session, roundId: RequirementRoundId): Promise<void> {
+    const runAll = this.runAllStates.get(session)
+    if (runAll?.roundId !== roundId) {
+      this.continueRunAll(session, roundId)
+      return
+    }
+    await runAll.agent.whenIdle()
+    if (this.runAllStates.get(session) !== runAll) return
+    if (this.ctx.agents.get(session.id) !== runAll.agent || runAll.agent.session !== session) {
+      this.runAllStates.delete(session)
+      return
+    }
+    this.continueRunAll(session, roundId)
   }
 
   private appendValidation(session: Session, review: RequirementReviewCompleted): void {

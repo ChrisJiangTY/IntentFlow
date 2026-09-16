@@ -42,7 +42,7 @@ function todoShape(row: Element, panel: Element): string {
 
 describe('assembled todo surfaces', () => {
   it('renders the parallel plan as a row summary, a separate active count, and the dock plan strip', async () => {
-    mountAssembledApp()
+    mountAssembledApp('?fixture', { selectedView: 'chat' })
 
     const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
     fireEvent.click(await within(tree).findByText('Fixture 历史会话'))

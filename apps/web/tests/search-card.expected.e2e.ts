@@ -46,7 +46,7 @@ function cardShape(root: Element): string {
 
 describe('assembled search card', () => {
   it('renders the grep card, its truncation summary, and its capped head/tail slice from the built bundles', async () => {
-    mountAssembledApp()
+    mountAssembledApp('?fixture', { selectedView: 'chat' })
 
     const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
     fireEvent.click(await within(tree).findByText('Fixture 历史会话'))

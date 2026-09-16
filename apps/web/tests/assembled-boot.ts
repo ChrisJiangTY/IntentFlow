@@ -25,6 +25,8 @@ interface AssembledPlugin extends WebBootEntry {
 interface AssembledBootOptions {
   /** Package ids omitted from this mounted composition. */
   readonly exclude?: readonly string[]
+  /** Explicit persisted View for resident fixture Sessions. */
+  readonly selectedView?: string
 }
 
 interface ClientPackageManifest {
@@ -255,6 +257,16 @@ export function installAssembledBootEnv(): void {
 export function mountAssembledApp(search = '?fixture', options: AssembledBootOptions = {}): void {
   const excluded = new Set(options.exclude)
   const plugins = PLUGINS.filter(plugin => !excluded.has(plugin.id))
+  if (options.selectedView !== undefined) {
+    const fixtureSessionIds = ['fx-alpha', 'fx-beta', 'fx-gamma', 'fx-1']
+    for (const sessionId of fixtureSessionIds) {
+      localStorage.setItem(`dsh.conversation.${sessionId}`, JSON.stringify({
+        draft: '',
+        view: options.selectedView,
+        viewRequest: null,
+      }))
+    }
+  }
   history.replaceState(null, '', `/${search}`)
   const root = document.createElement('div')
   root.id = 'root'

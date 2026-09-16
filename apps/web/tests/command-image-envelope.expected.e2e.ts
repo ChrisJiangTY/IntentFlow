@@ -54,7 +54,7 @@ async function pasteImage(textarea: HTMLElement, name: string): Promise<void> {
 }
 
 it('refuses an image-carrying submit to a non-declaring command and keeps draft and images', async () => {
-  mountAssembledApp()
+  mountAssembledApp('?fixture', { selectedView: 'chat' })
   const textarea = await freshComposer()
   await pasteImage(textarea, 'ref.png')
 
@@ -80,7 +80,7 @@ it('refuses an image-carrying submit to a non-declaring command and keeps draft 
 })
 
 it('consumes images through a declaring command and clears the composer on success', async () => {
-  mountAssembledApp()
+  mountAssembledApp('?fixture', { selectedView: 'chat' })
   const textarea = await freshComposer()
   await pasteImage(textarea, 'goal-ref.png')
 
@@ -96,7 +96,7 @@ it('consumes images through a declaring command and clears the composer on succe
 })
 
 it('submits a bare /plan with an image as an image-only plan request', async () => {
-  mountAssembledApp()
+  mountAssembledApp('?fixture', { selectedView: 'chat' })
   const textarea = await freshComposer()
   await pasteImage(textarea, 'plan-task.png')
 

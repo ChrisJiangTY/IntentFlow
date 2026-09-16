@@ -164,6 +164,7 @@
   flex: 1;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .notebook {
@@ -375,31 +376,58 @@
   white-space: pre-wrap;
 }
 
-.taskSourceRow {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 10px;
+.taskHeadingRow {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
 }
 
-.taskSourceRow > span {
-  padding-top: 1px;
+.taskHeadingRow > span {
+  flex: 0 0 auto;
   color: #1f854d;
   font: 600 12px/18px var(--ds-font-family-code);
+}
+
+.taskHeadingRow > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-sm-14);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskSummaryInput {
+  box-sizing: border-box;
+  display: block;
+  width: calc(100% - 54px);
+  min-height: 30px;
+  margin: 5px 0 0 54px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  color: var(--dsw-alias-label-secondary);
+  outline: none;
+  background: transparent;
+  resize: none;
+  font: var(--dsw-font-xs-13);
+  line-height: 1.55;
 }
 
 .taskSource {
   box-sizing: border-box;
   width: 100%;
-  min-height: 30px;
+  min-height: 96px;
   margin: 0;
-  padding: 0 2px;
+  padding: 7px 9px;
   overflow: hidden;
-  border: 0;
-  border-radius: 3px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
   color: var(--dsw-alias-label-primary);
   outline: none;
-  background: transparent;
+  background: var(--dsw-alias-bg-layer-1);
   resize: none;
   font: 12px/18px var(--ds-font-family-code);
   white-space: pre-wrap;
@@ -407,6 +435,60 @@
 
 .taskSource:focus {
   background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 4%, transparent);
+}
+
+.taskAgentSpec {
+  display: grid;
+  min-width: 0;
+  padding: 4px 14px 3px 32px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.taskAgentSpec[data-expanded='true'] {
+  padding-bottom: 10px;
+}
+
+.taskAgentSpecToggle {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 24px;
+  padding: 2px 6px;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--dsw-alias-label-caption);
+  background: transparent;
+  cursor: pointer;
+  font: var(--dsw-font-xxs-12);
+}
+
+.taskAgentSpecToggle:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.taskAgentSpecToggle:focus-visible {
+  outline: 1px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.taskAgentSpecBody {
+  min-width: 0;
+  padding: 7px 0 0 24px;
+}
+
+.taskAgentSpecReadonly {
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+
+  max-height: 240px;
+  padding: 9px 11px;
+  overflow: auto;
+  border-left: 2px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2);
+  font: 12px/18px var(--ds-font-family-code);
 }
 
 .markdown {
@@ -1017,16 +1099,53 @@
   font-family: var(--ds-font-family-code);
 }
 
+.traceControls { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; }
+.traceControls > span { margin-right: auto; color: var(--dsw-alias-label-secondary); }
+.traceControls button, .traceDetail button { border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 4px 8px; background: var(--dsw-alias-bg-layer-1); color: inherit; cursor: pointer; }
+.traceViewport { overflow: auto; max-height: 60vh; background-image: radial-gradient(var(--dsw-alias-border-l2) 1px, transparent 1px); background-size: 16px 16px; }
+.traceCanvas { position: relative; transform-origin: top left; }
+.traceCanvas svg { position: absolute; inset: 0; pointer-events: none; }
+.traceCanvas svg path { fill: none; stroke: var(--dsw-alias-label-secondary); stroke-width: 1.5; }
+.traceCanvas [data-dimmed='true'] { opacity: .18; }
+.traceColumn { position: absolute; top: 12px; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.traceNode { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 4px; width: 172px; height: 74px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-left: 3px solid #9174c4; border-radius: 10px; background: var(--dsw-alias-bg-layer-1); color: inherit; text-align: left; cursor: pointer; transition: opacity .15s; }
+.traceNode[data-layer='task'] { border-left-color: #548dbd; }
+.traceNode[data-layer='code'] { border-left-color: #55a187; }
+.traceNode[aria-pressed='true'], .traceNode:focus-visible { outline: 2px solid #9174c4; outline-offset: 2px; }
+.traceNode strong { font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; width: 100%; }
+.traceNode small, .traceNode span { font-size: 10px; color: var(--dsw-alias-label-secondary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 100%; }
+.traceHint { padding: 8px 12px; font-size: 11px; color: var(--dsw-alias-label-secondary); line-height: 1.6; }
+.traceDetail { border-top: 1px solid var(--dsw-alias-border-l2); padding: 12px; font-size: 12px; overflow-wrap: anywhere; }
+.traceDetail p { line-height: 1.6; }
+.traceDetail details { margin-top: 12px; }
+.traceDetail summary { cursor: pointer; margin-bottom: 10px; }
+.traceDetail pre { overflow: auto; max-height: 240px; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; font-size: 11px; }
 .graphPanel {
+  position: relative;
   display: flex;
-  width: 372px;
-  min-width: 320px;
+  width: 660px;
+  min-width: 0;
+  max-width: 90%;
   min-height: 0;
-  flex: 0 0 min(372px, 40%);
+  flex: 0 0 min(660px, 48%);
   flex-direction: column;
   border-left: 1px solid var(--dsw-alias-border-l2);
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-bg-layer-1);
+}
+
+.graphResize {
+  position: absolute;
+  z-index: 10;
+  inset: 0 auto 0 -4px;
+  width: 9px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.graphResize:hover,
+.graphResize:focus-visible {
+  background: var(--dsw-alias-border-l2);
 }
 
 .graphHeader {
@@ -1124,9 +1243,11 @@
 }
 
 .graphBody {
+  flex: 1;
   min-height: 0;
-  padding: 12px;
+  padding: 12px 12px calc(var(--dsh-composer-height, 152px) + 24px);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .graphEmpty {

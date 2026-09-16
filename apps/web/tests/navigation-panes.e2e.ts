@@ -15,6 +15,7 @@ import { strFromU8, unzipSync } from 'fflate'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest'
 import { parseSessionLog } from '@deepseek-ai/dsh-llm-replay'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { createUserMessage, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
@@ -30,6 +31,7 @@ const REQUIREMENTS_EN_EXPECTED = join(SNAPSHOT_DIR, 'requirements-en.expected.md
 const REQUIREMENTS_ZH_EXPECTED = join(SNAPSHOT_DIR, 'requirements-zh.expected.md')
 const REQUIREMENTS_DRAFT_EXPECTED = join(SNAPSHOT_DIR, 'requirements-draft.expected.md')
 const REQUIREMENTS_NOTE_EXPECTED = join(SNAPSHOT_DIR, 'requirements-markdown-note.expected.md')
+const REQUIREMENTS_RESTORED_EXPECTED = join(SNAPSHOT_DIR, 'requirements-restored.expected.md')
 const MODE = webSnapshotMode()
 const SEED_ID = 'navigation-panes-web-e2e'
 
@@ -107,7 +109,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
   }, 120_000)
 
   beforeEach(async () => {
-    page = await newEnglishPage(browser)
+    page = await newEnglishPage(browser, 1000, MODE === 'record' ? 'chat' : 'product-default')
     tripwire = watchConsole(page)
     slotErrors = []
     page.on('console', (message) => {
@@ -215,12 +217,34 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     // Search navigation addresses the session, not a specific event, and the
     // query remains until the user explicitly clears it.
     await expect.poll(() => search.inputValue(), { timeout: 5_000 }).toBe('WATERFALL')
+    await page.getByRole('tab', { name: 'Chat', exact: true }).click()
     await expect.poll(() => page.getByText('FIRST_DONE', { exact: true }).count(), { timeout: 15_000 }).toBeGreaterThanOrEqual(1)
     await expect.poll(() => page.getByRole('heading', { name: 'Navigation Summary' }).count(), { timeout: 15_000 }).toBe(1)
     await page.getByRole('button', { name: 'Clear search' }).click()
     await expect.poll(() => search.inputValue(), { timeout: 5_000 }).toBe('')
     await expect.poll(() => page.locator('[role="treeitem"]').count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
   }, 90_000)
+
+  it.skipIf(MODE === 'record')('opens a Session in the Requirements view by default', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-navigation-default-requirements'))
+    const welcome = page.locator('[class*="onboardingOverlay"]')
+    if (await welcome.count() > 0) {
+      await welcome.getByRole('button').click()
+      await welcome.waitFor({ state: 'detached', timeout: 15_000 })
+    }
+    const searchButton = page.getByRole('button', { name: 'Search sessions' })
+    if (await searchButton.getAttribute('aria-expanded') !== 'true') await searchButton.click()
+    const search = page.getByPlaceholder('Search sessions', { exact: false })
+    await search.fill('WATERFALL')
+    const result = page.getByRole('tree', { name: 'Search results' }).getByRole('treeitem')
+    await expect.poll(() => result.count(), { timeout: 15_000 }).toBe(1)
+    await result.click()
+
+    const requirements = page.getByRole('tab', { name: 'Requirements', exact: true })
+    await requirements.waitFor({ timeout: 15_000 })
+    await expect.poll(() => requirements.getAttribute('aria-selected'), { timeout: 15_000 }).toBe('true')
+    await page.getByRole('toolbar', { name: 'Requirements view toolbar' }).waitFor({ timeout: 15_000 })
+  }, 60_000)
 
   it.skipIf(MODE === 'record')('renders the trajectory ledger and opens its local record inspector', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-navigation-trajectory'))
@@ -345,6 +369,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
         order: 0,
         kind: 'implementation',
         title: 'Build navigation HTML',
+        summary: 'Users can navigate the page with a clear, complete layout.',
         statement: 'Implement the requested navigation in index.html.\n\n_关联需求：1.1_',
         requirementRefs: ['1.1'],
         status: 'completed',
@@ -353,6 +378,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
         order: 1,
         kind: 'checkpoint',
         title: 'Check mobile navigation',
+        summary: 'Mobile navigation remains usable at the target breakpoint.',
         statement: 'Verify the navigation at the mobile breakpoint.\n\n_关联需求：1.2_',
         requirementRefs: ['1.2'],
         status: 'failed',
@@ -361,6 +387,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
         order: 2,
         kind: 'final-test',
         title: 'Final Test',
+        summary: 'The complete navigation experience meets every acceptance criterion.',
         statement: 'Run the complete navigation test set and verify every acceptance criterion.\n\n_关联需求：1.1、1.2_',
         requirementRefs: ['1.1', '1.2'],
         status: 'pending',
@@ -383,8 +410,8 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       taskId: failedTaskId,
       messageId: 'requirements-task-message-2' as never,
       status: 'failed',
-      turn: 2,
-      output: 'The mobile breakpoint needs another pass.',
+      turn: 3,
+      output: 'Checking mobile viewport.\n\n## Deliverables\n\nNo mobile layout delivered.\n\n## Verification\n\nInternal viewport assertions.\n\n## Notes\n\nThe mobile breakpoint needs another pass.',
     })
     session.append('requirement/note', {
       version: 1,
@@ -393,6 +420,10 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       kind: 'text',
       content: 'Keep the existing DSH conversation controls visible.',
       dispatched: false,
+    })
+    session.append('requirement/note', {
+      version: 1, roundId, noteId: 'COMMENT-WEB-01' as never,
+      kind: 'comment', content: 'Hidden Notebook comment', dispatched: true,
     })
     session.append('requirement/validation', {
       version: 1,
@@ -452,8 +483,17 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       }],
     })
     await page.getByRole('tab', { name: 'Requirements' }).click()
-    const taskTitle = page.getByRole('textbox', { name: 'Task content Build navigation HTML', exact: true })
-    await taskTitle.waitFor({ timeout: 15_000 })
+    const taskCell = page.locator('[data-cell="task"][data-task-id]').filter({ hasText: 'Build navigation HTML' })
+    await taskCell.waitFor({ timeout: 15_000 })
+    const failedOutput = page.getByRole('region', { name: 'Task output Check mobile navigation' })
+    expect(await failedOutput.getByRole('heading').allTextContents()).toEqual(['Deliverables'])
+    expect(await failedOutput.getByText('The mobile breakpoint needs another pass.', { exact: true }).count()).toBe(0)
+    expect(await failedOutput.getByText('Internal viewport assertions.', { exact: true }).count()).toBe(0)
+    expect(await page.locator('[data-cell="comment"]').count()).toBe(0)
+    expect(await page.getByText('Hidden Notebook comment', { exact: true }).count()).toBe(0)
+    expect(session.events.some(event => event.type === 'requirement/note' && event.data.kind === 'comment')).toBe(true)
+    await page.getByText('Users can navigate the page with a clear, complete layout.', { exact: true }).waitFor()
+    expect(await page.getByRole('textbox', { name: 'Task content Build navigation HTML', exact: true }).count()).toBe(0)
     const toolbar = page.getByRole('toolbar', { name: 'Requirements view toolbar' })
     expect(await page.getByRole('button', { name: 'Code', exact: true }).count()).toBe(1)
     expect(await page.getByRole('button', { name: 'Text', exact: true }).count()).toBe(1)
@@ -461,7 +501,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     expect(await toolbar.getByRole('button', { name: 'Text', exact: true }).count()).toBe(1)
     expect(await page.locator('[data-cell="task"][data-status="failed"]').count()).toBe(1)
     expect(await page.locator('[data-cell="validation"][data-status="completed"]').count()).toBe(1)
-    await taskTitle.click()
+    await taskCell.click()
     await page.getByRole('button', { name: 'More cell actions' }).click()
     await page.getByRole('menuitem', { name: 'View details and evidence' }).click()
     await page.getByText('The recorded reply contains the required heading', { exact: false }).waitFor()
@@ -481,13 +521,35 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await toolbar.getByRole('button', { name: 'Command', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Use English content' }).click()
     await toolbar.getByRole('button', { name: 'Open or close the requirement knowledge graph' }).click()
-    await expect.poll(() => page.getByRole('complementary', { name: 'Workspace requirement knowledge graph' }).count()).toBe(0)
+    await expect.poll(() => page.getByRole('complementary', { name: 'Session requirement code graph' }).count()).toBe(0)
     await toolbar.getByRole('button', { name: 'Command', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Open requirement knowledge graph' }).click()
-    const graph = page.getByRole('complementary', { name: 'Workspace requirement knowledge graph' })
+    const graph = page.getByRole('complementary', { name: 'Session requirement code graph' })
     const graphNode = graph.getByRole('button', { name: /requirement 1: 导航页面/u })
     await graphNode.waitFor()
     expect(await graphNode.getAttribute('data-status')).toBe('blocked')
+    await graph.getByRole('button', { name: 'Inspect task: Build navigation HTML' }).click()
+    expect(await graph.getByText('No traceable code mutation recorded yet.', { exact: true }).count()).toBe(1)
+    expect(await graph.getByRole('button', { name: /Inspect code changes:/u }).count()).toBe(0)
+    const callId = 'graph-navigation-edit' as never
+    session.append('tool/call', {
+      turn: 2, step: 1, callId, name: 'edit',
+      arguments: JSON.stringify({ file_path: 'nav-a.md', old_string: '# alpha nav', new_string: '# updated nav' }),
+    })
+    await writeFile(join(scaffold.workspaceCwd, 'workspace', 'nav-a.md'), '# updated nav\n')
+    session.append('tool/result', {
+      turn: 2, step: 1,
+      message: createToolResultMessage({ callId, isError: false, content: [{ type: 'text', text: 'Updated nav-a.md' }] }),
+      meta: { diffs: [{ path: 'nav-a.md', oldText: '# alpha nav', newText: '# updated nav' }] },
+    }, { surfaceOp: 'append' })
+    const codeNode = graph.getByRole('button', { name: 'Inspect code changes: nav-a.md' })
+    await codeNode.waitFor()
+    await codeNode.click()
+    expect(await graph.getByText('# updated nav', { exact: true }).count()).toBeGreaterThan(0)
+    const previewDirectory = fileURLToPath(new URL('../../../.artifacts/', import.meta.url))
+    await mkdir(previewDirectory, { recursive: true })
+    await page.screenshot({ path: join(previewDirectory, 'session-graph.png') })
+    await graph.getByRole('button', { name: 'Show all' }).click()
     const wideViewport = page.viewportSize()
     if (wideViewport === null) throw new Error('requirements viewport geometry is unavailable')
     const [graphBox, notebookBox, conversationScroll] = await Promise.all([
@@ -502,6 +564,18 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     expect(Math.abs(graphBox.height - notebookBox.height)).toBeLessThanOrEqual(1)
     expect(graphBox.y + graphBox.height).toBeLessThanOrEqual(wideViewport.height)
     expect(conversationScroll.scrollHeight).toBe(conversationScroll.clientHeight)
+
+    const resizeHandle = await graph.getByRole('separator', { name: 'Resize requirement graph' }).boundingBox()
+    if (resizeHandle === null) throw new Error('graph resize handle is unavailable')
+    await page.mouse.move(resizeHandle.x + resizeHandle.width / 2, resizeHandle.y + 40)
+    await page.mouse.down()
+    await page.mouse.move(resizeHandle.x - 100, resizeHandle.y + 40, { steps: 8 })
+    await page.mouse.up()
+    expect((await graph.boundingBox())!.width).toBeGreaterThan(graphBox.width + 80)
+    await graph.getByRole('button', { name: 'Inspect code changes: nav-a.md' }).click()
+    const scrollArea = graph.locator('[class*="graphBody"]')
+    await scrollArea.evaluate((node) => { node.scrollTop = node.scrollHeight })
+    expect(await scrollArea.evaluate(node => node.scrollTop)).toBeGreaterThan(0)
 
     await page.setViewportSize({ width: 375, height: 812 })
     await page.waitForTimeout(350)
@@ -566,18 +640,35 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
 
     await toolbar.getByRole('button', { name: 'Code', exact: true }).click()
     await page.getByRole('textbox', { name: 'Task content New task' }).waitFor()
-    const editor = page.locator('[data-cell="task"]').nth(2)
-    const input = editor.getByRole('textbox')
+    const taskGroup = page.locator('[data-task-group]').nth(2)
+    const editor = taskGroup.locator('[data-cell="task"]')
+    const agentSpec = taskGroup.locator('[data-task-agent-spec]')
+    const input = agentSpec.getByRole('textbox', { name: 'Task content New task' })
     await editor.waitFor()
+    await editor.click()
+    const summaryInput = editor.getByRole('textbox', { name: 'Human task description' })
     const compactBox = await editor.boundingBox()
-    if (compactBox === null) throw new Error('compact task editor geometry is unavailable')
-    expect(compactBox.height).toBeLessThanOrEqual(100)
-    expect(await input.evaluate(node => node.style.height)).toBe('30px')
-    expect(await editor.getByRole('button', { name: 'Save', exact: true }).count()).toBe(0)
-    expect(await editor.getByRole('button', { name: 'Cancel', exact: true }).count()).toBe(0)
+    const compactSpecBox = await agentSpec.boundingBox()
+    if (compactBox === null || compactSpecBox === null) throw new Error('compact task editor geometry is unavailable')
+    expect(compactBox.height).toBeLessThanOrEqual(280)
+    expect(await summaryInput.evaluate(node => Number.parseFloat(node.style.height))).toBeLessThanOrEqual(50)
+    expect(await input.evaluate(node => Number.parseFloat(node.style.height))).toBeLessThanOrEqual(110)
+    expect(await taskGroup.getByRole('button', { name: 'Save', exact: true }).count()).toBe(0)
+    expect(await taskGroup.getByRole('button', { name: 'Cancel', exact: true }).count()).toBe(0)
     expect(await editor.getByRole('button', { name: 'Run task New task' }).isDisabled()).toBe(true)
     const content = 'Export navigation results\n  Export the current navigation results.\n  Use CSV.\n  Keep the header.\n  Validate the file.'
+    const humanSummary = 'Users can export the current navigation results as a clear CSV file.'
     const storedStatement = 'Export the current navigation results.\nUse CSV.\nKeep the header.\nValidate the file.\n\n_关联需求：1.1、1.2_'
+    const translator = vi.spyOn(scaffold.ctx.subagents, 'start').mockImplementation(async (_provider, request) => {
+      const prompt = request.prompt[0]
+      if (prompt?.type !== 'text') throw new Error('expected task translation prompt')
+      const source = JSON.parse(prompt.text.slice(prompt.text.lastIndexOf('\n\n') + 2)) as { task: { title: string; statement: string } }
+      return { id: SessionId('navigation-task-translator'), localAgent: undefined,
+        result: Promise.resolve({ stopReason: 'completed', output: [], structured: {
+          title: source.task.title, summary: '用户可以导出清晰的搜索结果。', markdown: source.task.statement,
+        } }), dispose: async () => {},
+      }
+    })
     await input.fill(content)
     await expect.poll(() => {
       const latest = session.events.findLast(event => event.type === 'requirement/task-list')
@@ -585,14 +676,33 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
         ? latest.data.tasks.find(task => task.title === 'Export navigation results')?.statement
         : undefined
     }).toBe(storedStatement)
-    await expect.poll(async () => (await editor.boundingBox())?.height ?? 0).toBeGreaterThan(compactBox.height)
+    await summaryInput.fill(humanSummary)
+    await summaryInput.blur()
+    await expect.poll(() => {
+      const latest = session.events.findLast(event => event.type === 'requirement/task-list')
+      return latest?.type === 'requirement/task-list'
+        ? latest.data.tasks.find(task => task.title === 'Export navigation results')?.summary
+        : undefined
+    }).toBe(humanSummary)
+    translator.mockRestore()
+    await expect.poll(async () => (await agentSpec.boundingBox())?.height ?? 0).toBeGreaterThan(compactSpecBox.height)
     const draft = (await captureStableAria(page, '[class*="viewArea"]', scaffold.workspaceCwd))
       .split(SEED_ID).join('{{seededId}}')
     await compareOrRefreshGolden(REQUIREMENTS_DRAFT_EXPECTED, draft, MODE)
     await page.reload()
     await ensureSeedOpen(page)
     await page.getByRole('tab', { name: 'Requirements' }).click()
-    const restored = page.getByRole('textbox', { name: 'Task content Export navigation results' })
+    const restoredCell = page.locator('[data-cell="task"]').filter({ hasText: 'Export navigation results' })
+    await restoredCell.waitFor()
+    await expect.poll(() => restoredCell.getByRole('textbox', { name: 'Human task description' }).inputValue()).toBe(humanSummary)
+    expect(await page.getByText('Export the current navigation results.', { exact: true }).count()).toBe(0)
+    await restoredCell.click()
+    expect(await restoredCell.getByRole('textbox', { name: 'Human task description' }).inputValue()).toBe(humanSummary)
+    const restoredGroup = restoredCell.locator('..')
+    const restoredSpec = restoredGroup.locator('[data-task-agent-spec]')
+    expect(await restoredSpec.getByRole('button', { name: 'Expand Agent execution instructions Export navigation results' }).getAttribute('aria-expanded')).toBe('false')
+    await restoredSpec.getByRole('button', { name: 'Expand Agent execution instructions Export navigation results' }).click()
+    const restored = restoredSpec.getByRole('textbox', { name: 'Task content Export navigation results' })
     await restored.waitFor()
     expect(await restored.inputValue()).toBe(`Export navigation results\n  ${storedStatement.replaceAll('\n', '\n  ')}`)
 
@@ -623,6 +733,74 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await restoredNote.getByRole('button', { name: 'Edit note' }).click()
     expect(await page.getByRole('textbox', { name: 'Markdown note content' }).inputValue()).toBe(markdown)
     expect(session.events.filter(event => event.type === 'turn/start')).toHaveLength(turnsBeforeNote)
+
+    const retained = scaffold.ctx.sessions.create(SessionId('notebook-retention-web-e2e'), {
+      seed: session.events.filter(event => event.type.startsWith('requirement/')).map((event, seq) => ({ ...event, seq })),
+      meta: { cwd: scaffold.workspaceCwd },
+    })
+    retained.append('turn/start', { turn: 1 })
+    for (let index = 0; index < 65; index++) retained.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: `NOTEBOOK_RETENTION ${index}` }], source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    retained.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    await scaffold.ctx.sessions.flush(retained)
+    const searchResponse = await scaffold.hostFetch('/api/session/search', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'notebook-retention-search', method: 'session/search',
+        payload: { args: { request: { query: 'NOTEBOOK_RETENTION' } } } }),
+    })
+    const found = await searchResponse.json() as { result: { ok: boolean; value: { items: { sessionId: string }[] } } }
+    expect(found.result.ok, JSON.stringify(found)).toBe(true)
+    expect(found).toMatchObject({ result: { ok: true, value: { items: [{ sessionId: retained.id }] } } })
+    await page.reload()
+    await page.getByText('Ungrouped', { exact: true }).waitFor()
+    const searchButton = page.getByRole('button', { name: 'Search sessions' })
+    if (await searchButton.getAttribute('aria-expanded') !== 'true') await searchButton.click()
+    await page.getByPlaceholder('Search sessions', { exact: false }).fill('NOTEBOOK_RETENTION')
+    const retainedRow = page.getByRole('tree', { name: 'Search results' }).getByRole('treeitem')
+    await expect.poll(() => retainedRow.count(), { timeout: 15_000 }).toBe(1)
+    await retainedRow.click()
+    await page.getByRole('tab', { name: 'Requirements' }).click()
+    await page.locator('[data-cell="task"]').filter({ hasText: 'Export navigation results' }).waitFor()
+    const taskCount = await page.locator('[data-cell="task"]').count()
+    const outputBefore = await page.locator('[data-cell-output]').allTextContents()
+    expect(taskCount).toBe(4)
+    expect(outputBefore.join('\n')).toContain('No mobile layout delivered.')
+    await page.addInitScript(() => {
+      const state = globalThis as typeof globalThis & { notebookSockets: WebSocket[] }
+      state.notebookSockets = []
+      const Original = WebSocket
+      globalThis.WebSocket = class extends Original {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols)
+          state.notebookSockets.push(this)
+        }
+      }
+    })
+    await page.reload()
+    await page.getByRole('tab', { name: 'Requirements' }).click()
+    await expect.poll(() => page.locator('[data-cell="task"]').count()).toBe(taskCount)
+    expect(await page.locator('[data-cell-output]').allTextContents()).toEqual(outputBefore)
+    const durableNote = page.locator('[data-cell="text"]').filter({ has: page.getByRole('heading', { name: 'Review notes' }) })
+    await durableNote.waitFor()
+    expect(await page.locator('[data-cell="task"]').filter({ hasText: 'Export navigation results' })
+      .getByRole('textbox', { name: 'Human task description' }).inputValue()).toBe(humanSummary)
+    const reconnected = page.waitForEvent('websocket')
+    await page.evaluate(() => {
+      const state = globalThis as typeof globalThis & { notebookSockets: WebSocket[] }
+      for (const socket of state.notebookSockets) socket.close()
+    })
+    await reconnected
+    retained.append('requirement/note', { version: 1, roundId, noteId: 'AFTER-RECONNECT' as never,
+      kind: 'text', content: 'Saved after reconnect', dispatched: false })
+    await page.getByText('Saved after reconnect', { exact: true }).waitFor()
+    expect(await page.locator('[data-cell="task"]').count()).toBe(taskCount)
+    expect(await page.locator('[data-cell-output]').allTextContents()).toEqual(outputBefore)
+    // The injected disconnect owes exactly one warning; later transport warnings still fail cleanup.
+    expect(tripwire.warnings.splice(0)).toEqual(['[connection] connection lost, retry #1'])
+    const retainedSnapshot = (await captureStableAria(page, '[class*="viewArea"]', scaffold.workspaceCwd))
+      .split(retained.id).join('{{retainedId}}')
+    await compareOrRefreshGolden(REQUIREMENTS_RESTORED_EXPECTED, retainedSnapshot, MODE)
   }, 120_000)
 
   it.skipIf(MODE === 'record')('downloads through the Session Header and /export with one dialog', async () => {
@@ -849,6 +1027,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       'session.jsonl', 'search-results.expected.md', 'trajectory.expected.md',
       'terminal-card.expected.md', 'requirements-en.expected.md', 'requirements-zh.expected.md',
       'requirements-draft.expected.md', 'requirements-markdown-note.expected.md',
+      'requirements-restored.expected.md',
     ])
   })
 })

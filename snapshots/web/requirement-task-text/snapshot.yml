@@ -1,0 +1,7 @@
+version: 1
+scenario: requirement-task-text
+profile: web
+composition: web-default
+recording: live
+header:
+  class: web-default

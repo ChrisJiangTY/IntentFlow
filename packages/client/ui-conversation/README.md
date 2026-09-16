@@ -36,7 +36,7 @@ Target packages declaration-merge their snapshot and Location data maps, then re
 
 The package registers the optional-Session `conversation` shell, strict Session header/body entries, View list, composer chain and bar, input regions, Hero regions, queue dock, draft persistence, and phase calculation. `ctx.uiSession.provide()` materializes the Conversation and input sources from the same Session binding and supplies `inputActions` as a stable standard prop.
 
-View selection is deterministic: a registered persisted selection wins, otherwise registered `chat` wins, otherwise no View renders. It never chooses the first registered View. Shell phase combines Session lifecycle with the active-target set; no target-specific snapshot is read by the shell.
+View selection is deterministic: a registered persisted selection wins, otherwise registered `requirements` wins, then registered `chat`, otherwise no View renders. A newly entered Session therefore opens the human-facing Requirements Notebook when that plugin is available. The shell never chooses the first registered View. Shell phase combines Session lifecycle with the active-target set; no target-specific snapshot is read by the shell.
 
 The resident composer survives no-Session and Session transitions. The no-Session state keeps the same composer surface mounted but inert while the Workspace picker connects a blank Session. The surface is a shell-owned Lexical editor: reference chips are atomic decorator nodes carrying the owner's serialization identity (submission expands them through the owner codec), claimed slash commands stay styled leading text, folder text references carry the folder glyph as an icon prefix, and the draft's clipboard projection is mirrored into the per-Session Conversation store. Queue operations address exact queue occurrences through the scoped `ctx.conversation` service; queue previews render sent text through the shared inline reference projection from `ui-primitives` (wire session forms fold to their label), while an edit exposes the literal sent text. Busy Enter behavior is stored in the Host-backed `ui-conversation` settings namespace.
 
@@ -107,7 +107,7 @@ None; Conversation assembly and browser input state do not alter provider-side p
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Only registered targets can render** — the shell deliberately has no implicit fallback target beyond the registered `chat` preference.
+- **Only registered targets can render** — the shell deliberately has no implicit fallback target beyond the registered `requirements` and `chat` preferences.
 
 
 <a id="dev-note"></a>

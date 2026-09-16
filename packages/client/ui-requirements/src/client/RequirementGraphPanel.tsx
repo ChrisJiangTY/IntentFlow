@@ -1,196 +1,142 @@
-/** Collapsible Workspace requirement graph presentation. */
+/** Session-local requirement → Task → recorded code-change graph. */
 
+import { useRef, useState } from 'react'
 import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { RequirementsKey, NS } from './locales.ts'
-import type {
-  WorkspaceRequirementGraph,
-  WorkspaceRequirementNode,
-  WorkspaceRequirementRelation,
-  WorkspaceRequirementSession,
-} from './knowledge-graph.ts'
+import { focusedTraceKeys, type SessionRequirementGraph, type SessionRequirementNode } from './knowledge-graph.ts'
 import css from './RequirementsView.module.css'
 
-interface NodePosition {
-  readonly x: number
-  readonly y: number
-}
-
-interface GraphLayout {
-  readonly width: number
-  readonly height: number
-  readonly rounds: readonly { readonly id: string; readonly round: number; readonly summary: string; readonly x: number }[]
-  readonly positions: ReadonlyMap<string, NodePosition>
-}
-
-const NODE_WIDTH = 176
-const NODE_HEIGHT = 62
-const ROUND_GAP = 206
-const NODE_GAP = 82
-
-function graphLayout(lane: WorkspaceRequirementSession): GraphLayout {
-  const byRound = new Map<string, WorkspaceRequirementNode[]>()
-  for (const node of lane.nodes) {
-    const list = byRound.get(String(node.roundId)) ?? []
-    list.push(node)
-    byRound.set(String(node.roundId), list)
-  }
-  const rounds = [...byRound.entries()].map(([id, nodes], index) => ({
-    id,
-    round: nodes[0]?.round ?? index + 1,
-    summary: nodes[0]?.roundSummary ?? '',
-    x: 18 + index * ROUND_GAP,
-    nodes,
-  }))
-  const positions = new Map<string, NodePosition>()
-  let maximum = 0
-  for (const round of rounds) {
-    maximum = Math.max(maximum, round.nodes.length)
-    round.nodes.forEach((node, index) => {
-      positions.set(node.key, { x: round.x, y: 46 + index * NODE_GAP })
-    })
-  }
-  return {
-    width: Math.max(320, rounds.length * ROUND_GAP + 6),
-    height: Math.max(150, 54 + maximum * NODE_GAP),
-    rounds: rounds.map(({ id, round, summary, x }) => ({ id, round, summary, x })),
-    positions,
-  }
-}
-
-function relationPath(source: NodePosition, target: NodePosition): string {
-  const sourceX = source.x + NODE_WIDTH / 2
-  const sourceY = source.y + NODE_HEIGHT / 2
-  const targetX = target.x + NODE_WIDTH / 2
-  const targetY = target.y + NODE_HEIGHT / 2
-  if (sourceX === targetX) {
-    const bend = sourceX + NODE_WIDTH / 2 + 18
-    return ['M', sourceX, sourceY, 'C', bend, sourceY, bend, targetY, targetX, targetY].join(' ')
-  }
-  const middle = (sourceX + targetX) / 2
-  return ['M', sourceX, sourceY, 'C', middle, sourceY, middle, targetY, targetX, targetY].join(' ')
-}
-
-function relationKey(kind: WorkspaceRequirementRelation['kind']): RequirementsKey {
-  switch (kind) {
-    case 'depends-on': return 'graph.relation.dependsOn'
-    case 'refines': return 'graph.relation.refines'
-    case 'supersedes': return 'graph.relation.supersedes'
-  }
-}
-
 interface RequirementGraphPanelProps {
-  readonly graph: WorkspaceRequirementGraph
-  readonly currentSessionId: WorkspaceRequirementNode['sessionId']
+  readonly graph: SessionRequirementGraph
   readonly onClose: () => void
-  readonly onSelect: (node: WorkspaceRequirementNode) => void
+  readonly onSelect: (node: SessionRequirementNode) => void
   readonly t: TranslateNS<typeof NS>
 }
 
 /**
- * Render the current Workspace's graph with one horizontal round lane per Session.
- * @param props - Graph data, active Session, navigation action, close action, and localized copy.
- * @returns the collapsible graph sidebar.
+ * Render fixed layers with path focusing and an inline historical code inspector.
+ * @param props - Session graph, local Notebook navigation, and translated labels.
+ * @returns The replacement requirement graph panel.
  */
-export function RequirementGraphPanel({ graph, currentSessionId, onClose, onSelect, t }: RequirementGraphPanelProps) {
-  const nodesByKey = new Map(graph.nodes.map(node => [node.key, node]))
+export function RequirementGraphPanel({ graph, onClose, onSelect, t }: RequirementGraphPanelProps) {
+  const [selected, setSelected] = useState<string>()
+  const [zoom, setZoom] = useState(1)
+  const [width, setWidth] = useState<number>()
+  const panel = useRef<HTMLElement>(null)
+  const drag = useRef<{ x: number; width: number }>()
+  const resize = (next: number): void => {
+    const available = panel.current?.parentElement?.getBoundingClientRect().width ?? 660
+    setWidth(Math.max(Math.min(280, available), Math.min(next, available * .9)))
+  }
+  const all = [...graph.requirements, ...graph.tasks, ...graph.files]
+  const selectedKey = all.some(node => node.key === selected) ? selected : undefined
+  const focused = focusedTraceKeys(graph, selectedKey)
+  const positions = new Map<string, { x: number; y: number }>()
+  const columns = [graph.requirements, graph.tasks, graph.files]
+  columns.forEach((nodes, column) => {
+    nodes.forEach((node, row) => { positions.set(node.key, { x: 16 + column * 210, y: 46 + row * 94 }) })
+  })
+  const height = Math.max(240, 60 + Math.max(...columns.map(nodes => nodes.length)) * 94)
+  const file = graph.files.find(node => node.key === selectedKey)
+  const task = graph.tasks.find(node => node.key === selectedKey)
+  const requirement = graph.requirements.find(node => node.key === selectedKey)
+  const focus = (key: string): void => { setSelected(current => current === key ? undefined : key) }
+  const taskState = (status: string): RequirementsKey => status === 'completed' ? 'graph.status.completed'
+    : status === 'failed' ? 'graph.status.blocked'
+      : status === 'in_progress' || status === 'reviewing' ? 'graph.status.in-progress' : 'graph.status.pending'
   return (
-    <aside className={css.graphPanel} aria-label={t('graph.aria')}>
+    <aside ref={panel} className={css.graphPanel} aria-label={t('graph.aria')} style={width === undefined ? undefined : { width, flexBasis: width }}>
+      <div className={css.graphResize} role="separator" tabIndex={0} aria-orientation="vertical" aria-label={t('graph.resize')}
+        aria-valuenow={Math.round(width ?? 660)}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return
+          drag.current = { x: event.clientX, width: panel.current?.getBoundingClientRect().width ?? 660 }
+          event.currentTarget.setPointerCapture(event.pointerId)
+          event.preventDefault()
+        }}
+        onPointerMove={(event) => { if (drag.current) resize(drag.current.width + drag.current.x - event.clientX) }}
+        onPointerUp={(event) => { drag.current = undefined; event.currentTarget.releasePointerCapture(event.pointerId) }}
+        onLostPointerCapture={() => { drag.current = undefined }}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+          event.preventDefault()
+          resize((panel.current?.getBoundingClientRect().width ?? 660) + (event.key === 'ArrowLeft' ? 32 : -32))
+        }} />
       <header className={css.graphHeader}>
-        <div>
-          <strong>{t('graph.title')}</strong>
-          <span>{graph.workspaceTitle ?? t('graph.currentProject')}</span>
-        </div>
+        <div><strong>{t('graph.title')}</strong><span>{graph.title || t('graph.currentSession')}</span></div>
         <button type="button" aria-label={t('graph.close')} onClick={onClose}><IconCloseOutline16 size={14} /></button>
       </header>
-      <div className={css.graphLegend} aria-label={t('graph.legend')}>
-        {(['pending', 'in-progress', 'verified', 'blocked'] as const).map(status => (
-          <span key={status}><i data-status={status} />{t(`graph.status.${status}`)}</span>
-        ))}
+      <div className={css.traceControls}>
+        <span>{t('graph.currentSession')}</span>
+        <button type="button" onClick={() => { setSelected(undefined); setZoom(1) }}>{t('graph.reset')}</button>
+        <button type="button" aria-label={t('graph.zoomOut')} disabled={zoom <= .6} onClick={() => { setZoom(value => Math.max(.6, value - .1)) }}>−</button>
+        <button type="button" aria-label={t('graph.zoomIn')} disabled={zoom >= 1.4} onClick={() => { setZoom(value => Math.min(1.4, value + .1)) }}>＋</button>
       </div>
       <div className={css.graphBody}>
-        {graph.sessions.length === 0 ? (
-          <div className={css.graphEmpty}>
-            <span aria-hidden>⌘</span>
-            <strong>{t('graph.emptyTitle')}</strong>
-            <p>{t('graph.emptyDetail')}</p>
-          </div>
-        ) : graph.sessions.map((lane, laneIndex) => {
-          const layout = graphLayout(lane)
-          const laneRelations = graph.relations.filter(relation => layout.positions.has(relation.sourceKey)
-            && layout.positions.has(relation.targetKey))
-          const markerId = `requirement-graph-arrow-${laneIndex}`
-          return (
-            <section className={css.graphSession} key={lane.sessionId}>
-              <h3>{lane.title}{lane.sessionId === currentSessionId && <small>{t('graph.currentSession')}</small>}</h3>
-              <div className={css.graphViewport}>
-                <div className={css.graphCanvas} style={{ width: layout.width, height: layout.height }}>
-                  <svg viewBox={`0 0 ${layout.width} ${layout.height}`} width={layout.width} height={layout.height} aria-hidden>
-                    <defs>
-                      <marker id={markerId} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                        <path d="M 0 0 L 10 5 L 0 10 z" />
-                      </marker>
-                    </defs>
-                    {laneRelations.map((relation) => {
-                      const source = layout.positions.get(relation.sourceKey)
-                      const target = layout.positions.get(relation.targetKey)
-                      if (source === undefined || target === undefined) return null
-                      return <path key={relation.key} d={relationPath(source, target)} data-kind={relation.kind} markerEnd={`url(#${markerId})`} />
-                    })}
-                  </svg>
-                  {layout.rounds.map(round => (
-                    <div className={css.graphRoundLabel} key={round.id} style={{ left: round.x }}>
-                      <strong>{t('round.label', { round: round.round })}</strong>
-                      <span>{round.summary}</span>
-                    </div>
-                  ))}
-                  {lane.nodes.map((node) => {
-                    const position = layout.positions.get(node.key)
-                    if (position === undefined) return null
-                    const select = (): void => { onSelect(node) }
-                    return (
-                      <button
-                        className={css.graphNode}
-                        type="button"
-                        key={node.key}
-                        data-status={node.status}
-                        data-current-session={node.sessionId === currentSessionId || undefined}
-                        style={{ left: position.x, top: position.y }}
-                        aria-label={t('graph.nodeAria', {
-                          round: node.round,
-                          requirement: node.requirementId,
-                          title: node.title,
-                          status: t(`graph.status.${node.status}`),
-                        })}
-                        onClick={select}
-                      >
-                        <span><i />{t('graph.requirementCode', { requirement: node.requirementId })}</span>
-                        <strong title={node.title}>{node.title}</strong>
-                        <small>{t('graph.criteriaCount', { count: node.acceptanceRefs.length })}</small>
-                      </button>
-                    )
+        {graph.requirements.length === 0 ? (
+          <div className={css.graphEmpty}><strong>{t('graph.emptyTitle')}</strong><p>{t('graph.emptyDetail')}</p></div>
+        ) : (
+          <div className={css.traceViewport}>
+            <div style={{ width: 646 * zoom, height: height * zoom }}>
+              <div className={css.traceCanvas} style={{ width: 646, height, transform: `scale(${zoom})` }}>
+                {(['graph.requirements', 'graph.tasks', 'graph.code'] as const).map((label, index) => (
+                  <strong className={css.traceColumn} key={label} style={{ left: 16 + index * 210 }}>{t(label)}</strong>
+                ))}
+                <svg width="646" height={height} aria-hidden>
+                  {graph.edges.map((edge) => {
+                    const source = positions.get(edge.source)
+                    const target = positions.get(edge.target)
+                    if (source === undefined || target === undefined) return null
+                    const x = source.x + 172
+                    return <path key={`${edge.source}:${edge.target}`} data-dimmed={!focused.has(edge.source) || !focused.has(edge.target)}
+                      d={`M ${x} ${source.y + 36} C ${x + 22} ${source.y + 36}, ${target.x - 22} ${target.y + 36}, ${target.x} ${target.y + 36}`} />
                   })}
-                </div>
+                </svg>
+                {all.map((node) => {
+                  const position = positions.get(node.key)
+                  if (position === undefined) return null
+                  const req = 'requirementId' in node ? node : undefined
+                  const work = 'task' in node ? node.task : undefined
+                  const code = 'path' in node ? node : undefined
+                  const title = req?.title ?? work?.title ?? code?.path.split(/[\\/]/u).at(-1) ?? ''
+                  const label = req ? t('graph.nodeAria', { round: req.round, requirement: req.requirementId, title, status: t(`graph.status.${req.status}`) })
+                    : work ? t('graph.taskAria', { title }) : t('graph.fileAria', { path: code?.path ?? '' })
+                  return <button type="button" key={node.key} className={css.traceNode} aria-label={label} aria-pressed={selectedKey === node.key}
+                    data-layer={req ? 'requirement' : work ? 'task' : 'code'} data-status={req?.status} data-dimmed={!focused.has(node.key)}
+                    style={{ left: position.x, top: position.y }} title={code?.path ?? title}
+                    onClick={() => { focus(node.key); if (req) onSelect(req) }}>
+                    <small>{req ? `${t('round.label', { round: req.round })} · ${t('graph.requirementCode', { requirement: req.requirementId })}`
+                      : work ? work.id : t('graph.recorded')}</small>
+                    <strong>{title}</strong>
+                    <span>{req ? t(`graph.status.${req.status}`) : work ? t(taskState(work.status)) : t('graph.changeCount', { count: code?.changes.length ?? 0 })}</span>
+                  </button>
+                })}
               </div>
-              {laneRelations.length > 0 && (
-                <ul className={css.graphRelations} aria-label={t('graph.relations')}>
-                  {laneRelations.map((relation) => {
-                    const source = nodesByKey.get(relation.sourceKey)
-                    const target = nodesByKey.get(relation.targetKey)
-                    return source === undefined || target === undefined ? null : (
-                      <li key={relation.key} title={relation.reason}>
-                        <b>{t('graph.requirementCode', { requirement: source.requirementId })}</b>
-                        <span>{t(relationKey(relation.kind))}</span>
-                        <b>{t('graph.requirementCode', { requirement: target.requirementId })}</b>
-                        <small>{relation.reason}</small>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </section>
-          )
-        })}
+            </div>
+          </div>
+        )}
+        <p className={css.traceHint}>{t('graph.scopeHint')}</p>
+        {requirement && <section className={css.traceDetail}>
+          <strong>{requirement.title}</strong><p>{t('graph.criteriaCount', { count: requirement.acceptanceRefs.length })} · {requirement.acceptanceRefs.join(', ')}</p>
+          {!graph.edges.some(edge => edge.source === requirement.key) && <p>{t('graph.noTasks')}</p>}
+        </section>}
+        {task && <section className={css.traceDetail}>
+          <strong>{task.task.title}</strong><p>{task.task.summary}</p>
+          {!graph.edges.some(edge => edge.source === task.key) && <p>{t('graph.noChanges')}</p>}
+          <button type="button" onClick={() => {
+            const owner = graph.requirements.find(node => graph.edges.some(edge => edge.source === node.key && edge.target === task.key))
+            if (owner) onSelect({ ...owner, taskIds: [task.task.id] })
+          }} disabled={!graph.edges.some(edge => edge.target === task.key)}>{t('graph.locateTask')}</button>
+        </section>}
+        {file && <section className={css.traceDetail}>
+          <strong>{file.path}</strong>
+          {file.changes.map((change, index) => <details key={`${change.seq}:${index}`} open={file.changes.length === 1}>
+            <summary>{graph.tasks.find(node => node.key === change.taskKey)?.task.title} · {t('graph.turn', { turn: change.turn })}</summary>
+            <span>{t('graph.before')}</span><pre>{change.oldText ?? t('graph.newFile')}</pre>
+            <span>{t('graph.after')}</span><pre>{change.newText}</pre>
+          </details>)}
+        </section>}
       </div>
     </aside>
   )

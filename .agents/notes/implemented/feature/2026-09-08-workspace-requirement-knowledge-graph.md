@@ -10,6 +10,10 @@ The Requirements Notebook records documents, Tasks, reviews, and validation, but
 
 ## Decision
 
+The [Session requirement code graph](2026-09-16-session-requirement-code-graph.md) supersedes this note's Workspace aggregation, cross-Session navigation, and graph presentation. This note retains the durable requirement identity, relation validation, revision, and status decisions.
+
+The [batched requirement review decision](2026-09-16-batched-requirement-review.md) supersedes this note's rule that independently reviewed implementation Tasks can turn requirements green before Final Test. This note retains the other status precedence and failure attribution decisions.
+
 Each valid requirement-document revision has one complete `requirement/graph` event. Its nodes come from the document's numbered requirements and acceptance criteria. The document authoring tool also supplies directed relations with a concise Chinese reason. `depends-on` connects nodes inside the current document. `refines` and `supersedes` connect a current node to an existing node from an earlier round in the same Session. The host rejects duplicate nodes and relations, unknown or identical endpoints, cross-round dependencies, same-round history links, and dependency cycles.
 
 The graph is revision-aligned with `requirement/document`. A valid browser edit rebuilds its nodes and keeps only relations whose endpoints remain valid. An invalid edit appends the document draft without a graph for that revision, so the read projection removes the stale current graph instead of presenting it as current.

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.md
-2026-09-08-workspace-requirement-knowledge-graph.md: 29cc04a26d8586e75f2cbc533a4f597306753fa6
-2026-09-08-workspace-requirement-knowledge-graph.zh.md: e22f2865dd6f463710c110863497cf2634be07ed
+2026-09-08-workspace-requirement-knowledge-graph.md: 53b82e4155f98a19274f65ff323155439657aa9d
+2026-09-08-workspace-requirement-knowledge-graph.zh.md: 577efa28061fe339d0968048adbf716025454b17

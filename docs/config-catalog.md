@@ -2021,7 +2021,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/session/session-requirements/src/index.ts:69`](../packages/session/session-requirements/src/index.ts)
+Source: [`packages/session/session-requirements/src/index.ts:80`](../packages/session/session-requirements/src/index.ts)
 
 <a id="deepseek-aidsh-session-telemetry-otel"></a>
 

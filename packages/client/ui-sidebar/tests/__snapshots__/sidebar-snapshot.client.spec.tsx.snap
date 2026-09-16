@@ -138,18 +138,9 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
               style="display: contents;"
             >
               <span
-                class="localBuildBrand"
+                class="fallbackBrandName"
               >
-                <span
-                  class="localBuildTitle"
-                >
-                  IntentFlow Local Build
-                </span>
-                <span
-                  class="buildVersion"
-                >
-                  1.2.3-rc.4-abc1234-dirty
-                </span>
+                IntentFlow
               </span>
             </div>
           </span>
@@ -268,18 +259,9 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
               style="display: contents;"
             >
               <span
-                class="localBuildBrand"
+                class="fallbackBrandName"
               >
-                <span
-                  class="localBuildTitle"
-                >
-                  IntentFlow 本地构建
-                </span>
-                <span
-                  class="buildVersion"
-                >
-                  1.2.3-rc.4-abc1234-dirty
-                </span>
+                IntentFlow
               </span>
             </div>
           </span>

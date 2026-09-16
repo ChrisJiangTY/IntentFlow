@@ -33,7 +33,7 @@ async function openFixtureSession(): Promise<void> {
 }
 
 it('renders the history image pair through the authorized attachment route and opens the lightbox', async () => {
-  mountAssembledApp()
+  mountAssembledApp('?fixture', { selectedView: 'chat' })
   await openFixtureSession()
 
   // Both the user-side (align=end) and assistant-side (align=start) galleries
@@ -79,7 +79,7 @@ it('renders the history image pair through the authorized attachment route and o
 })
 
 it('accepts pasted images into the composer rail in order and removes them', async () => {
-  mountAssembledApp()
+  mountAssembledApp('?fixture', { selectedView: 'chat' })
 
   const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
   const start = tree.querySelector<HTMLButtonElement>('button[aria-label="New session in fixture"]')
@@ -157,7 +157,7 @@ it('accepts pasted images into the composer rail in order and removes them', asy
 })
 
 it('accepts a whole-page drop under the limits-labeled overlay and refuses an over-limit batch at intake', async () => {
-  mountAssembledApp()
+  mountAssembledApp('?fixture', { selectedView: 'chat' })
 
   const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
   const start = tree.querySelector<HTMLButtonElement>('button[aria-label="New session in fixture"]')
@@ -211,7 +211,7 @@ it('accepts a whole-page drop under the limits-labeled overlay and refuses an ov
 })
 
 it('renders a host dimension rejection with the projected 2000px limit', async () => {
-  mountAssembledApp('?fixture&fixturePrompt=reject')
+  mountAssembledApp('?fixture&fixturePrompt=reject', { selectedView: 'chat' })
 
   const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
   const start = tree.querySelector<HTMLButtonElement>('button[aria-label="New session in fixture"]')

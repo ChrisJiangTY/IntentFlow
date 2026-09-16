@@ -14,7 +14,7 @@
   - button "Collapse round":
     - img
   - strong: "Round 1:"
-  - text: 构建并验证导航页面 Completed
+  - text: 构建并验证导航页面 Tasks ready
   - group: Clarification record
   - article:
     - text: "[2]"
@@ -39,54 +39,75 @@
     - button "Run task Build navigation HTML" [disabled]:
       - img
     - text: TASK1
-    - textbox "Task content Build navigation HTML":
-      - /placeholder: Enter the task title on the first line and an indented description below…
-      - text: Build navigation HTML Implement the requested navigation in index.html. _关联需求：1.1_
+    - strong: Build navigation HTML
+    - textbox "Human task description":
+      - /placeholder: Translate this Agent task in one or two sentences…
+      - text: Users can navigate the page with a clear, complete layout.
+  - region "Agent execution instructions Build navigation HTML":
+    - button "Expand Agent execution instructions Build navigation HTML":
+      - img
+      - text: Agent execution instructions
   - region "Task output Build navigation HTML":
     - button "Collapse task output Build navigation HTML" [expanded]:
       - img
-    - paragraph: Implemented index.html and preserved the current navigation behavior.
+    - heading "Deliverables" [level=3]
+    - paragraph: No structured deliverables are available.
   - article:
     - text: "[!]"
     - button "Run task Check mobile navigation":
       - img
     - text: TASK2
-    - textbox "Task content Check mobile navigation":
-      - /placeholder: Enter the task title on the first line and an indented description below…
-      - text: Check mobile navigation Verify the navigation at the mobile breakpoint. _关联需求：1.2_
+    - strong: Check mobile navigation
+    - textbox "Human task description":
+      - /placeholder: Translate this Agent task in one or two sentences…
+      - text: Mobile navigation remains usable at the target breakpoint.
+  - region "Agent execution instructions Check mobile navigation":
+    - button "Expand Agent execution instructions Check mobile navigation":
+      - img
+      - text: Agent execution instructions
   - region "Task output Check mobile navigation":
     - button "Collapse task output Check mobile navigation" [expanded]:
       - img
-    - paragraph: The mobile breakpoint needs another pass.
-    - text: Task execution failed; failure is distinct from historical requirement regression.
+    - heading "Deliverables" [level=3]
+    - paragraph: No mobile layout delivered.
   - article:
     - text: "[ ]"
     - button "Run task Export navigation results":
       - img
     - text: TASK3
-    - textbox "Task content Export navigation results":
-      - /placeholder: Enter the task title on the first line and an indented description below…
-      - text: Export navigation results Export the current navigation results. Use CSV. Keep the header. Validate the file. _关联需求：1.1、1.2_
+    - strong: Export navigation results
+    - textbox "Human task description":
+      - /placeholder: Translate this Agent task in one or two sentences…
+      - text: Users can export the current navigation results as a clear CSV file.
     - toolbar "Notebook cell toolbar":
       - button "Select previous task":
         - img
       - button "Select next task" [disabled]:
         - img
-      - button "Add comment": ⌁
-      - button "Edit task":
-        - img
       - button "More cell actions":
         - img
     - button "Ask the Agent to explain or optimize this task":
       - img
+  - region "Agent execution instructions Export navigation results":
+    - button "Collapse Agent execution instructions Export navigation results" [expanded]:
+      - img
+      - text: Agent execution instructions
+    - textbox "Task content Export navigation results":
+      - /placeholder: Enter the task title on the first line and an indented description below…
+      - text: Export navigation results Export the current navigation results. Use CSV. Keep the header. Validate the file. _关联需求：1.1、1.2_
   - article:
     - text: "[ ]"
     - button "Run task Final Test" [disabled]:
       - img
     - text: TASK4
-    - textbox "Task content Final Test":
-      - /placeholder: Enter the task title on the first line and an indented description below…
-      - text: Final Test Run the complete navigation test set and verify every acceptance criterion. _关联需求：1.1、1.2_
+    - strong: Final Test
+    - textbox "Human task description":
+      - /placeholder: Translate this Agent task in one or two sentences…
+      - text: The complete navigation experience meets every acceptance criterion.
+  - region "Agent execution instructions Final Test":
+    - button "Expand Agent execution instructions Final Test":
+      - img
+      - text: Agent execution instructions
   - article:
     - text: MD
     - strong: Markdown note
@@ -94,27 +115,47 @@
       - img
       - text: Edit note
     - paragraph: Keep the existing DSH conversation controls visible.
-  - article:
-    - text: "[2]"
-    - img
-    - text: ✓
-    - strong: Final validation
-    - text: Completed
-    - paragraph: The HTML was generated; one ordinary mobile check failed, with no historical requirement regression.
   - group "Notebook zoom":
     - button "Zoom out Notebook": −
     - text: 100%
     - button "Zoom in Notebook": ＋
-- complementary "Workspace requirement knowledge graph":
+- complementary "Session requirement code graph":
+  - separator "Resize requirement graph"
   - strong: Requirement graph
-  - text: Current project
+  - text: "NavScenario: first run bash to"
   - button "Close the requirement knowledge graph":
     - img
-  - text: Pending In progress Verified Failed or regressed
-  - 'heading "NavScenario: first run bash to Current Session" [level=3]'
-  - strong: "Round 1:"
-  - text: 构建并验证导航页面
+  - text: Current Session
+  - button "Show all"
+  - button "Zoom out graph": −
+  - button "Zoom in graph": ＋
+  - strong: Requirements
+  - strong: Tasks
+  - strong: Code changes
   - 'button "Round 1, requirement 1: 导航页面, status: Failed or regressed"':
-    - text: Requirement 1
+    - text: "Round 1: · Requirement 1"
     - strong: 导航页面
-    - text: 2 acceptance criteria
+    - text: Failed or regressed
+  - 'button "Inspect task: Build navigation HTML"':
+    - text: TASK-WEB-01
+    - strong: Build navigation HTML
+    - text: Completed
+  - 'button "Inspect task: Check mobile navigation"':
+    - text: TASK-WEB-02
+    - strong: Check mobile navigation
+    - text: Failed or regressed
+  - 'button "Inspect task: Export navigation results"':
+    - text: TASK-2674f87f
+    - strong: Export navigation results
+    - text: Pending
+  - 'button "Inspect task: Final Test"':
+    - text: TASK-WEB-FINAL
+    - strong: Final Test
+    - text: Pending
+  - 'button "Inspect code changes: nav-a.md" [pressed]':
+    - text: Recorded mutation
+    - strong: nav-a.md
+    - text: 1 change snippets
+  - paragraph: Current conversation only. Edges show assigned work and recorded mutations, not passing tests; unrecorded shell or delegated changes may be absent.
+  - strong: nav-a.md
+  - group: "Build navigation HTML · Execution turn 2 Before # alpha nav After # updated nav"

@@ -28,6 +28,7 @@ export const zh = {
   'collapse': '收起',
   'expand': '展开',
   'back': '返回',
+  'brand.name': 'IntentFlow',
   'brand.localBuild': 'IntentFlow 本地构建',
   'unknown': '未知',
   'none': '无',

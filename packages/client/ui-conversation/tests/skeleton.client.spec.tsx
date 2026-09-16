@@ -384,13 +384,14 @@ describe('ConversationRoot resident composer', () => {
     expect(b.view.queryByText('Root')).toBeNull()
   })
 
-  it('routes the native composer to the Requirements round when that view is active', async () => {
+  it('opens Requirements by default and routes the native composer into a new round', async () => {
     const requirementsSubmit = vi.fn(async (_sessionId: SessionId, _draft: string) => true)
     const b = mount(sessionSnapshotOf(), undefined, undefined, {
-      activeView: 'requirements',
       requirementsSubmit,
       viewTabs: [{ id: 'chat', label: 'Chat' }, { id: 'requirements', label: 'Requirements' }],
     })
+    expect(b.view.getByTestId('view-requirements')).toBeTruthy()
+    expect(b.view.getByRole('tab', { name: 'Requirements' }).getAttribute('aria-selected')).toBe('true')
     const box = b.view.getByRole('textbox')
     act(() => { b.wiring.setDraft('start a requirement round') })
     fireEvent.keyDown(box, { key: 'Enter' })
@@ -398,6 +399,15 @@ describe('ConversationRoot resident composer', () => {
     expect(requirementsSubmit).toHaveBeenCalledWith(SID, 'start a requirement round')
     expect(b.sink).not.toHaveBeenCalled()
     expect(b.wiring.snapshot.draft).toBe('')
+  })
+
+  it('keeps an explicit Chat selection ahead of the Requirements default', () => {
+    const b = mount(sessionSnapshotOf(), undefined, undefined, {
+      activeView: 'chat',
+      viewTabs: [{ id: 'chat', label: 'Chat' }, { id: 'requirements', label: 'Requirements' }],
+    })
+    expect(b.view.getByTestId('view-chat')).toBeTruthy()
+    expect(b.view.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
   })
 
   it('shows hierarchy only for subagents and opens their ordinary owner', () => {
@@ -553,7 +563,7 @@ describe('ConversationRoot resident composer', () => {
     expect(b.view.getByTestId('view-chat')).toBeTruthy()
   })
 
-  it('keeps the Chat fallback selected by id when a view is inserted before it', () => {
+  it('keeps the Chat fallback selected by id when Requirements is unavailable', () => {
     const viewTabs: ViewTab[] = [
       { id: 'chat', label: 'Chat' },
       { id: 'trajectory', label: 'Trajectory' },

@@ -176,6 +176,13 @@ function validate(event: SessionEvent, fail: InvariantFailure): void {
       fail(`requirement/task-list at seq ${event.seq} must end with exactly one Final Test`)
     }
     for (const [index, task] of data.tasks.entries()) {
+      const summary: unknown = task.summary
+      if (summary !== undefined && typeof summary !== 'string') {
+        fail(`requirement/task-list at seq ${event.seq} has an invalid task summary`)
+      }
+      if (task.humanInstruction !== undefined && (typeof task.humanInstruction !== 'string' || task.humanInstruction.trim() === '')) {
+        fail(`requirement/task-list at seq ${event.seq} has an invalid human instruction`)
+      }
       if (task.id.trim() === '' || ids.has(task.id)) {
         fail(`requirement/task-list at seq ${event.seq} has an empty or duplicate task id`)
       }

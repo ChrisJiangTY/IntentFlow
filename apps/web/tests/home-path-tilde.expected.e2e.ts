@@ -14,7 +14,7 @@ installAssembledBootEnv()
 
 describe('assembled POSIX home-path display', () => {
   it('shows the home-descendant Workspace path as ~ and copies the full path', async () => {
-    mountAssembledApp()
+    mountAssembledApp('?fixture', { selectedView: 'chat' })
 
     const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
     const group = (await within(tree).findAllByText('project'))

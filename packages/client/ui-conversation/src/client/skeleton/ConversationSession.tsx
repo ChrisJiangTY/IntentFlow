@@ -23,12 +23,15 @@ interface Breadcrumb {
   readonly subagent: boolean
 }
 
-const DEFAULT_VIEW_ID = 'chat'
+const DEFAULT_VIEW_ID = 'requirements'
+const FALLBACK_VIEW_ID = 'chat'
 
-/** Resolve a persisted selection, then registered Chat, without choosing another View. */
+/** Resolve a persisted selection, then Requirements or Chat, without choosing another View. */
 function resolveActiveView(tabs: readonly ViewTab[], selectedId: string | null): ViewTab | undefined {
   const selected = selectedId === null ? undefined : tabs.find(view => view.id === selectedId)
-  return selected ?? tabs.find(view => view.id === DEFAULT_VIEW_ID)
+  return selected
+    ?? tabs.find(view => view.id === DEFAULT_VIEW_ID)
+    ?? tabs.find(view => view.id === FALLBACK_VIEW_ID)
 }
 
 function deriveAncestry(list: SessionListState, id: SessionId): readonly Breadcrumb[] {

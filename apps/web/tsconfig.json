@@ -34,6 +34,8 @@
     "tests/plan-review.e2e.ts",
     "tests/steering.e2e.ts",
     "tests/navigation-panes.e2e.ts",
+    "tests/requirement-task-text.e2e.ts",
+    "tests/requirement-task-result.e2e.ts",
     "tests/chat-scroll-fixture.ts",
     "tests/trajectory-virtualization.e2e.ts",
     "tests/lifecycle-chrome.e2e.ts",

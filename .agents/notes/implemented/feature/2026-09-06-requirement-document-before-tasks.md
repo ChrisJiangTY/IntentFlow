@@ -10,6 +10,8 @@ The Requirements Notebook needs an explicit, reviewable definition of the reques
 
 ## Decision
 
+The [batched requirement review decision](2026-09-16-batched-requirement-review.md) supersedes this note's per-Task review cadence and Run All stop timing. This note retains the requirement-document, Task-generation, editing, and Final Test invariants.
+
 `startRound` preserves the raw request and queues an ambiguity-analysis turn without entering Plan mode. The main Agent first performs read-only repository inspection. It calls `clarify_requirements` only for material choices that the repository cannot resolve, asks one to five related Chinese questions per batch, and may use at most the configured number of batches. The question and answer records remain collapsed in the Notebook after settlement. If material ambiguity remains after the limit, the Agent leaves the round awaiting user input instead of guessing.
 
 The Agent submits a complete Chinese requirement document through `submit_requirements_document`. The document contains `# 需求文档`, `## 简介`, and `## 需求`; it has no glossary. Each numbered requirement includes a user story and numbered acceptance criteria. A separate summary of at most 30 Chinese characters labels the round and is read-only. The document body is editable before execution. Every edit appends a validated revision; an invalid revision stays visible but cannot generate Tasks.

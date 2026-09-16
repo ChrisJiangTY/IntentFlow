@@ -32,7 +32,7 @@ function noticeShape(row: Element): string {
 
 describe('assembled max-tokens turn-end notice', () => {
   it('renders the localized truncation notice after the cut-off answer instead of ending silently', async () => {
-    mountAssembledApp()
+    mountAssembledApp('?fixture', { selectedView: 'chat' })
 
     const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
     fireEvent.click(await within(tree).findByText('Fixture 历史会话'))

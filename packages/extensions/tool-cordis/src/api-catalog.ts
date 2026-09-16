@@ -1794,14 +1794,20 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the task execution identity and submitted event sequence.',
       },
       {
+        signature: '@Remote(\'stopTask\') stopTask(agent: Agent, request: RequirementTaskRunRequest): RequirementTaskRunResult',
+        description: 'Cancel the selected task without discarding unrelated queued messages.',
+        parameters: [{ name: 'agent', description: 'exact live Agent owning the task.' }, { name: 'request', description: 'round and task to stop.' }],
+        returns: 'acknowledgement referencing the selected execution.',
+      },
+      {
         signature: '@Remote(\'addTask\') addTask(agent: Agent, request: RequirementTaskAddRequest): RequirementTaskMutationResult',
         description: 'Insert one manually authored task, including an empty pending draft, into the current round.',
         parameters: [{ name: 'agent', description: 'exact live Agent that owns the round.' }, { name: 'request', description: 'task text and optional insertion point.' }],
         returns: 'the durable task identity and task-list event sequence.',
       },
       {
-        signature: '@Remote(\'editTask\') editTask(agent: Agent, request: RequirementTaskEditRequest): RequirementTaskMutationResult',
-        description: 'Persist a task\'s editable text, including empty drafts, and return it to the pending state.',
+        signature: '@Remote(\'editTask\') async editTask(agent: Agent, request: RequirementTaskEditRequest): Promise<RequirementTaskMutationResult>',
+        description: 'Rewrite execution instructions from a human edit, or translate changed Agent text. A successful change returns the task and Final Test to pending; stale results are rejected.',
         parameters: [{ name: 'agent', description: 'exact live Agent that owns the round.' }, { name: 'request', description: 'task identity and replacement text.' }],
         returns: 'the durable task identity and task-list event sequence.',
       },
@@ -1825,7 +1831,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote(\'stopRunAll\') stopRunAll(agent: Agent, request: RequirementRunAllStopRequest): RequirementRunAllStopResult',
-        description: 'Stop Run All after the current task and its independent review settle.',
+        description: 'Stop Run All after the current task and any required review settle.',
         parameters: [{ name: 'agent', description: 'exact live Agent that owns the ordered run.' }, { name: 'request', description: 'round whose ordered run should stop.' }],
         returns: 'durable stop-request position.',
       },
@@ -4794,12 +4800,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface RequirementRunAllStopResult {\n    readonly roundId: RequirementRoundId;\n    readonly eventSeq: number;\n}',
   },
   {
+    name: 'RequirementTask',
+    declaration: 'export interface RequirementTask {\n    readonly humanInstruction?: string;\n    readonly id: RequirementTaskId;\n    readonly order: number;\n    readonly kind: RequirementTaskKind;\n    readonly title: string;\n    readonly summary: string;\n    readonly statement: string;\n    readonly requirementRefs: readonly string[];\n    readonly status: \'pending\' | \'in_progress\' | \'reviewing\' | \'completed\' | \'failed\' | \'withdrawn\';\n}',
+  },
+  {
     name: 'RequirementTaskAddRequest',
-    declaration: 'export interface RequirementTaskAddRequest {\n    readonly roundId: RequirementRoundId;\n    readonly afterTaskId?: RequirementTaskId;\n    readonly title: string;\n    readonly statement: string;\n}',
+    declaration: 'export interface RequirementTaskAddRequest {\n    readonly roundId: RequirementRoundId;\n    readonly afterTaskId?: RequirementTaskId;\n    readonly title: string;\n    readonly summary: string;\n    readonly statement: string;\n}',
   },
   {
     name: 'RequirementTaskEditRequest',
-    declaration: 'export interface RequirementTaskEditRequest {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n    readonly title: string;\n    readonly statement: string;\n}',
+    declaration: 'export interface RequirementTaskEditRequest {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n    readonly title: string;\n    readonly summary: string;\n    readonly statement: string;\n    readonly humanEdit?: boolean;\n}',
   },
   {
     name: 'RequirementTaskGenerateRequest',
@@ -4810,12 +4820,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type RequirementTaskId = Branded<\'RequirementTaskId\'>;',
   },
   {
+    name: 'RequirementTaskKind',
+    declaration: 'export type RequirementTaskKind = \'implementation\' | \'checkpoint\' | \'final-test\';',
+  },
+  {
     name: 'RequirementTaskMoveRequest',
     declaration: 'export interface RequirementTaskMoveRequest {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n    readonly direction: \'up\' | \'down\';\n}',
   },
   {
     name: 'RequirementTaskMutationResult',
-    declaration: 'export interface RequirementTaskMutationResult {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n    readonly eventSeq: number;\n}',
+    declaration: 'export interface RequirementTaskMutationResult {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n    readonly eventSeq: number;\n    readonly task?: RequirementTask;\n}',
   },
   {
     name: 'RequirementTaskRunRequest',

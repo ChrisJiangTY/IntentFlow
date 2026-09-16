@@ -18,7 +18,7 @@ export interface ConversationViewRequest {
 export interface ConversationStoreState {
   /** Composer draft (persisted; survives session switches and reloads). */
   draft: string
-  /** Preferred `conversation.view` entry id; null resolves to Chat when registered. */
+  /** Preferred `conversation.view` entry id; null resolves to Requirements, then Chat. */
   view: string | null
   /** Focus request consumed and acknowledged by the addressed View. */
   viewRequest: ConversationViewRequest | null

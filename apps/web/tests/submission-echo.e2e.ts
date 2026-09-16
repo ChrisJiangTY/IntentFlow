@@ -13,7 +13,7 @@ import { installAssembledBootEnv, mountAssembledApp } from './assembled-boot.ts'
 installAssembledBootEnv()
 
 it('paints the submission echo on the send keystroke and swaps it for the durable node', async () => {
-  mountAssembledApp()
+  mountAssembledApp('?fixture', { selectedView: 'chat' })
 
   const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
   const start = tree.querySelector<HTMLButtonElement>('button[aria-label="New session in fixture"]')

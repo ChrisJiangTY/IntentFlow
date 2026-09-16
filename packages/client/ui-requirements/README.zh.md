@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-client-ui-requirements` 在“对话”和“轨迹”旁注册“需求”标签页。它把每条原始需求显示为带简短摘要的产品轮次，其中包含折叠的澄清记录、可编辑中文需求文档、可执行 Task 块、逐 Task 审核和最终验证。可折叠的右侧栏把当前 Workspace 的全部需求轮次合并为一张知识图谱。
+`dsh-client-ui-requirements` 在“对话”和“轨迹”旁注册“需求”标签页。它把每条原始需求显示为带简短摘要的产品轮次，其中包含折叠的澄清记录、可编辑中文需求文档、可执行 Task 块、检查点审核和最终验证。可折叠的右侧栏把当前 Session 的用户需求、Task 与已记录的文件修改串联起来。
 
 ## 目录
 
@@ -27,21 +27,23 @@ kind: "package-reference"
 
 在“需求”标签页激活时，通过 DSH 底部输入框提交新需求。输入框把原始文本路由到 `sessionRequirements.startRound`。轮次标题随后显示 Agent 生成的只读摘要。原始输入以及每个澄清问题和回答保留在默认折叠的澄清记录中。
 
-歧义解决后，Notebook 使用 Markdown 渲染完整需求文档。“编辑”会在原位置打开源文本，并提供明确的“保存”和“取消”控件。保存会创建新的文档修订；无效修订显示验证问题并禁用“生成任务”。如果已有 Task 来自更早的文档修订，保存后会隐藏这些 Task。任务生成期间以及 Task 执行开始后，文档不能修改。
+歧义解决后，Notebook 使用 Markdown 渲染完整需求文档。“编辑”会在原位置打开源文本，并提供明确的“保存”和“取消”控件。保存会创建新的文档修订；无效修订显示验证问题并禁用“生成任务”。来自更早文档修订的 Task 保持可见且只读。任务生成期间以及 Task 执行开始后，文档不能修改。
 
-“生成任务”是需求文档块的执行操作。它要求主 Agent 检查仓库，并从确切文档修订生成有序的顶层 Task 块。“需求”视图不包含 Plan 卡片或 Plan 审批操作。每个生成的 Task 把所有子勾选项保留在对应顶层块内，并显示中文需求引用。所有 Task 都是必做项；Final Test 始终是最后一个块。
+“生成任务”是需求文档块的执行操作。它要求主 Agent 检查仓库，先从确切文档修订生成有序的顶层技术 Task，再把每个已经确定的 Agent Task 翻译成简洁的人类任务说明。“需求”视图不包含 Plan 卡片或 Plan 审批操作。所有 Task 都是必做项；Final Test 始终是最后一个块。
 
-执行前，用户可以新增、编辑、移动或撤回普通待处理 Task。Final Test 保持可编辑，但不能移动或撤回。一个 Task 开始后，已完成、执行中和审核中的单元格会锁定。当前 Task 与审核结算并停止“全部运行”后，后续待处理 Task 才能编辑。
+左侧 Notebook 显示 Task 标题、可直接编辑的人类说明和状态。完整执行说明位于单元格外，默认折叠。离开人类说明编辑区或运行任务时，系统保存最新输入并重写执行说明。保存中显示“正在更新任务”，失败保留草稿并阻止执行。人类编辑已完成 Task 会将其重新标记为待执行；编辑或新增非空工作也会让已完成的 Final Test 回到待执行状态。Final Test 不能移动或撤回。
 
-“全部运行”一次只执行一个 Task，并等待其独立审核。审核通过或警告时继续下一个 Task；审核阻塞或失败时停止。按序执行期间始终显示“停止全部运行”，该操作会在当前 Task 及其审核结算后生效。只有此前所有 Task 都已完成时，Final Test 才能运行；它通过自身审核后生成最终验证。
+“全部运行”一次只执行一个 Task，活动期间禁止单独启动其他 Task。普通实现 Task 的 Agent Turn 正常完成且 Agent 停稳后直接继续；Turn 非正常结束、取消和命令/工具错误会停止序列。检查点等待独立审核；审核通过或警告时继续，审核阻塞或失败时停止。按序执行期间始终显示“停止全部运行”，该操作会在当前 Task 及任何必要审核结算后生效。只有此前所有 Task 都已完成时，Final Test 才能运行；随后由一个综合审核者检查全部需求、回归、Task 结果和代码证据，再生成最终验证。
 
-状态允许时，选中的 Task 继续提供运行、移动、批注、编辑、详情、撤回和 Agent 辅助操作。Agent 输出在输入单元格下方使用 Markdown 渲染，并可独立折叠。被动文本备注和批注继续作为可重放的 Notebook 事件。缩放控件位于 Notebook 画布底部。需求图谱会常驻 Notebook 右侧，直到用户关闭；窄屏下则显示为覆盖式抽屉。
+状态允许时，选中的 Task 提供运行、移动、详情、撤回和辅助操作。运行说明下方的可折叠结果区仅显示“交付结果”并保留链接。任务状态标记继续显示；说明、审核摘要和执行详情不进入结果展示。历史 Markdown 仅提取可识别的交付章节；非结构化输出保留在详情和轨迹中，不编造交付结果。Notebook 显示文本备注，但隐藏批注及其创建入口；已保存的批注保留在 Session 日志中。需求图谱显示在 Notebook 旁直到关闭，窄屏下使用覆盖面板。
 
-图谱以当前 Workspace 的有序 `sessionIds` 作为成员来源，并按 Session、轮次和需求编号保留每个节点。早于图谱事件的历史文档会贡献确定性重建的节点，但不会臆造关系。灰色表示映射的实现工作尚未完成，蓝色表示映射工作正在执行或部分完成，绿色表示全部验收标准已有完成且通过独立审核的 Task，红色表示映射 Task 失败，或验证记录了失败或回归。点击当前 Session 的节点会定位到映射 Task 或需求文档；点击其他 Session 的节点会先打开该 Session，然后可再次点击同一节点定位单元格。
+图谱固定为三列：用户需求、Task、修改文件，仅读取当前 Session。验收标准引用连接需求与 Task，执行 Turn 标识连接 Task 与成功记录的文件修改。同一文件只显示一个节点。映射 Task 完成后，需求仍保持“进行中”，只有最终验证成功后才显示“已验证”；Task 自身的“已完成”标签不表示需求已经验证。选择节点会高亮其有向祖先与后代；选择文件会展开历史修改前后片段。选择需求或使用 Task 详情可定位 Notebook 单元格。缩放与“显示全部”只影响图谱面板。拖动左边缘可调整面板宽度；面板内容可独立于 Notebook 上下滚动。
 
-Task 执行失败使用 `[!]` 和琥珀色状态。审核警告使用独立的警告样式，但不会阻止按序执行。只有审核者记录确认的意外回归证据时才使用红色；只有审核者能够提供依据时才显示 Task 归因。
+Task 运行时，运行按钮替换为停止按钮。停止操作取消该任务的排队消息、执行或必要审核，并阻止“全部运行”继续推进。取消结算后，失败状态的 Task 可再次运行。取消不会撤销文件修改。
 
-Notebook 投影消费仅追加的 `requirement/round`、`requirement/clarification`、`requirement/document`、`requirement/task-list`、`requirement/task-execution`、`requirement/run-all`、`requirement/note`、`requirement/review` 和 `requirement/validation` 事件，以及用户版本和执行事件。图谱读取 Session 列表已经携带的宿主计算 `requirementGraph` 值，因此实时 Session 和未打开 Session 都可参与聚合。React 状态只保存选择、折叠、草稿、缩放、图谱开关和临时操作状态。
+Task 执行失败使用 `[!]` 和琥珀色状态。检查点或 Final Test 的审核警告使用独立的警告样式，但不会阻止按序执行。只有审核者记录确认的意外回归证据时才使用红色；只有审核者能够提供依据时才显示 Task 归因。
+
+Notebook 投影消费仅追加的 `requirement/round`、`requirement/clarification`、`requirement/document`、`requirement/task-list`、`requirement/task-execution`、`requirement/run-all`、`requirement/note`、`requirement/review` 和 `requirement/validation` 事件，以及用户版本和执行事件。图谱仅读取当前 Session 行中的 `requirementGraph` 与 `requirementChanges` 投影，并与完整 Notebook 关联。React 状态只保存选择、折叠、草稿、缩放、图谱开关和临时操作状态。
 
 -----
 
@@ -53,7 +55,7 @@ Notebook 投影消费仅追加的 `requirement/round`、`requirement/clarificati
 
 本包贡献 target 专属 Event Definition、仅追加快照 builder、Session selector hook、`conversation.view` 注册和提供给 `ui-conversation` 的输入框路由。原生 DSH 输入框仍是发起新产品轮次的唯一入口。Notebook 变更调用生成的 `sessionRequirements` Remote，因此文档修订、Task 顺序、编辑、撤回、note、执行和“全部运行”状态都能作为 Session 事实重放。
 
-该视图为每个轮次、文档、Task 列表、Task 执行、审核、“全部运行”请求和 note 选择最新事件修订。只有 Task 列表的 `documentRevision` 与当前文档修订相同时才会渲染。Workspace 聚合不会在 React 中读取其他 Session 日志，而是合并 Session 摘要中的图谱投影并按 Workspace 成员关系过滤。产品文案属于类型化的 `requirements` locale namespace；审核者生成的双语内容来自持久审核和验证事件。
+Notebook 通过 Session 投影订阅读取宿主完整的 `requirementNotebook` 投影。聊天分页、刷新和流重连不会移除已保存的单元格。每个文档修订保留对应任务列表，每次执行保留交付结果，修改后的任务重新执行时也会保留此前结果。当前任务遵守正常编辑锁定规则；旧文档任务保持只读。图谱关联当前文档的 Task 与执行记录，不读取其他 Session 日志。产品文案属于类型化的 `requirements` locale namespace。
 
 </details>
 
@@ -81,7 +83,7 @@ Notebook 投影消费仅追加的 `requirement/round`、`requirement/clarificati
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **未确认的编辑仅存在当前标签页**——关闭标签页可能丢失待处理或失败的自动保存、尚未保存的文档编辑或未提交的批注。
+- **未确认的编辑仅存在当前标签页**——关闭标签页可能丢失待处理或失败的自动保存或尚未保存的文档编辑。
 - **Task 输出有长度上限**——每个 Task 保存有界的 Agent 最终回复；详细工具证据仍在“轨迹”和 Session 日志中。
 - **Task 归因依赖审核证据**——只有证据支持时审核者才把回归归因到 Task；否则最终验证报告回归但不会猜测责任。
 - **关系限定在单个 Session 内**——创作 Agent 可以关联自身 Notebook 历史中的轮次；Workspace 视图会合并多个 Session，但不会推断不同 Session 之间的依赖。
@@ -92,6 +94,6 @@ Notebook 投影消费仅追加的 `requirement/round`、`requirement/clarificati
 <details>
 <summary>维护者的工作上下文——点击展开</summary>
 
-参阅[Workspace 需求知识图谱 Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.zh.md)。
+参阅[集中需求审核 Agent Note](../../../.agents/notes/implemented/feature/2026-09-16-batched-requirement-review.zh.md)和[Workspace 需求知识图谱 Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.zh.md)。
 
 </details>

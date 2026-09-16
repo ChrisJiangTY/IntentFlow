@@ -31,6 +31,30 @@ const secondTaskId = 'TASK-02' as never
 const sessionId = 'SESSION-01' as never
 const workspaceId = 'WORKSPACE-01' as never
 
+it('keeps earlier deliveries visible while a revised task starts a new execution', () => {
+  const value = snapshot()
+  const list = value.taskLists[0]!
+  const taskExecutions = [
+    base('requirements-task-execution', { version: 1, revision: 1, roundId, taskId, messageId: 'first' as never, status: 'completed', output: '## 交付结果\n\n第一次交付' }, 10),
+    base('requirements-task-execution', { version: 1, revision: 2, roundId, taskId, messageId: 'second' as never, status: 'submitted' }, 12),
+  ] as RequirementTaskExecutionNode[]
+  render(<RequirementsView {...props({}, { ...value, taskExecutions, taskLists: [{ ...list, data: { ...list.data,
+    tasks: list.data.tasks.map(task => task.id === taskId ? { ...task, humanInstruction: '修改后的要求' } : task),
+  } }] })} />)
+  expect(screen.getByText('第一次交付')).toBeTruthy()
+})
+
+it('keeps tasks visible and read-only after their requirement document changes', () => {
+  const value = snapshot()
+  const document = value.documents[0]!
+  render(<RequirementsView {...props({}, { ...value, documents: [{ ...document, data: { ...document.data, revision: 2 } }] })} />)
+  expect(within(screen.getByRole('main')).getByText('建立 Notebook')).toBeTruthy()
+  expect(screen.getAllByText('需求已更新 · 历史任务（只读）')).toHaveLength(2)
+  const cell = globalThis.document.querySelector('[data-task-id="TASK-01"]')!
+  expect(within(cell as HTMLElement).getByRole('textbox').hasAttribute('readonly')).toBe(true)
+  expect(within(cell as HTMLElement).getByRole('button', { name: '运行任务 建立 Notebook' }).hasAttribute('disabled')).toBe(true)
+})
+
 function graphProjection(title = 'Notebook 需求节点'): RequirementGraphProjection {
   return {
     rounds: [{
@@ -123,8 +147,8 @@ function snapshot(): RequirementsSnapshot {
     roundId,
     documentRevision: 1,
     tasks: [
-      { id: taskId, order: 0, kind: 'implementation', title: '建立 Notebook', statement: '渲染需求、Task 和验证单元格。\n\n_关联需求：1.1_', requirementRefs: ['1.1'], status: 'pending' },
-      { id: secondTaskId, order: 1, kind: 'final-test', title: '验证 Notebook', statement: '检查 Notebook 的完整用户路径。\n\n_关联需求：1.1_', requirementRefs: ['1.1'], status: 'pending' },
+      { id: taskId, order: 0, kind: 'implementation', title: '建立 Notebook', summary: '用户可以清楚查看需求、任务和验证结果。', statement: '渲染需求、Task 和验证单元格。\n\n_关联需求：1.1_', requirementRefs: ['1.1'], status: 'pending' },
+      { id: secondTaskId, order: 1, kind: 'final-test', title: '验证 Notebook', summary: '确认 Notebook 的完整使用路径正常。', statement: '检查 Notebook 的完整用户路径。\n\n_关联需求：1.1_', requirementRefs: ['1.1'], status: 'pending' },
     ],
   }, 4) as RequirementTaskListNode
   const validation: RequirementValidationNode = base('requirements-validation', {
@@ -161,6 +185,7 @@ function props(
     editDocument: vi.fn(() => action({ roundId, documentRevision: 2, eventSeq: 6 })),
     generateTasks: vi.fn(() => action({ roundId, documentRevision: 1, eventSeq: 6 })),
     runTask: vi.fn(() => action({ roundId, taskId, eventSeq: 6 })),
+    stopTask: vi.fn(() => action({ roundId, taskId, eventSeq: 6 })),
     runAll: vi.fn(() => action({ roundId, taskId, eventSeq: 6 })),
     stopRunAll: vi.fn(() => action({ roundId, eventSeq: 6 })),
     addTask: vi.fn(() => action({ roundId, taskId, eventSeq: 6 })),
@@ -181,10 +206,19 @@ function props(
 }
 
 function selectTask(title = '建立 Notebook'): HTMLElement {
-  const cell = screen.getByRole('textbox', { name: `任务内容 ${title}` }).closest('article')
+  const id = title === '验证 Notebook' ? secondTaskId : taskId
+  const cell = document.querySelector<HTMLElement>(`[data-task-id="${id}"]`)
   if (cell === null) throw new Error(`task Notebook cell ${title} is missing`)
   fireEvent.click(cell)
   return cell
+}
+
+function openTaskSpec(title = '建立 Notebook'): { readonly cell: HTMLElement; readonly spec: HTMLElement; readonly content: HTMLTextAreaElement } {
+  const cell = selectTask(title)
+  const spec = cell.parentElement?.querySelector<HTMLElement>('[data-task-agent-spec]')
+  if (spec === null || spec === undefined) throw new Error(`Agent execution instructions ${title} are missing`)
+  fireEvent.click(within(spec).getByRole('button', { name: `展开 Agent 运行说明 ${title}` }))
+  return { cell, spec, content: within(spec).getByRole('textbox', { name: `任务内容 ${title}` }) }
 }
 
 function reviewSnapshot(): RequirementsSnapshot {
@@ -236,7 +270,81 @@ describe('RequirementsView Notebook', () => {
     expect(screen.getByRole('group', { name: 'Notebook 缩放' })).toBeTruthy()
     expect(screen.getByText('TASK1')).toBeTruthy()
     expect(screen.getByText('TASK2')).toBeTruthy()
-    expect(screen.queryByText('1.1')).toBeNull()
+    expect(screen.queryByText('覆盖 1 条验收要求')).toBeNull()
+  })
+
+  it('keeps the human translation editable inside the cell and the Agent instructions collapsed outside it', () => {
+    render(<RequirementsView {...props()} />)
+
+    expect(screen.getByText('用户可以清楚查看需求、任务和验证结果。')).toBeTruthy()
+    expect(screen.queryByText('覆盖 1 条验收要求')).toBeNull()
+    expect(screen.getAllByRole('textbox', { name: '人类任务说明' })).toHaveLength(2)
+    expect(screen.queryByText('关联需求 1.1')).toBeNull()
+    expect(screen.queryByText('渲染需求、Task 和验证单元格。')).toBeNull()
+    expect(screen.queryByRole('textbox', { name: '任务内容 建立 Notebook' })).toBeNull()
+
+    const cell = screen.getAllByText('建立 Notebook').map(element => element.closest<HTMLElement>('[data-cell="task"]')).find(Boolean)!
+    const spec = cell.parentElement!.querySelector<HTMLElement>('[data-task-agent-spec]')!
+    expect(spec.closest('[data-cell="task"]')).toBeNull()
+    expect(within(spec).getByRole('button', { name: '展开 Agent 运行说明 建立 Notebook' }).getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(cell)
+    expect(within(cell).getByRole('textbox', { name: '人类任务说明' })).toBeTruthy()
+    expect(within(cell).queryByRole('textbox', { name: '任务内容 建立 Notebook' })).toBeNull()
+    fireEvent.click(within(spec).getByRole('button', { name: '展开 Agent 运行说明 建立 Notebook' }))
+    expect(within(spec).getByRole('textbox', { name: '任务内容 建立 Notebook' })).toBeTruthy()
+  })
+
+  it('edits a completed task human description without exposing an editable Agent specification', async () => {
+    const value = snapshot()
+    const taskList = value.taskLists[0]!
+    const completed = {
+      ...value,
+      taskLists: [{
+        ...taskList,
+        data: {
+          ...taskList.data,
+          tasks: taskList.data.tasks.map(task => task.id === taskId ? { ...task, status: 'completed' as const } : task),
+        },
+      }],
+    }
+    const editTask = vi.fn(() => Promise.resolve({ ok: true as const, value: { roundId, taskId, eventSeq: 6 } }))
+    render(<RequirementsView {...props({ editTask }, completed)} />)
+
+    const cell = selectTask()
+    fireEvent.change(within(cell).getByRole('textbox', { name: '人类任务说明' }), {
+      target: { value: '用户能直接读懂这个任务要完成的事情。' },
+    })
+    fireEvent.blur(within(cell).getByRole('textbox', { name: '人类任务说明' }))
+    await waitFor(() => { expect(editTask).toHaveBeenCalledWith({ humanEdit: true,
+      roundId,
+      taskId,
+      title: '建立 Notebook',
+      summary: '用户能直接读懂这个任务要完成的事情。',
+      statement: '渲染需求、Task 和验证单元格。\n\n_关联需求：1.1_',
+    }) })
+
+    const spec = cell.parentElement!.querySelector<HTMLElement>('[data-task-agent-spec]')!
+    fireEvent.click(within(spec).getByRole('button', { name: '展开 Agent 运行说明 建立 Notebook' }))
+    expect(within(spec).queryByRole('textbox', { name: '任务内容 建立 Notebook' })).toBeNull()
+    expect(within(spec).getByText('渲染需求、Task 和验证单元格。')).toBeTruthy()
+  })
+
+  it('removes dense acceptance-reference lists from historical human summaries', () => {
+    const value = snapshot()
+    const taskList = value.taskLists[0]!
+    const historicalTask = {
+      ...taskList.data.tasks[0]!,
+      summary: '',
+      statement: '**目标**：对全部 27 条验收标准（AC 1.1–1.7、2.1–2.6、3.1–3.8、4.1–4.6）做端到端复核。\n\n- [ ] 运行完整验证',
+    }
+    const historical = {
+      ...value,
+      taskLists: [{ ...taskList, data: { ...taskList.data, tasks: [historicalTask, ...taskList.data.tasks.slice(1)] } }],
+    }
+    render(<RequirementsView {...props({}, historical)} />)
+
+    expect(screen.getByText('对全部 27 条验收标准做端到端复核。')).toBeTruthy()
+    expect(screen.queryByText(/AC 1\.1/)).toBeNull()
   })
 
   it('runs only the selected task and opens details from the More menu', async () => {
@@ -252,10 +360,23 @@ describe('RequirementsView Notebook', () => {
     fireEvent.click(within(cell).getByRole('button', { name: '更多单元格操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '查看详情与证据' }))
     expect(screen.getByRole('complementary', { name: 'Notebook 详情' })).toBeTruthy()
-    expect(screen.getByText('TASK-01')).toBeTruthy()
+    expect(within(screen.getByRole('complementary', { name: 'Notebook 详情' })).getByText('TASK-01')).toBeTruthy()
   })
 
-  it('renders complete task output as Markdown outside the editable cell', () => {
+  it('offers stop on an executing task and sends its exact identity', async () => {
+    const value = snapshot()
+    const stopTask = vi.fn(() => Promise.resolve({ ok: true as const, value: { roundId, taskId, eventSeq: 7 } }))
+    const execution = base('requirements-task-execution', {
+      version: 1, revision: 1, roundId, taskId, messageId: 'running' as never, status: 'processing', turn: 2,
+    }, 6) as RequirementTaskExecutionNode
+    render(<RequirementsView {...props({ stopTask }, { ...value, taskExecutions: [execution] })} />)
+    const stop = screen.getByRole('button', { name: '停止运行：建立 Notebook' })
+    expect(stop.hasAttribute('disabled')).toBe(false)
+    fireEvent.click(stop)
+    await waitFor(() => { expect(stopTask).toHaveBeenCalledWith({ roundId, taskId }) })
+  })
+
+  it('renders only delivery outside the editable cell', () => {
     const value = snapshot()
     const execution: RequirementTaskExecutionNode = base('requirements-task-execution', {
       version: 1,
@@ -265,47 +386,50 @@ describe('RequirementsView Notebook', () => {
       messageId: 'message-output' as never,
       status: 'completed',
       turn: 2,
-      output: '# 实现完成\n\n- **页面结构**通过\n- `index.html` 已生成',
+      output: '正在执行……\n\n## 交付文件\n\n- [页面](https://example.com/result) — `index.html` 已生成\n\n## 可验证结果\n\n24 个步骤全部通过\n\n## 说明\n\n仅完成数据层。',
     }, 6) as RequirementTaskExecutionNode
     render(<RequirementsView {...props({}, { ...value, taskExecutions: [execution] })} />)
 
-    const input = screen.getByRole('textbox', { name: '任务内容 建立 Notebook' })
-    const cell = input.closest('article')
+    const cell = document.querySelector<HTMLElement>(`[data-task-id="${taskId}"]`)
     const output = screen.getByRole('region', { name: '任务输出 建立 Notebook' })
     expect(cell).toBeTruthy()
     expect(output.closest('article')).toBeNull()
     expect(cell?.parentElement?.firstElementChild).toBe(cell)
-    expect(cell?.nextElementSibling).toBe(output)
+    expect(cell?.nextElementSibling?.getAttribute('data-task-agent-spec')).not.toBeNull()
+    expect(cell?.nextElementSibling?.nextElementSibling).toBe(output)
     const collapse = within(output).getByRole('button', { name: '收起任务输出 建立 Notebook' })
     expect(collapse.getAttribute('aria-expanded')).toBe('true')
-    expect(within(output).getByRole('heading', { name: '实现完成' })).toBeTruthy()
-    expect(within(output).getByText('页面结构', { selector: 'strong' })).toBeTruthy()
+    expect(within(output).getAllByRole('heading').map(node => node.textContent)).toEqual(['交付结果'])
+    expect(within(output).getByRole('link', { name: '页面' }).getAttribute('href')).toBe('https://example.com/result')
+    expect(within(output).queryByText('仅完成数据层。')).toBeNull()
+    expect(within(output).queryByText('正在执行……')).toBeNull()
+    expect(within(output).queryByText('24 个步骤全部通过')).toBeNull()
     expect(within(output).getByText('index.html', { selector: 'code' })).toBeTruthy()
     fireEvent.click(collapse)
-    expect(within(output).queryByRole('heading', { name: '实现完成' })).toBeNull()
+    expect(within(output).queryByRole('heading', { name: '交付结果' })).toBeNull()
     const expand = within(output).getByRole('button', { name: '展开任务输出 建立 Notebook' })
     expect(expand.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(expand)
-    expect(within(output).getByRole('heading', { name: '实现完成' })).toBeTruthy()
+    expect(within(output).getByRole('heading', { name: '交付结果' })).toBeTruthy()
   })
 
   it('autosaves the title and indented statement without Save or Cancel controls', async () => {
     const editTask = vi.fn(() => Promise.resolve({ ok: true as const, value: { roundId, taskId, eventSeq: 7 } }))
     render(<RequirementsView {...props({ editTask })} />)
 
-    const cell = selectTask()
-    const content = within(cell).getByRole('textbox', { name: '任务内容 建立 Notebook' }) as HTMLTextAreaElement
+    const { spec, content } = openTaskSpec()
     expect(content.value).toBe('建立 Notebook\n  渲染需求、Task 和验证单元格。\n  \n  _关联需求：1.1_')
-    expect(within(cell).queryByRole('textbox', { name: '任务标题' })).toBeNull()
-    expect(within(cell).queryByRole('textbox', { name: '任务说明' })).toBeNull()
+    expect(within(spec).queryByRole('textbox', { name: '任务标题' })).toBeNull()
+    expect(within(spec).queryByRole('textbox', { name: '任务说明' })).toBeNull()
 
     fireEvent.change(content, { target: { value: '更新 Notebook\n  保留统一单元格编辑。\n  正文继续缩进。' } })
-    expect(within(cell).queryByRole('button', { name: '保存' })).toBeNull()
-    expect(within(cell).queryByRole('button', { name: '取消' })).toBeNull()
-    await waitFor(() => { expect(editTask).toHaveBeenCalledWith({
+    expect(within(spec).queryByRole('button', { name: '保存' })).toBeNull()
+    expect(within(spec).queryByRole('button', { name: '取消' })).toBeNull()
+    await waitFor(() => { expect(editTask).toHaveBeenCalledWith({ humanEdit: false,
       roundId,
       taskId,
       title: '更新 Notebook',
+      summary: '用户可以清楚查看需求、任务和验证结果。',
       statement: '保留统一单元格编辑。\n正文继续缩进。',
     }) })
   })
@@ -314,8 +438,7 @@ describe('RequirementsView Notebook', () => {
     const editTask = vi.fn(() => Promise.resolve({ ok: false as const, error: 'connection lost' }))
     const injected = props({ editTask })
     render(<RequirementsView {...injected} />)
-    const cell = selectTask()
-    const content = within(cell).getByRole('textbox', { name: '任务内容 建立 Notebook' }) as HTMLTextAreaElement
+    const { cell, content } = openTaskSpec()
     fireEvent.change(content, { target: { value: '临时标题\n  临时正文' } })
     await waitFor(() => { expect(within(cell).getByRole('alert').textContent).toContain('自动保存失败') })
     selectTask('验证 Notebook')
@@ -367,18 +490,20 @@ describe('RequirementsView Notebook', () => {
     })) })
     const { rerender } = render(<RequirementsView {...injected} />)
     fireEvent.click(screen.getByRole('button', { name: '代码' }))
-    await waitFor(() => { expect(addTask).toHaveBeenCalledWith({ roundId, title: '', statement: '' }) })
+    await waitFor(() => { expect(addTask).toHaveBeenCalledWith({ roundId, title: '', summary: '', statement: '' }) })
     const value = snapshot()
     const tasks = value.taskLists[0]!
     rerender(<RequirementsView {...props({ addTask, editTask: injected.editTask, runTask: injected.runTask }, { ...value, taskLists: [
       { ...tasks, anchorSeq: 6, data: { ...tasks.data, revision: 2, tasks: [tasks.data.tasks[0]!,
-        { id: addedTaskId, order: 1, kind: 'implementation', title: '', statement: '', requirementRefs: [], status: 'pending' },
+        { id: addedTaskId, order: 1, kind: 'implementation', title: '', summary: '', statement: '', requirementRefs: [], status: 'pending' },
         { ...tasks.data.tasks[1]!, order: 2 },
       ] } },
     ] })} />)
     const content = screen.getByRole('textbox', { name: '任务内容 新任务' }) as HTMLTextAreaElement
-    const cell = content.closest('article')!
+    const group = content.closest<HTMLElement>('[data-task-group]')!
+    const cell = group.querySelector<HTMLElement>('[data-cell="task"]')!
     expect(content).toBe(document.activeElement)
+    expect(within(cell).getByRole('textbox', { name: '人类任务说明' })).toBeTruthy()
     expect(within(cell).getByText('TASK2')).toBeTruthy()
     expect(within(cell).queryByRole('button', { name: '保存' })).toBeNull()
     expect(within(cell).queryByRole('button', { name: '取消' })).toBeNull()
@@ -387,16 +512,17 @@ describe('RequirementsView Notebook', () => {
     Object.defineProperty(content, 'scrollHeight', { configurable: true, value: 96 })
     fireEvent.change(content, { target: { value: '创建 HTML\n  第一行\n  第二行\n  第三行' } })
     expect(content.style.height).toBe('96px')
-    await waitFor(() => { expect(injected.editTask).toHaveBeenCalledWith({
+    await waitFor(() => { expect(injected.editTask).toHaveBeenCalledWith({ humanEdit: false,
       roundId,
       taskId: addedTaskId,
       title: '创建 HTML',
+      summary: '',
       statement: '第一行\n第二行\n第三行',
     }) })
     fireEvent.change(content, { target: { value: '创建 HTML' } })
     fireEvent.click(within(cell).getByRole('button', { name: '运行任务 新任务' }))
     await waitFor(() => { expect(injected.runTask).toHaveBeenCalledWith({ roundId, taskId: addedTaskId }) })
-    expect(injected.editTask).toHaveBeenLastCalledWith({ roundId, taskId: addedTaskId, title: '创建 HTML', statement: '' })
+    expect(injected.editTask).toHaveBeenLastCalledWith({ humanEdit: false, roundId, taskId: addedTaskId, title: '创建 HTML', summary: '', statement: '' })
   })
 
   it.each(['one', 'all'] as const)('waits for the latest queued edit before running %s', async (mode) => {
@@ -405,8 +531,7 @@ describe('RequirementsView Notebook', () => {
     const editTask = vi.fn(() => new Promise<Outcome>((resolve) => { completions.push(resolve) }))
     const injected = props({ editTask })
     render(<RequirementsView {...injected} />)
-    const cell = selectTask()
-    const content = within(cell).getByRole('textbox') as HTMLTextAreaElement
+    const { cell, content } = openTaskSpec()
     fireEvent.change(content, { target: { value: '第一版' } })
     await waitFor(() => { expect(editTask).toHaveBeenCalledTimes(1) })
     fireEvent.change(content, { target: { value: '第二版' } })
@@ -419,7 +544,7 @@ describe('RequirementsView Notebook', () => {
     expect(injected.runAll).not.toHaveBeenCalled()
     await act(async () => { completions[0]!({ ok: true, value: { roundId, taskId, eventSeq: 6 } }) })
     expect(editTask).toHaveBeenCalledTimes(2)
-    expect(editTask).toHaveBeenLastCalledWith({ roundId, taskId, title: '最终版', statement: '完整细节' })
+    expect(editTask).toHaveBeenLastCalledWith({ humanEdit: false, roundId, taskId, title: '最终版', summary: '用户可以清楚查看需求、任务和验证结果。', statement: '完整细节' })
     expect(injected.runTask).not.toHaveBeenCalled()
     expect(injected.runAll).not.toHaveBeenCalled()
     await act(async () => { completions[1]!({ ok: true, value: { roundId, taskId, eventSeq: 7 } }) })
@@ -427,14 +552,45 @@ describe('RequirementsView Notebook', () => {
     expect(content.value).toBe('最终版\n  完整细节')
   })
 
+  it('keeps newer human input while rebasing it onto the preceding rewritten task', async () => {
+    type Outcome = Awaited<ReturnType<Parameters<typeof RequirementsView>[0]['editTask']>>
+    const completions: ((outcome: Outcome) => void)[] = []
+    const editTask = vi.fn(() => new Promise<Outcome>((resolve) => { completions.push(resolve) }))
+    render(<RequirementsView {...props({ editTask })} />)
+    const cell = selectTask()
+    const editor = within(cell).getByRole('textbox', { name: '人类任务说明' }) as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: '改为导出表格。' } })
+    fireEvent.blur(editor)
+    await waitFor(() =>{  expect(editTask).toHaveBeenCalledTimes(1) })
+    fireEvent.change(editor, { target: { value: '改为导出图片。' } })
+    const rewritten = { ...snapshot().taskLists[0]!.data.tasks[0]!, title: '导出表格', summary: '改为导出表格。', statement: '生成表格并验证内容。' }
+    await act(async () => { completions[0]!({ ok: true, value: { roundId, taskId, eventSeq: 6, task: rewritten } }) })
+    expect(editor.value).toBe('改为导出图片。')
+    expect(editTask).toHaveBeenLastCalledWith(expect.objectContaining({ humanEdit: true, summary: '改为导出图片。', statement: rewritten.statement }))
+    await act(async () => { completions[1]!({ ok: true, value: { roundId, taskId, eventSeq: 7, task: { ...rewritten, summary: '改为导出图片。', statement: '生成图片并验证内容。' } } }) })
+    expect(editor.value).toBe('改为导出图片。')
+  })
+
   it('autosaves clearing a task and disables its run button', async () => {
     const injected = props()
     render(<RequirementsView {...injected} />)
-    const cell = selectTask()
-    fireEvent.change(within(cell).getByRole('textbox'), { target: { value: '' } })
-    await waitFor(() => { expect(injected.editTask).toHaveBeenCalledWith({ roundId, taskId, title: '', statement: '' }) })
+    const { cell, content } = openTaskSpec()
+    fireEvent.change(content, { target: { value: '' } })
+    await waitFor(() => { expect(injected.editTask).toHaveBeenCalledWith({ humanEdit: false, roundId, taskId, title: '', summary: '用户可以清楚查看需求、任务和验证结果。', statement: '' }) })
     expect(within(cell).getByRole('button', { name: '运行任务 建立 Notebook' }).hasAttribute('disabled')).toBe(true)
-    expect(within(cell).getByRole<HTMLTextAreaElement>('textbox').value).toBe('')
+    expect(content.value).toBe('')
+  })
+
+  it('disables individual Task starts while Run All is active', () => {
+    const value = snapshot()
+    const runAll = base('requirements-run-all', {
+      version: 1, revision: 1, roundId, status: 'running',
+    }, 6) as RequirementsSnapshot['runAlls'][number]
+    render(<RequirementsView {...props({}, { ...value, runAlls: [runAll] })} />)
+
+    const cell = selectTask()
+    expect(within(cell).getByRole('button', { name: '运行任务 建立 Notebook' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '停止全部运行' })).toBeTruthy()
   })
 
   it('keeps the insertion toolbar above the Notebook without a direct language switch', async () => {
@@ -474,7 +630,7 @@ describe('RequirementsView Notebook', () => {
     expect(screen.getByText('100%')).toBeTruthy()
   })
 
-  it('keeps Final Test last while supporting edit, comment, withdraw, and Agent assistance actions', async () => {
+  it('keeps Final Test last while supporting edit, withdraw, and Agent assistance actions', async () => {
     const moveTask = vi.fn(() => Promise.resolve({ ok: true as const, value: { roundId, taskId, eventSeq: 6 } }))
     const editTask = vi.fn(() => Promise.resolve({ ok: true as const, value: { roundId, taskId, eventSeq: 7 } }))
     const withdrawTask = vi.fn(() => Promise.resolve({ ok: true as const, value: { roundId, taskId, eventSeq: 8 } }))
@@ -487,27 +643,23 @@ describe('RequirementsView Notebook', () => {
     cell = selectTask('验证 Notebook')
     expect(within(cell).getByRole('button', { name: '选择上一个任务' }).hasAttribute('disabled')).toBe(true)
     expect(moveTask).not.toHaveBeenCalled()
-    await waitFor(() => { expect(within(cell).getByRole('button', { name: '编辑任务' }).hasAttribute('disabled')).toBe(false) })
-    cell = selectTask()
-    fireEvent.change(within(cell).getByRole('textbox', { name: '任务内容 建立 Notebook' }), {
+    expect(within(cell).getByRole<HTMLTextAreaElement>('textbox', { name: '人类任务说明' }).readOnly).toBe(false)
+    const opened = openTaskSpec()
+    cell = opened.cell
+    fireEvent.change(opened.content, {
       target: { value: '更新 Notebook\n  渲染需求、Plan、Task 和验证单元格。' },
     })
-    await waitFor(() => { expect(editTask).toHaveBeenCalledWith({
+    await waitFor(() => { expect(editTask).toHaveBeenCalledWith({ humanEdit: false,
       roundId,
       taskId,
       title: '更新 Notebook',
+      summary: '用户可以清楚查看需求、任务和验证结果。',
       statement: '渲染需求、Plan、Task 和验证单元格。',
     }) })
 
     await waitFor(() => { expect(screen.queryByRole('button', { name: '保存' })).toBeNull() })
     cell = selectTask()
-    fireEvent.click(within(cell).getByRole('button', { name: '添加批注' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '输入文本或批注…' }), { target: { value: '先核对交互' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(addNote).toHaveBeenCalledWith({ roundId, kind: 'comment', content: '先核对交互', dispatch: false })
-
-    await waitFor(() => { expect(screen.queryByRole('textbox', { name: '输入文本或批注…' })).toBeNull() })
-    cell = selectTask()
+    expect(within(cell).queryByRole('button', { name: '添加批注' })).toBeNull()
     fireEvent.click(within(cell).getByRole('button', { name: '请求 Agent 解释或优化此任务' }))
     expect(addNote).toHaveBeenLastCalledWith(expect.objectContaining({ roundId, kind: 'comment', dispatch: true }))
     await waitFor(() => { expect(openView).toHaveBeenCalledWith('chat', 'TASK-01') })
@@ -518,6 +670,22 @@ describe('RequirementsView Notebook', () => {
     await waitFor(() => { expect(withdrawTask).toHaveBeenCalledWith({ roundId, taskId }) })
   })
 
+  it('hides saved and dispatched comments without removing text notes or persisted data', () => {
+    const value = snapshot()
+    const notes: RequirementNoteNode[] = [false, true].map((dispatched, index) => base('requirements-note', {
+      version: 1, roundId, noteId: `COMMENT-${index}` as never, kind: 'comment',
+      content: `隐藏批注${index}`, dispatched,
+    }, 10 + index) as RequirementNoteNode)
+    notes.push(base('requirements-note', {
+      version: 1, roundId, noteId: 'TEXT-01' as never, kind: 'text', content: '保留普通文本', dispatched: false,
+    }, 12) as RequirementNoteNode)
+    render(<RequirementsView {...props({}, { ...value, notes })} />)
+    expect(screen.queryByText('隐藏批注0')).toBeNull()
+    expect(screen.queryByText('隐藏批注1')).toBeNull()
+    expect(screen.getByText('保留普通文本')).toBeTruthy()
+    expect(notes).toHaveLength(3)
+  })
+
   it('renders pending, active, turn, failed, completed, and withdrawn execution marks', () => {
     const value = snapshot()
     const taskList: RequirementTaskListNode = base('requirements-task-list', {
@@ -526,13 +694,13 @@ describe('RequirementsView Notebook', () => {
       roundId,
       documentRevision: 1,
       tasks: [
-        { id: 'PENDING' as never, order: 0, kind: 'implementation', title: '等待任务', statement: 'pending', requirementRefs: ['1.1'], status: 'pending' },
-        { id: 'ACTIVE' as never, order: 1, kind: 'implementation', title: '运行任务', statement: 'active', requirementRefs: ['1.1'], status: 'in_progress' },
-        { id: 'TURN' as never, order: 2, kind: 'implementation', title: '轮次任务', statement: 'turn', requirementRefs: ['1.1'], status: 'in_progress' },
-        { id: 'FAILED' as never, order: 3, kind: 'implementation', title: '失败任务', statement: 'failed', requirementRefs: ['1.1'], status: 'failed' },
-        { id: 'DONE' as never, order: 4, kind: 'implementation', title: '完成任务', statement: 'done', requirementRefs: ['1.1'], status: 'completed' },
-        { id: 'GONE' as never, order: 5, kind: 'implementation', title: '撤回任务', statement: 'withdrawn', requirementRefs: ['1.1'], status: 'withdrawn' },
-        { id: 'FINAL' as never, order: 6, kind: 'final-test', title: '最终测试', statement: 'final', requirementRefs: ['1.1'], status: 'pending' },
+        { id: 'PENDING' as never, order: 0, kind: 'implementation', title: '等待任务', summary: '等待开始。', statement: 'pending', requirementRefs: ['1.1'], status: 'pending' },
+        { id: 'ACTIVE' as never, order: 1, kind: 'implementation', title: '运行任务', summary: '正在处理。', statement: 'active', requirementRefs: ['1.1'], status: 'in_progress' },
+        { id: 'TURN' as never, order: 2, kind: 'implementation', title: '轮次任务', summary: '正在多轮处理。', statement: 'turn', requirementRefs: ['1.1'], status: 'in_progress' },
+        { id: 'FAILED' as never, order: 3, kind: 'implementation', title: '失败任务', summary: '处理失败。', statement: 'failed', requirementRefs: ['1.1'], status: 'failed' },
+        { id: 'DONE' as never, order: 4, kind: 'implementation', title: '完成任务', summary: '处理完成。', statement: 'done', requirementRefs: ['1.1'], status: 'completed' },
+        { id: 'GONE' as never, order: 5, kind: 'implementation', title: '撤回任务', summary: '任务已撤回。', statement: 'withdrawn', requirementRefs: ['1.1'], status: 'withdrawn' },
+        { id: 'FINAL' as never, order: 6, kind: 'final-test', title: '最终测试', summary: '确认结果可用。', statement: 'final', requirementRefs: ['1.1'], status: 'pending' },
       ],
     }, 9) as RequirementTaskListNode
     const active: RequirementTaskExecutionNode = base('requirements-task-execution', {
@@ -559,8 +727,8 @@ describe('RequirementsView Notebook', () => {
       ...value.taskLists[0]!.data,
       revision: 2,
       tasks: [
-        { id: taskId, order: 0, kind: 'implementation', title: '回归任务', statement: 'regression', requirementRefs: ['1.1'], status: 'completed' },
-        { id: secondTaskId, order: 1, kind: 'final-test', title: '失败任务', statement: 'failure', requirementRefs: ['1.1'], status: 'failed' },
+        { id: taskId, order: 0, kind: 'implementation', title: '回归任务', summary: '任务曾经完成。', statement: 'regression', requirementRefs: ['1.1'], status: 'completed' },
+        { id: secondTaskId, order: 1, kind: 'final-test', title: '失败任务', summary: '最终验证失败。', statement: 'failure', requirementRefs: ['1.1'], status: 'failed' },
       ],
     }, 7) as RequirementTaskListNode
     const validation: RequirementValidationNode = base('requirements-validation', {
@@ -593,11 +761,11 @@ describe('RequirementsView Notebook', () => {
     fireEvent.click(screen.getByRole('button', { name: '关闭详情' }))
 
     fireEvent.click(screen.getByRole('button', { name: '打开或关闭需求知识图谱' }))
-    expect(screen.queryByRole('complementary', { name: 'Workspace 需求知识图谱' })).toBeNull()
+    expect(screen.queryByRole('complementary', { name: 'Session 需求代码图谱' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '命令' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '打开需求知识图谱' }))
-    const graph = screen.getByRole('complementary', { name: 'Workspace 需求知识图谱' })
-    expect(within(graph).getByText('IntentFlow')).toBeTruthy()
+    const graph = screen.getByRole('complementary', { name: 'Session 需求代码图谱' })
+    expect(within(graph).getByText('Notebook 需求流')).toBeTruthy()
     expect(within(graph).getByText('当前 Session')).toBeTruthy()
     const node = within(graph).getByRole('button', { name: /需求 1：Notebook 需求节点/u })
     expect(node.dataset.status).toBe('pending')
@@ -606,7 +774,7 @@ describe('RequirementsView Notebook', () => {
     expect(container.querySelector('[data-task-id="TASK-01"]')?.getAttribute('data-selected')).toBe('true')
   })
 
-  it('opens a different Session when its Workspace graph node is selected', () => {
+  it('excludes other Sessions even when they share the Workspace', () => {
     const otherSessionId = 'SESSION-02' as never
     const otherRoundId = 'ROUND-02' as never
     const sessions = sessionList()
@@ -646,7 +814,7 @@ describe('RequirementsView Notebook', () => {
       useWorkspaces: <Selected,>(selector: (current: WorkspaceSnapshot) => Selected): Selected => selector(workspaces),
     })} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /需求 1：跨会话节点/u }))
-    expect(openSession).toHaveBeenCalledWith(otherSessionId)
+    expect(screen.queryByRole('button', { name: /需求 1：跨会话节点/u })).toBeNull()
+    expect(openSession).not.toHaveBeenCalled()
   })
 })

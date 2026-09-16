@@ -1,0 +1,176 @@
+- toolbar "Requirements view toolbar":
+  - button "Command":
+    - img
+    - text: Command
+  - button "Code"
+  - button "Text"
+  - button "Run all":
+    - img
+    - text: Run all
+  - button "Open or close the requirement knowledge graph" [pressed]:
+    - img
+    - text: Requirement graph
+- main:
+  - button "Collapse round":
+    - img
+  - strong: "Round 1:"
+  - text: 构建并验证导航页面 Tasks ready
+  - group: Clarification record
+  - article:
+    - text: "[2]"
+    - button "Generate tasks from the requirement document" [disabled]:
+      - img
+    - text: REQ
+    - strong: Requirement document
+    - heading "需求文档" [level=1]
+    - heading "简介" [level=2]
+    - paragraph: 构建并验证导航页面，同时保留现有行为。
+    - heading "需求" [level=2]
+    - heading "需求 1：导航页面" [level=3]
+    - paragraph:
+      - strong: 用户故事：
+      - text: 作为用户，我希望使用清晰的导航页面，以便访问主要功能。
+    - heading "验收标准" [level=4]
+    - list:
+      - listitem: 当页面打开时，系统应当显示导航内容。
+      - listitem: 当视口缩小至移动端时，系统应当保持导航可用。
+  - article:
+    - text: "[✓]"
+    - button "Run task Build navigation HTML" [disabled]:
+      - img
+    - text: TASK1
+    - strong: Build navigation HTML
+    - textbox "Human task description":
+      - /placeholder: Translate this Agent task in one or two sentences…
+      - text: Users can navigate the page with a clear, complete layout.
+  - region "Agent execution instructions Build navigation HTML":
+    - button "Expand Agent execution instructions Build navigation HTML":
+      - img
+      - text: Agent execution instructions
+  - region "Task output Build navigation HTML":
+    - button "Collapse task output Build navigation HTML" [expanded]:
+      - img
+    - heading "Deliverables" [level=3]
+    - paragraph: No structured deliverables are available.
+  - article:
+    - text: "[!]"
+    - button "Run task Check mobile navigation":
+      - img
+    - text: TASK2
+    - strong: Check mobile navigation
+    - textbox "Human task description":
+      - /placeholder: Translate this Agent task in one or two sentences…
+      - text: Mobile navigation remains usable at the target breakpoint.
+  - region "Agent execution instructions Check mobile navigation":
+    - button "Expand Agent execution instructions Check mobile navigation":
+      - img
+      - text: Agent execution instructions
+  - region "Task output Check mobile navigation":
+    - button "Collapse task output Check mobile navigation" [expanded]:
+      - img
+    - heading "Deliverables" [level=3]
+    - paragraph: No mobile layout delivered.
+  - article:
+    - text: "[ ]"
+    - button "Run task Export navigation results":
+      - img
+    - text: TASK3
+    - strong: Export navigation results
+    - textbox "Human task description":
+      - /placeholder: Translate this Agent task in one or two sentences…
+      - text: Users can export the current navigation results as a clear CSV file.
+  - region "Agent execution instructions Export navigation results":
+    - button "Expand Agent execution instructions Export navigation results":
+      - img
+      - text: Agent execution instructions
+  - article:
+    - text: "[ ]"
+    - button "Run task Final Test" [disabled]:
+      - img
+    - text: TASK4
+    - strong: Final Test
+    - textbox "Human task description":
+      - /placeholder: Translate this Agent task in one or two sentences…
+      - text: The complete navigation experience meets every acceptance criterion.
+  - region "Agent execution instructions Final Test":
+    - button "Expand Agent execution instructions Final Test":
+      - img
+      - text: Agent execution instructions
+  - article:
+    - text: MD
+    - strong: Markdown note
+    - button "Edit note":
+      - img
+      - text: Edit note
+    - paragraph: Keep the existing DSH conversation controls visible.
+  - article:
+    - text: MD
+    - strong: Markdown note
+    - button "Edit note":
+      - img
+      - text: Edit note
+    - heading "Review notes" [level=1]
+    - list:
+      - listitem:
+        - strong: Keep
+        - text: the navigation
+      - listitem:
+        - text: Verify
+        - code: index.html
+    - table:
+      - rowgroup:
+        - row "Check Result":
+          - columnheader "Check"
+          - columnheader "Result"
+      - rowgroup:
+        - row "Mobile Pending":
+          - cell "Mobile"
+          - cell "Pending"
+    - text: js
+    - button "Copy"
+    - code: const reviewed = true
+  - article:
+    - text: MD
+    - strong: Markdown note
+    - button "Edit note":
+      - img
+      - text: Edit note
+    - paragraph: Saved after reconnect
+  - group "Notebook zoom":
+    - button "Zoom out Notebook": −
+    - text: 100%
+    - button "Zoom in Notebook": ＋
+- complementary "Session requirement code graph":
+  - separator "Resize requirement graph"
+  - strong: Requirement graph
+  - text: NOTEBOOK_RETENTION 0
+  - button "Close the requirement knowledge graph":
+    - img
+  - text: Current Session
+  - button "Show all"
+  - button "Zoom out graph": −
+  - button "Zoom in graph": ＋
+  - strong: Requirements
+  - strong: Tasks
+  - strong: Code changes
+  - 'button "Round 1, requirement 1: 导航页面, status: Failed or regressed"':
+    - text: "Round 1: · Requirement 1"
+    - strong: 导航页面
+    - text: Failed or regressed
+  - 'button "Inspect task: Build navigation HTML"':
+    - text: TASK-WEB-01
+    - strong: Build navigation HTML
+    - text: Completed
+  - 'button "Inspect task: Check mobile navigation"':
+    - text: TASK-WEB-02
+    - strong: Check mobile navigation
+    - text: Failed or regressed
+  - 'button "Inspect task: Export navigation results"':
+    - text: TASK-2674f87f
+    - strong: Export navigation results
+    - text: Pending
+  - 'button "Inspect task: Final Test"':
+    - text: TASK-WEB-FINAL
+    - strong: Final Test
+    - text: Pending
+  - paragraph: Current conversation only. Edges show assigned work and recorded mutations, not passing tests; unrecorded shell or delegated changes may be absent.
