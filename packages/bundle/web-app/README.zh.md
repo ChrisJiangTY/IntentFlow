@@ -11,6 +11,8 @@ kind: "package-bundle"
 
 运行 `dsh --profile web`，界面会在你的默认浏览器中打开，即可与 agent（智能体）交互式聊天。你会获得会话视图、模型与设置管理以及会话历史，背后与其他表层相同的模型访问、工具与安全默认值。该命令会打印带 token 的启动 URL；浏览器用该 token 换取签名会话 cookie，再重定向到干净的根 URL。你可以从命令行更改端口、关闭浏览器交接并允许额外主机；有意不支持绑定所有网络接口。需要浏览器中的交互式工作时选择它；`dsh-headless` 是一次性的命令行兄弟表层。
 
+Web 组合包内置 `dsh-better-sidebar` 0.17.1，为工具 tab 提供宽度可调的右侧工作区。
+
 ## 目录
 
 - [使用本包](#use-this-package)
@@ -26,6 +28,8 @@ kind: "package-bundle"
 ## 使用本包
 
 启动 GUI、打开浏览器，然后开始与 agent（智能体）对话。flag 用于微调本次调用。
+
+使用右侧工作区的 `+` 菜单打开工具 tab。浏览器 tab 启用时，从结果链接打开 Notebook 交付的网页会在当前 Session 侧栏中显示；否则链接保留浏览器原生行为。
 
 ### 启动 Web GUI
 
@@ -74,6 +78,8 @@ dsh --profile web --no-open --port 8080
 ### patch 语义
 
 patch 会替换目标行的整个 `config`，因此每个 Web 行都重述自己拥有的每个键：基础行上的 persona、`DSH_TOOLS_MODE` PTC mode 开关与 `session-query-sqlite` 值，随后 `insert` 添加 Web 宿主行、传输层与浏览器名录。base 以进程级挂载的按 agent 工具行在这里被禁用，由 preset 名录接管；每项宿主层与 preset 层归属决策的理由以行内注释写在 patch 里。
+
+patch 会在 `ui-requirements` 之前挂载精确版本的 `dsh-better-sidebar` 0.17.1 插件，使需求 tab 注册时侧栏服务已经可用。带保护的条目 id 也允许已经单独安装的副本接管服务，避免生成重复 Loader 行。
 
 ### 就绪宣告
 

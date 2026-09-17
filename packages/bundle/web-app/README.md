@@ -11,6 +11,8 @@ English | [中文](README.zh.md)
 
 Run `dsh --profile web` and the interface opens in your default browser, ready for interactive chat with the agent. You get the conversation view, model and settings management, and session history, backed by the same model access, tools, and safety defaults as every other surface. The command prints a tokenized startup URL; the browser exchanges that token for a signed session cookie and redirects to the clean root URL. You can change the port, suppress the browser handoff, and allow extra hosts from the command line; binding all network interfaces is intentionally not supported. Choose it for interactive work in the browser; `dsh-headless` is the one-shot command-line sibling.
 
+The Web bundle includes `dsh-better-sidebar` 0.17.1, which provides an adjustable-width right-side workspace for tool tabs.
+
 ## Table of Contents
 
 - [Use this package](#use-this-package)
@@ -26,6 +28,8 @@ Run `dsh --profile web` and the interface opens in your default browser, ready f
 ## Use this package
 
 Start the GUI, open your browser, and start talking to the agent. The flags fine-tune the invocation.
+
+Use the `+` menu in the right workspace to open tool tabs. When its browser tab is enabled, opening a Notebook-delivered web page from its result link shows the page in the current Session sidebar; otherwise the link keeps native browser behavior.
 
 ### Starting the Web GUI
 
@@ -74,6 +78,8 @@ The bundle is one patch plus one runtime glue plugin. The storage stack and proj
 ### Patch semantics
 
 A patch replaces the targeted row's whole `config`, so each web row restates every key it owns: the persona, the `DSH_TOOLS_MODE` PTC mode opt-in, and the `session-query-sqlite` values on the base rows, then `insert` adds the web host rows, transport, and browser roster. The per-agent tool rows the base mounts process-wide are disabled here and the preset roster takes over; the reasoning for each host-plane versus preset-plane decision is inline in the patch.
+
+The patch mounts the exact `dsh-better-sidebar` 0.17.1 plugin before `ui-requirements`, so the sidebar service is available when requirement tabs register. Its guarded entry id also lets an already installed copy own the service instead of creating a duplicate Loader row.
 
 ### Readiness
 

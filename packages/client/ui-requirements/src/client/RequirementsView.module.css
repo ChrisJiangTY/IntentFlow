@@ -121,34 +121,6 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.graphToggle {
-  display: inline-flex;
-  align-items: center;
-  height: 28px;
-  margin-left: auto;
-  padding: 0 10px;
-  gap: 5px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 7px;
-  color: var(--dsw-alias-label-secondary);
-  background: transparent;
-  cursor: pointer;
-  font: var(--dsw-font-xxs-12);
-  white-space: nowrap;
-}
-
-.graphToggle[aria-pressed='true'],
-.graphToggle:hover {
-  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 42%, var(--dsw-alias-border-l1));
-  color: var(--dsw-alias-state-business-primary);
-  background: var(--dsw-alias-state-business-tertiary);
-}
-
-.graphToggle:focus-visible {
-  outline: 1px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 1px;
-}
-
 .actionError {
   flex: none;
   padding: 7px 24px;
@@ -1100,7 +1072,15 @@
 }
 
 .traceControls { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; }
-.traceControls > span { margin-right: auto; color: var(--dsw-alias-label-secondary); }
+.traceControls > span {
+  min-width: 0;
+  margin-right: auto;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.traceControls > button { flex: none; }
 .traceControls button, .traceDetail button { border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 4px 8px; background: var(--dsw-alias-bg-layer-1); color: inherit; cursor: pointer; }
 .traceViewport { overflow: auto; max-height: 60vh; background-image: radial-gradient(var(--dsw-alias-border-l2) 1px, transparent 1px); background-size: 16px 16px; }
 .traceCanvas { position: relative; transform-origin: top left; }
@@ -1121,82 +1101,16 @@
 .traceDetail summary { cursor: pointer; margin-bottom: 10px; }
 .traceDetail pre { overflow: auto; max-height: 240px; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; font-size: 11px; }
 .graphPanel {
-  position: relative;
   display: flex;
-  width: 660px;
+  width: 100%;
+  height: 100%;
   min-width: 0;
-  max-width: 90%;
   min-height: 0;
-  flex: 0 0 min(660px, 48%);
   flex-direction: column;
-  border-left: 1px solid var(--dsw-alias-border-l2);
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-bg-layer-1);
 }
 
-.graphResize {
-  position: absolute;
-  z-index: 10;
-  inset: 0 auto 0 -4px;
-  width: 9px;
-  cursor: col-resize;
-  touch-action: none;
-}
-
-.graphResize:hover,
-.graphResize:focus-visible {
-  background: var(--dsw-alias-border-l2);
-}
-
-.graphHeader {
-  display: flex;
-  min-height: 55px;
-  padding: 10px 12px 9px 16px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
-}
-
-.graphHeader > div {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.graphHeader strong {
-  font: var(--dsw-font-sm-14);
-  font-weight: 650;
-}
-
-.graphHeader span {
-  overflow: hidden;
-  color: var(--dsw-alias-label-caption);
-  font: var(--dsw-font-caption);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.graphHeader button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  flex: none;
-  place-items: center;
-  border: 0;
-  border-radius: 6px;
-  color: var(--dsw-alias-label-secondary);
-  background: transparent;
-  cursor: pointer;
-}
-
-.graphHeader button:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-layer-2);
-}
-
-.graphHeader button:focus-visible,
 .graphNode:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 1px;
@@ -1245,7 +1159,7 @@
 .graphBody {
   flex: 1;
   min-height: 0;
-  padding: 12px 12px calc(var(--dsh-composer-height, 152px) + 24px);
+  padding: 0 12px 24px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -1547,10 +1461,6 @@
     min-width: auto;
   }
 
-  .graphToggle {
-    margin-left: 0;
-  }
-
   .notebook {
     padding-right: 14px;
     padding-left: 14px;
@@ -1575,27 +1485,11 @@
   .editorActions {
     justify-content: flex-end;
   }
-
-  .graphPanel {
-    position: absolute;
-    z-index: 9;
-    inset: 0 0 0 auto;
-    width: min(372px, 92vw);
-    min-width: 0;
-    box-shadow: var(--dsw-shadow-lv2);
-  }
 }
 
 @media (max-width: 600px) {
   .toolbar {
     padding-inline: 8px;
     gap: 4px;
-  }
-
-  .graphToggle {
-    width: 28px;
-    padding: 0;
-    justify-content: center;
-    font-size: 0;
   }
 }

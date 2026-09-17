@@ -63,9 +63,7 @@ const BUNDLE_LAYERS = [
     patch: join(REPO_ROOT, 'packages/bundle/web-app/cordis.patch.yml'),
   },
 ] as const
-const bundleResolvers = BUNDLE_LAYERS.map(layer => createRequire(layer.manifest))
-const webBundleResolver = bundleResolvers[1]
-if (webBundleResolver === undefined) throw new Error('assembled boot: web bundle resolver missing')
+const webBundleResolver = createRequire(BUNDLE_LAYERS[1].manifest)
 const workspacePackageManifests = new Map(globSync('packages/*/*/package.json', { cwd: REPO_ROOT }).map((relative) => {
   const path = join(REPO_ROOT, relative)
   const pkg = JSON.parse(readFileSync(path, 'utf8')) as ClientPackageManifest
@@ -75,7 +73,14 @@ const workspacePackageManifests = new Map(globSync('packages/*/*/package.json', 
 const appBoot = await import(pathToFileURL(webBundleResolver.resolve('@deepseek-ai/dsh-app-boot')).href) as unknown as BootComposition
 
 function resolvePackageManifest(specifier: string): string | undefined {
-  return workspacePackageManifests.get(specifier)
+  const workspaceManifest = workspacePackageManifests.get(specifier)
+  if (workspaceManifest !== undefined) return workspaceManifest
+  try {
+    return webBundleResolver.resolve(`${specifier}/package.json`)
+  } catch {
+    // Non-package Loader rows and names outside the Web bundle are not browser plugins.
+    return undefined
+  }
 }
 
 function resolveClientExport(packagePath: string, pkg: ClientPackageManifest): string {

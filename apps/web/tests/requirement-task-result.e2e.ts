@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { launchWebScaffold, recordFixture, webSnapshotMode } from './scaffold.ts'
+import { compareOrRefreshGolden, launchWebScaffold, recordFixture, webSnapshotMode } from './scaffold.ts'
 
 const directory = fileURLToPath(new URL('../../../snapshots/web/requirement-task-result', import.meta.url))
 const mode = webSnapshotMode()
@@ -61,6 +61,14 @@ describe('human-facing task delivery report', () => {
       expect(output?.match(/^## .+$/gmu)).toEqual(['## 交付结果', '## 说明'])
       expect(output).not.toContain('```')
       expect(spy).toHaveBeenCalledOnce()
+      if (mode !== 'record') {
+        const execution = session.events.flatMap(event => event.type === 'requirement/task-execution'
+          ? [{ taskId: event.data.taskId, status: event.data.status }]
+          : [])
+        await compareOrRefreshGolden(join(directory, 'execution.expected.md'), JSON.stringify({
+          execution, reviewers: spy.mock.calls.map(([, request]) => request.label),
+        }, null, 2), mode)
+      }
       if (mode === 'record') await recordFixture(scaffold, agent.id, join(directory, 'session.jsonl'))
     } finally { spy.mockRestore(); await scaffold.close() }
   }, 300_000)

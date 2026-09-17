@@ -26,7 +26,8 @@
         "@deepseek-ai/dsh-api-workspace-controller",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-conversation",
-        "@deepseek-ai/dsh-client-ui-renderer"
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "dsh-better-sidebar"
       ],
       "platform": "web"
     }
@@ -43,7 +44,8 @@
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-session-requirements": "workspace:^",
-    "@deepseek-ai/cordis": "workspace:^"
+    "@deepseek-ai/cordis": "workspace:^",
+    "dsh-better-sidebar": "0.17.1"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-api-remotes": "workspace:^",
@@ -62,6 +64,7 @@
     "@deepseek-ai/cordis": "workspace:^",
     "@types/react": "~18.3.1",
     "@testing-library/react": "^16.3.2",
+    "dsh-better-sidebar": "0.17.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

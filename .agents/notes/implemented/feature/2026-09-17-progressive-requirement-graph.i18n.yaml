@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-17-progressive-requirement-graph.md
+2026-09-17-progressive-requirement-graph.md: 2c2fa4f77e44261f6af79a16cae4568bff7741cf
+2026-09-17-progressive-requirement-graph.zh.md: 126c120e8682e1076a4e0c460c1cb42e68199807

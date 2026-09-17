@@ -82,6 +82,8 @@
         reviewerTools: [read, glob, grep]
         maxClarificationRounds: 2
         maxQuestionsPerRound: 5
+        taskHealthCheckAfterMs: 3600000
+        taskHealthCheckTimeoutMs: 300000
 
     # Resolve bind host, SSH launch, and display once at boot, then mount the
     # matching dual-face directory picker. Mount -native or -browse directly in
@@ -303,6 +305,14 @@
 
     - id: ui-trajectory
       name: '@deepseek-ai/dsh-client-ui-trajectory'
+
+    # This bundle owns the default mount. A separately installed
+    # dsh-better-sidebar bundle may appear before or after it; distinct ids
+    # let whichever row is later disable itself instead of failing Loader on
+    # a duplicate id before either guard can run.
+    - id: intentflow-better-sidebar
+      name: 'dsh-better-sidebar'
+      disabled: !!js "[...ctx.loader.entries()].some((e) => e.options.name === 'dsh-better-sidebar' && e.options.id !== 'intentflow-better-sidebar' && !e.disabled)"
 
     - id: ui-requirements
       name: '@deepseek-ai/dsh-client-ui-requirements'

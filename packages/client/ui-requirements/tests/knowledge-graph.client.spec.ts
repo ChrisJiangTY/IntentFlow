@@ -76,6 +76,7 @@ describe('Session requirement graph', () => {
   it('excludes other Sessions and preserves round identity', () => {
     const graph = sessionRequirementGraph(sessions(), EMPTY_REQUIREMENTS_SNAPSHOT, currentSessionId)
     expect(graph.title).toBe('当前会话')
+    expect(graph.documents.map(node => [node.key, node.title])).toEqual([['document:ROUND-01', '当前会话'], ['document:ROUND-02', '第二轮']])
     expect(graph.requirements.map(node => node.key)).toEqual(['requirement:ROUND-01:1', 'requirement:ROUND-02:1'])
     expect(graph.tasks).toEqual([])
     expect(sessionRequirementGraph(sessions(), EMPTY_REQUIREMENTS_SNAPSHOT, 'absent' as never).requirements).toEqual([])
@@ -107,10 +108,10 @@ describe('Session requirement graph', () => {
     expect(graph.tasks).toHaveLength(2)
     expect(graph.files).toHaveLength(1)
     expect(graph.files[0]?.changes.map(change => change.turn)).toEqual([2, 3])
-    expect(graph.edges).toHaveLength(4)
-    expect([...focusedTraceKeys(graph, 'task:ROUND-01:T1')].sort()).toEqual(['file:shared.ts', 'requirement:ROUND-01:1', 'task:ROUND-01:T1'])
+    expect(graph.edges).toHaveLength(6)
+    expect([...focusedTraceKeys(graph, 'task:ROUND-01:T1')].sort()).toEqual(['document:ROUND-01', 'file:shared.ts', 'requirement:ROUND-01:1', 'task:ROUND-01:T1'])
     expect(focusedTraceKeys(graph, 'file:shared.ts').has('task:ROUND-01:T2')).toBe(true)
-    expect(focusedTraceKeys(graph, undefined).size).toBe(5)
+    expect(focusedTraceKeys(graph, undefined).size).toBe(7)
     const ambiguous = { ...notebook, taskExecutions: notebook.taskExecutions.map(execution => ({
       ...execution, data: { ...execution.data, turn: 2 },
     })) }

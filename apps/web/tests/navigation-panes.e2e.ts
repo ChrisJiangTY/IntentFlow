@@ -32,6 +32,7 @@ const REQUIREMENTS_ZH_EXPECTED = join(SNAPSHOT_DIR, 'requirements-zh.expected.md
 const REQUIREMENTS_DRAFT_EXPECTED = join(SNAPSHOT_DIR, 'requirements-draft.expected.md')
 const REQUIREMENTS_NOTE_EXPECTED = join(SNAPSHOT_DIR, 'requirements-markdown-note.expected.md')
 const REQUIREMENTS_RESTORED_EXPECTED = join(SNAPSHOT_DIR, 'requirements-restored.expected.md')
+const REQUIREMENTS_GRAPH_EXPECTED = join(SNAPSHOT_DIR, 'requirements-graph.expected.md')
 const MODE = webSnapshotMode()
 const SEED_ID = 'navigation-panes-web-e2e'
 
@@ -520,14 +521,28 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await page.getByRole('complementary', { name: 'Notebook details' }).getByRole('button', { name: 'Close details' }).click()
     await toolbar.getByRole('button', { name: 'Command', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Use English content' }).click()
-    await toolbar.getByRole('button', { name: 'Open or close the requirement knowledge graph' }).click()
-    await expect.poll(() => page.getByRole('complementary', { name: 'Session requirement code graph' }).count()).toBe(0)
-    await toolbar.getByRole('button', { name: 'Command', exact: true }).click()
-    await page.getByRole('menuitem', { name: 'Open requirement knowledge graph' }).click()
-    const graph = page.getByRole('complementary', { name: 'Session requirement code graph' })
+    const sidebar = page.locator('[data-dsh-better-sidebar]')
+    const expandSidebar = sidebar.getByRole('button', { name: 'Expand sidebar', exact: true })
+    if (await expandSidebar.count() > 0) await expandSidebar.click()
+    const graph = page.getByRole('region', { name: 'Session requirement code graph' })
+    const documentNode = graph.getByRole('button', { name: 'Inspect round 1 document: 构建并验证导航页面' })
+    await documentNode.waitFor()
+    const orbGeometry = await documentNode.locator('[class*="orb"]').evaluate(node => ({
+      radius: getComputedStyle(node).borderRadius, width: node.clientWidth, height: node.clientHeight,
+    }))
+    expect(orbGeometry.radius).toBe('50%')
+    expect(orbGeometry.width).toBe(orbGeometry.height)
+    expect(orbGeometry.width).toBeGreaterThanOrEqual(36)
+    expect(orbGeometry.width).toBeLessThanOrEqual(44)
+    expect(await graph.getByRole('button', { name: /requirement 1: 导航页面/u }).count()).toBe(0)
+    expect(await graph.getByRole('button', { name: /Inspect task:/u }).count()).toBe(0)
+    await documentNode.click()
+    expect(await graph.getByRole('button', { name: /requirement 1: 导航页面/u }).count()).toBe(0)
+    await graph.getByRole('button', { name: 'Expand 构建并验证导航页面' }).click()
     const graphNode = graph.getByRole('button', { name: /requirement 1: 导航页面/u })
     await graphNode.waitFor()
     expect(await graphNode.getAttribute('data-status')).toBe('blocked')
+    await graph.getByRole('button', { name: 'Expand 导航页面' }).click()
     await graph.getByRole('button', { name: 'Inspect task: Build navigation HTML' }).click()
     expect(await graph.getByText('No traceable code mutation recorded yet.', { exact: true }).count()).toBe(1)
     expect(await graph.getByRole('button', { name: /Inspect code changes:/u }).count()).toBe(0)
@@ -543,53 +558,46 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       meta: { diffs: [{ path: 'nav-a.md', oldText: '# alpha nav', newText: '# updated nav' }] },
     }, { surfaceOp: 'append' })
     const codeNode = graph.getByRole('button', { name: 'Inspect code changes: nav-a.md' })
+    await expect.poll(() => graph.getByRole('button', { name: 'Expand Build navigation HTML' }).isEnabled()).toBe(true)
+    expect(await codeNode.count()).toBe(0)
+    await graph.getByRole('button', { name: 'Expand Build navigation HTML' }).click()
     await codeNode.waitFor()
+    expect(await graph.locator('g[data-layer]').count()).toBe(4)
+    const scrollArea = graph.locator('[aria-label="Four-layer perspective graph canvas"]')
+    await expect.poll(() => scrollArea.evaluate(node => node.scrollHeight - node.clientHeight)).toBeLessThanOrEqual(1)
+    const viewportBox = await scrollArea.boundingBox()
+    if (viewportBox === null) throw new Error('requirement graph viewport geometry is unavailable')
+    for (const node of [documentNode, graphNode, graph.getByRole('button', { name: 'Inspect task: Build navigation HTML' }), codeNode]) {
+      const nodeBox = await node.boundingBox()
+      if (nodeBox === null) throw new Error('four-layer graph node geometry is unavailable')
+      expect(nodeBox.y).toBeGreaterThanOrEqual(viewportBox.y - 1)
+      expect(nodeBox.y + nodeBox.height).toBeLessThanOrEqual(viewportBox.y + viewportBox.height + 1)
+    }
     await codeNode.click()
     expect(await graph.getByText('# updated nav', { exact: true }).count()).toBeGreaterThan(0)
+    await graph.getByRole('button', { name: 'Fit view', exact: true }).click()
+    await expect.poll(() => scrollArea.evaluate(node => node.scrollHeight - node.clientHeight)).toBeLessThanOrEqual(1)
     const previewDirectory = fileURLToPath(new URL('../../../.artifacts/', import.meta.url))
     await mkdir(previewDirectory, { recursive: true })
     await page.screenshot({ path: join(previewDirectory, 'session-graph.png') })
-    await graph.getByRole('button', { name: 'Show all' }).click()
+    const graphSnapshot = await captureStableAria(page, '[aria-label="Session requirement code graph"]', scaffold.workspaceCwd)
+    await compareOrRefreshGolden(REQUIREMENTS_GRAPH_EXPECTED, graphSnapshot, MODE)
+    await graph.getByRole('button', { name: 'Collapse all' }).click()
+    expect(await codeNode.count()).toBe(0)
+    await graph.getByRole('searchbox').fill('nav-a.md')
+    await graph.getByRole('region', { name: 'Graph search results' }).getByRole('button').click()
+    await codeNode.waitFor()
+    await graph.getByRole('button', { name: 'Clear search' }).click()
     const wideViewport = page.viewportSize()
     if (wideViewport === null) throw new Error('requirements viewport geometry is unavailable')
-    const [graphBox, notebookBox, conversationScroll] = await Promise.all([
-      graph.boundingBox(),
-      page.locator('[data-notebook-scroll]').boundingBox(),
-      page.locator('[data-conversation-scroll]').evaluate(node => ({
-        clientHeight: node.clientHeight,
-        scrollHeight: node.scrollHeight,
-      })),
-    ])
-    if (graphBox === null || notebookBox === null) throw new Error('requirement graph geometry is unavailable')
-    expect(Math.abs(graphBox.height - notebookBox.height)).toBeLessThanOrEqual(1)
+    const graphBox = await graph.boundingBox()
+    if (graphBox === null) throw new Error('requirement graph geometry is unavailable')
     expect(graphBox.y + graphBox.height).toBeLessThanOrEqual(wideViewport.height)
-    expect(conversationScroll.scrollHeight).toBe(conversationScroll.clientHeight)
-
-    const resizeHandle = await graph.getByRole('separator', { name: 'Resize requirement graph' }).boundingBox()
-    if (resizeHandle === null) throw new Error('graph resize handle is unavailable')
-    await page.mouse.move(resizeHandle.x + resizeHandle.width / 2, resizeHandle.y + 40)
-    await page.mouse.down()
-    await page.mouse.move(resizeHandle.x - 100, resizeHandle.y + 40, { steps: 8 })
-    await page.mouse.up()
-    expect((await graph.boundingBox())!.width).toBeGreaterThan(graphBox.width + 80)
-    await graph.getByRole('button', { name: 'Inspect code changes: nav-a.md' }).click()
-    const scrollArea = graph.locator('[class*="graphBody"]')
+    for (let step = 0; step < 6; step++) await graph.getByRole('button', { name: 'Zoom in' }).click()
+    await expect.poll(() => scrollArea.evaluate(node => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0)
     await scrollArea.evaluate((node) => { node.scrollTop = node.scrollHeight })
     expect(await scrollArea.evaluate(node => node.scrollTop)).toBeGreaterThan(0)
-
-    await page.setViewportSize({ width: 375, height: 812 })
-    await page.waitForTimeout(350)
-    const [narrowGraphBox, narrowToggleBox] = await Promise.all([
-      graph.boundingBox(),
-      toolbar.getByRole('button', { name: 'Open or close the requirement knowledge graph' }).boundingBox(),
-    ])
-    if (narrowGraphBox === null || narrowToggleBox === null) throw new Error('narrow requirement graph geometry is unavailable')
-    expect(narrowGraphBox.x).toBeGreaterThanOrEqual(0)
-    expect(narrowGraphBox.x + narrowGraphBox.width).toBeLessThanOrEqual(375)
-    expect(narrowGraphBox.width).toBeLessThanOrEqual(346)
-    expect(narrowToggleBox.x + narrowToggleBox.width).toBeLessThanOrEqual(375)
-    await page.setViewportSize(wideViewport)
-    await page.waitForTimeout(350)
+    await sidebar.getByRole('button', { name: 'Collapse sidebar', exact: true }).click()
 
     const failedRail = page.locator('[data-cell="task"][data-status="failed"] [class*="statusRail"]')
     expect(await failedRail.evaluate(node => getComputedStyle(node).backgroundColor)).toBe('rgb(235, 148, 13)')
@@ -1027,7 +1035,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       'session.jsonl', 'search-results.expected.md', 'trajectory.expected.md',
       'terminal-card.expected.md', 'requirements-en.expected.md', 'requirements-zh.expected.md',
       'requirements-draft.expected.md', 'requirements-markdown-note.expected.md',
-      'requirements-restored.expected.md',
+      'requirements-restored.expected.md', 'requirements-graph.expected.md',
     ])
   })
 })

@@ -2020,6 +2020,10 @@ export interface Config {
   readonly maxClarificationRounds: number
   /** Maximum questions accepted in one clarification batch. */
   readonly maxQuestionsPerRound: number
+  /** Elapsed Task execution time before one independent health check, in milliseconds. */
+  readonly taskHealthCheckAfterMs: number
+  /** Maximum duration of the health-check child, in milliseconds. */
+  readonly taskHealthCheckTimeoutMs: number
 }
 ```
 

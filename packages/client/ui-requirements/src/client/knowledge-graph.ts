@@ -7,6 +7,19 @@ import type {
 } from '@deepseek-ai/dsh-session-requirements/client'
 import type { RequirementsSnapshot } from './contract.ts'
 
+/** One requirement document, identified by its Session round. */
+export interface TraceDocument {
+  readonly key: string
+  readonly roundId: RequirementRoundId
+  readonly round: number
+  readonly title: string
+  readonly revision: number
+  readonly markdown: string
+}
+
+/** Notebook location without inventing a requirement for document or Task navigation. */
+export type TraceNavigation = Pick<SessionRequirementNode, 'roundId' | 'taskIds'> & { readonly requirementTitle?: string }
+
 /** One document requirement in the selected Session. */
 export interface SessionRequirementNode extends RequirementGraphProjectedNode {
   readonly key: string
@@ -28,16 +41,17 @@ export interface TraceFile {
   readonly changes: readonly (RequirementCodeChange & { readonly taskKey: string })[]
 }
 
-/** Directed requirement-to-Task or Task-to-file connection. */
+/** Directed document-to-requirement, requirement-to-Task, or Task-to-file connection. */
 export interface TraceEdge {
   readonly source: string
   readonly target: string
 }
 
-/** Three-layer graph scoped to one Session, including unassigned Tasks. */
+/** Four-layer graph scoped to one Session, including unassigned Tasks. */
 export interface SessionRequirementGraph {
   readonly sessionId: SessionId
   readonly title: string
+  readonly documents: readonly TraceDocument[]
   readonly requirements: readonly SessionRequirementNode[]
   readonly tasks: readonly TraceTask[]
   readonly files: readonly TraceFile[]
@@ -49,12 +63,13 @@ export interface SessionRequirementGraph {
  * @param sessions - Session-list projections; only the selected row is read.
  * @param snapshot - Selected Session's complete Notebook.
  * @param sessionId - Session displayed by the conversation.
- * @returns Three-layer graph with shared files and successful recorded modifications.
+ * @returns Four-layer graph with shared files and successful recorded modifications.
  */
 export function sessionRequirementGraph(
   sessions: SessionListState, snapshot: RequirementsSnapshot, sessionId: SessionId,
 ): SessionRequirementGraph {
   const summary = sessions.byId[sessionId]
+  const documents: TraceDocument[] = []
   const requirements: SessionRequirementNode[] = []
   const tasks: TraceTask[] = []
   const files = new Map<string, { key: string; path: string; changes: (RequirementCodeChange & { taskKey: string })[] }>()
@@ -69,8 +84,13 @@ export function sessionRequirementGraph(
   }
   const connect = (source: string, target: string): void => { edges.set(JSON.stringify([source, target]), { source, target }) }
   for (const round of summary?.projectionValues?.requirementGraph?.rounds ?? []) {
+    const documentKey = `document:${round.roundId}`
+    const document = snapshot.documents.find(node => node.data.roundId === round.roundId && node.data.revision === round.documentRevision)
+    documents.push({ key: documentKey, roundId: round.roundId, round: round.round,
+      title: round.summary, revision: round.documentRevision, markdown: document?.data.markdown ?? '' })
     const nodes = round.nodes.map(node => ({ ...node, key: `requirement:${round.roundId}:${node.requirementId}`, roundId: round.roundId, round: round.round }))
     requirements.push(...nodes)
+    for (const node of nodes) connect(documentKey, node.key)
     const list = snapshot.taskLists.filter(node => node.data.roundId === round.roundId
       && node.data.documentRevision === round.documentRevision)
       .sort((a, b) => a.anchorSeq - b.anchorSeq).at(-1)
@@ -93,17 +113,17 @@ export function sessionRequirementGraph(
       }
     }
   }
-  return { sessionId, title: summary?.displayTitle ?? '', requirements, tasks, files: [...files.values()], edges: [...edges.values()] }
+  return { sessionId, title: summary?.displayTitle ?? '', documents, requirements, tasks, files: [...files.values()], edges: [...edges.values()] }
 }
 
 /**
  * Select all directed ancestors and descendants without walking into sibling branches.
- * @param graph - Current three-layer graph.
+ * @param graph - Current four-layer graph.
  * @param key - Focused node, or undefined for the complete graph.
  * @returns Keys belonging to the focused paths.
  */
 export function focusedTraceKeys(graph: SessionRequirementGraph, key: string | undefined): ReadonlySet<string> {
-  if (key === undefined) return new Set([...graph.requirements, ...graph.tasks, ...graph.files].map(node => node.key))
+  if (key === undefined) return new Set([...graph.documents, ...graph.requirements, ...graph.tasks, ...graph.files].map(node => node.key))
   const result = new Set([key])
   for (const direction of ['source', 'target'] as const) {
     const visited = new Set([key])

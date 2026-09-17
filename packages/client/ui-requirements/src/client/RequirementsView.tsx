@@ -6,23 +6,23 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
 } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   IconChecklistOutline14,
   IconChevronDownOutline14,
   IconChevronRightOutline14,
   IconChevronUpOutline14,
   IconEllipsisOutline16,
-  IconLinkOutline14,
   IconPlayOutline16,
   IconRefreshOutline14,
   IconSearchOutline16,
   IconSparkle16,
   IconTrashOutline16,
   MarkdownText,
+  type MarkdownFileMentions,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
@@ -62,8 +62,7 @@ import css from './RequirementsView.module.css'
 import { AutoGrowTextarea } from './AutoGrowTextarea.tsx'
 import { MarkdownNoteCell } from './MarkdownNoteCell.tsx'
 import { taskResult } from './task-result.ts'
-import { RequirementGraphPanel } from './RequirementGraphPanel.tsx'
-import { sessionRequirementGraph, type SessionRequirementNode } from './knowledge-graph.ts'
+import type { TraceNavigation } from './knowledge-graph.ts'
 
 /** Result returned after one structured Notebook action. */
 export type RequirementActionOutcome<T> =
@@ -102,8 +101,12 @@ export interface RequirementsViewInjected {
   editNote: (request: RequirementNoteEditRequest) => Promise<RequirementActionOutcome<RequirementNoteResult>>
   /** Dispatch an explicit independent review. */
   requestReview: () => Promise<string | undefined>
-  /** Navigate to another Session represented in the current Workspace graph. */
-  openSession: (sessionId: SessionId) => void
+  /** Try to open an external Task delivery inside the Session sidebar browser. */
+  openDeliveryUrl: (url: string) => boolean
+  /** Open a local HTML delivery in the Session sidebar's file preview. */
+  openDeliveryFile: (path: string) => boolean
+  /** Bind sidebar graph navigation to this mounted Notebook. */
+  bindGraphReveal: (listener: (node: TraceNavigation) => void) => () => void
   /** Initial content language derived from the active product locale. */
   readonly initialLanguage: RequirementContentLanguage
 }
@@ -216,8 +219,6 @@ function taskStatusKey(status: RequirementTaskListNode['data']['tasks'][number][
  * @returns the complete requirements Notebook view.
  */
 export function RequirementsView({
-  sessionId,
-  useSessions,
   useRequirements,
   editDocument,
   generateTasks,
@@ -232,16 +233,14 @@ export function RequirementsView({
   addNote,
   editNote,
   requestReview,
+  openDeliveryUrl,
+  openDeliveryFile,
+  bindGraphReveal,
   openView,
   initialLanguage,
   t,
 }: ConvViewProps & InjectFace<RequirementsViewInjected> & PropsLocale<typeof NS>) {
   const snapshot = useRequirements(value => value)
-  const sessionSnapshot = useSessions(value => value)
-  const knowledgeGraph = useMemo(
-    () => sessionRequirementGraph(sessionSnapshot, snapshot, sessionId),
-    [sessionId, sessionSnapshot, snapshot],
-  )
   const rootRef = useRef<HTMLDivElement>(null)
   const [language, setLanguage] = useState<RequirementContentLanguage>(initialLanguage)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -260,7 +259,19 @@ export function RequirementsView({
   const [moreOpen, setMoreOpen] = useState<string | undefined>()
   const [zoom, setZoom] = useState(1)
   const [actionError, setActionError] = useState<string | undefined>()
-  const [graphOpen, setGraphOpen] = useState(true)
+  const [graphReveal, setGraphReveal] = useState<TraceNavigation | undefined>()
+  const deliveryFiles = useMemo<MarkdownFileMentions>(() => ({
+    resolve: (path) => {
+      if (!/^[^\s<>`"'|?*]+\.html?$/i.test(path) || /^[a-z][a-z\d+.-]*:/i.test(path) && !/^[a-z]:[\\/]/i.test(path)) return undefined
+      return {
+        label: t('cell.openHtml', { path }),
+        title: path,
+        open: () => {
+          if (!openDeliveryFile(path)) setActionError(t('cell.htmlUnavailable'))
+        },
+      }
+    },
+  }), [openDeliveryFile, t])
 
   const rounds = useMemo(() => latestBy(snapshot.rounds, node => String(node.data.roundId)), [snapshot.rounds])
   const documents = useMemo(() => latestBy(snapshot.documents, node => String(node.data.roundId)), [snapshot.documents])
@@ -498,22 +509,43 @@ export function RequirementsView({
     setInspector(mode)
   }
 
-  const revealGraphNode = (node: SessionRequirementNode): void => {
-    const roundKey = String(node.roundId)
-    const mappedTask = taskLists.get(roundKey)?.data.tasks.find(task => node.taskIds.includes(task.id))
-    setCollapsed(current => new Set([...current].filter(id => id !== roundKey)))
+  useLayoutEffect(() => bindGraphReveal(setGraphReveal), [bindGraphReveal])
+
+  useLayoutEffect(() => {
+    if (graphReveal === undefined) return
+    const roundKey = String(graphReveal.roundId)
+    const mappedTask = taskLists.get(roundKey)?.data.tasks.find(task => graphReveal.taskIds.includes(task.id))
+    if (graphReveal.taskIds.length > 0 && mappedTask === undefined) return
+    if (mappedTask === undefined && !documents.has(roundKey)) return
+    setCollapsed(current => current.has(roundKey)
+      ? new Set([...current].filter(id => id !== roundKey))
+      : current)
     setSelected(mappedTask === undefined
-      ? { roundId: node.roundId }
-      : { roundId: node.roundId, taskId: mappedTask.id })
+      ? { roundId: graphReveal.roundId }
+      : { roundId: graphReveal.roundId, taskId: mappedTask.id })
     queueMicrotask(() => {
       const roundElement = [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-round-id]') ?? [])]
         .find(element => element.dataset.roundId === roundKey)
+      const documentElement = roundElement?.querySelector<HTMLElement>('[data-cell="document"]')
+      const requirementHeading = graphReveal.requirementTitle === undefined ? undefined
+        : [...(documentElement?.querySelectorAll<HTMLElement>('h2, h3, h4') ?? [])].find(heading => heading.textContent.includes(graphReveal.requirementTitle ?? ''))
       const target = mappedTask === undefined
-        ? roundElement?.querySelector<HTMLElement>('[data-cell="document"]')
+        ? requirementHeading ?? documentElement
         : [...(roundElement?.querySelectorAll<HTMLElement>('[data-task-id]') ?? [])]
           .find(element => element.dataset.taskId === String(mappedTask.id))
-      target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      if (target === undefined || target === null) return
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      setGraphReveal(current => current === graphReveal ? undefined : current)
     })
+  }, [documents, graphReveal, taskLists])
+
+  const openDelivery = (event: ReactMouseEvent<HTMLElement>): void => {
+    if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+    const target = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null
+    if (target === null) return
+    const url = new URL(target.href, globalThis.location.href)
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.origin === globalThis.location.origin) return
+    if (openDeliveryUrl(url.href)) event.preventDefault()
   }
 
   const selectTask = (
@@ -555,7 +587,6 @@ export function RequirementsView({
             <span className={css.cellMenu} role="menu">
               <button type="button" role="menuitem" onClick={() => { openInspector('details', { roundId, taskId }) }}>{t('more.details')}</button>
               <button type="button" role="menuitem" onClick={() => { openInspector('history', { roundId, taskId }) }}>{t('more.history')}</button>
-              <button type="button" role="menuitem" onClick={() => { setMoreOpen(undefined); setGraphOpen(true) }}><IconLinkOutline14 size={12} />{t('more.relations')}</button>
               <button type="button" role="menuitem" onClick={() => { setMoreOpen(undefined); void review() }}><IconRefreshOutline14 size={12} />{t('toolbar.review')}</button>
               {task?.status === 'pending' && task.kind !== 'final-test' && !listBusy && <button className={css.destructiveMenuItem} type="button" role="menuitem" onClick={() => {
                 setMoreOpen(undefined)
@@ -712,7 +743,7 @@ export function RequirementsView({
           )}
         </section>
         {(results.length > 0 || taskReview !== undefined || taskFailure || taskWithdrawn) && (
-          <section className={css.cellOutput} aria-label={t('cell.output', { task: task.title })} data-cell-output data-collapsed={!outputExpanded || undefined}>
+          <section className={css.cellOutput} aria-label={t('cell.output', { task: task.title })} data-cell-output data-collapsed={!outputExpanded || undefined} onClick={openDelivery}>
             <button
               className={css.outputToggle}
               type="button"
@@ -734,7 +765,7 @@ export function RequirementsView({
                 <h3>{t('cell.deliverables')}</h3>
                 {results.length === 0
                   ? <MarkdownText text={t('cell.noDeliverables')} labels={markdownLabels} />
-                  : results.map((result, index) => <MarkdownText key={outputs[index]?.key} text={result.deliverables || t('cell.noDeliverables')} labels={markdownLabels} />)}
+                  : results.map((result, index) => <MarkdownText key={outputs[index]?.key} text={result.deliverables || t('cell.noDeliverables')} labels={markdownLabels} fileMentions={deliveryFiles} />)}
               </div>
             )}
           </section>
@@ -882,7 +913,6 @@ export function RequirementsView({
             <button type="button" role="menuitem" disabled={reviewing} onClick={() => { setCommandOpen(false); void review() }}><IconRefreshOutline14 size={12} />{t('toolbar.review')}</button>
             <button type="button" role="menuitem" onClick={() => { setCollapsed(new Set(orderedRounds.map(round => String(round.data.roundId)))); setCommandOpen(false) }}>{t('toolbar.collapseAll')}</button>
             <button type="button" role="menuitem" onClick={() => { setCollapsed(new Set()); setCommandOpen(false) }}>{t('toolbar.expandAll')}</button>
-            <button type="button" role="menuitem" onClick={() => { setGraphOpen(true); setCommandOpen(false) }}><IconLinkOutline14 size={12} />{t('more.relations')}</button>
             <button type="button" role="menuitem" onClick={() => { setLanguage('zh'); setCommandOpen(false) }}>{t('command.useZh')}</button>
             <button type="button" role="menuitem" onClick={() => { setLanguage('en'); setCommandOpen(false) }}>{t('command.useEn')}</button>
           </div>}
@@ -899,13 +929,6 @@ export function RequirementsView({
         {activeRunAll !== undefined
           ? <button className={css.runAllButton} type="button" disabled={activeRunAll.data.status === 'stopping' || running !== undefined} onClick={() => { void stopEverything(activeRunAll.data.roundId) }}>{t(activeRunAll.data.status === 'stopping' ? 'toolbar.stopping' : 'toolbar.stopRunAll')}</button>
           : <button className={css.runAllButton} type="button" disabled={latestRound === undefined || currentLatestTaskList === undefined || running !== undefined} onClick={() => { if (latestRound !== undefined) void runEverything(latestRound.data.roundId) }}><IconPlayOutline16 size={13} />{t('toolbar.runAll')}</button>}
-        <button
-          className={css.graphToggle}
-          type="button"
-          aria-pressed={graphOpen}
-          aria-label={t('graph.toggle')}
-          onClick={() => { setGraphOpen(value => !value) }}
-        ><IconLinkOutline14 size={13} />{t('graph.title')}</button>
       </div>
       {actionError !== undefined && <div className={css.actionError}>{t('toolbar.actionFailed')} · {actionError}</div>}
       <div className={css.workspaceBody}>
@@ -929,15 +952,6 @@ export function RequirementsView({
               </div>
             </main>
           )}
-        {graphOpen && (
-          <RequirementGraphPanel
-            key={sessionId}
-            graph={knowledgeGraph}
-            onClose={() => { setGraphOpen(false) }}
-            onSelect={revealGraphNode}
-            t={t}
-          />
-        )}
       </div>
       {inspector !== undefined && inspectionRound !== undefined && (
         <aside className={css.details} aria-label={t('details.aria')}>

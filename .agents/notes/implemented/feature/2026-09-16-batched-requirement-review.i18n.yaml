@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-16-batched-requirement-review.md
-2026-09-16-batched-requirement-review.md: 5afcdae127f1c0eae5610ce418584a48bde0ca50
-2026-09-16-batched-requirement-review.zh.md: 0cb04d1c30e90bc1bf8d3a53a79b12561e951f86
+2026-09-16-batched-requirement-review.md: b2403f8854a3c13754b0301db52f63c4af4762a5
+2026-09-16-batched-requirement-review.zh.md: f8b0749e6f8cc3563d023bc60b75e44e17898697

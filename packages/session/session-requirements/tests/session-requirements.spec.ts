@@ -11,7 +11,7 @@ import type { SubagentRun, SubagentStartRequest } from '@deepseek-ai/dsh-subagen
 import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MockAdapter, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
+import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import SessionRequirements from '../src/index.ts'
 
 const contexts: Context[] = []
@@ -21,6 +21,8 @@ const config = {
   reviewerTools: ['read'],
   maxClarificationRounds: 2,
   maxQuestionsPerRound: 5,
+  taskHealthCheckAfterMs: 3_600_000,
+  taskHealthCheckTimeoutMs: 300_000,
 }
 
 class NonzeroShellExecutor extends ShellExecutor {
@@ -72,6 +74,7 @@ const documentMarkdown = `# 需求文档
 
 afterEach(async () => {
   await Promise.allSettled(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+  vi.useRealTimers()
 })
 
 function parent(id = 'requirements-parent') {
@@ -954,7 +957,7 @@ describe('session requirements document pipeline', () => {
     expect(start).not.toHaveBeenCalled()
   })
 
-  it('stops immediately when a Task tool result reports an error', async () => {
+  it('lets a Task recover from a tool error and complete normally', async () => {
     const { ctx, agent, session, followup, start } = await setup()
     const cancel = vi.fn()
     Object.assign(agent, { cancel })
@@ -984,26 +987,23 @@ describe('session requirements document pipeline', () => {
 
     await vi.waitFor(() => {
       expect(session.events.findLast(event => event.type === 'requirement/task-execution')).toMatchObject({
-        data: { taskId: 'TASK-A', status: 'failed', output: 'command failed' },
+        data: { taskId: 'TASK-A', status: 'processing' },
       })
       expect(session.events.findLast(event => event.type === 'requirement/run-all')).toMatchObject({
-        data: { status: 'failed' },
+        data: { status: 'running' },
       })
     })
-    expect(cancel).toHaveBeenCalledWith(
-      { kind: 'hook', reason: 'requirement task command failed' },
-      { keepInbox: true },
-    )
+    expect(cancel).not.toHaveBeenCalled()
     expect(start).not.toHaveBeenCalled()
 
     emit(ctx, session, session.append('turn/end', { turn: 2, reason: { kind: 'completed' } }))
     await new Promise<void>((resolve) => { queueMicrotask(resolve) })
-    expect(session.events.findLast(event => event.type === 'requirement/task-execution')).toMatchObject({
-      data: { taskId: 'TASK-A', status: 'failed' },
+    expect(session.events.findLast(event => event.type === 'requirement/task-execution' && event.data.taskId === 'TASK-A')).toMatchObject({
+      data: { taskId: 'TASK-A', status: 'completed' },
     })
   })
 
-  it.each(['bash', 'pwsh'] as const)('stops immediately when %s exits non-zero', async (toolName) => {
+  it.each(['bash', 'pwsh'] as const)('keeps the Task processing when %s exits non-zero', async (toolName) => {
     const { ctx, agent, session, followup, start } = await setup()
     const cancel = vi.fn()
     Object.assign(agent, { cancel })
@@ -1045,16 +1045,16 @@ describe('session requirements document pipeline', () => {
 
     emitCommand('nonzero', 9, '[exit code: 9]')
     expect(session.events.findLast(event => event.type === 'requirement/task-execution')).toMatchObject({
-      data: { taskId: 'TASK-A', status: 'failed', output: '[exit code: 9]' },
+      data: { taskId: 'TASK-A', status: 'processing' },
     })
     expect(session.events.findLast(event => event.type === 'requirement/run-all')).toMatchObject({
-      data: { status: 'failed' },
+      data: { status: 'running' },
     })
-    expect(cancel).toHaveBeenCalledOnce()
+    expect(cancel).not.toHaveBeenCalled()
     expect(start).not.toHaveBeenCalled()
   })
 
-  it('stops the real Agent Loop on a structured Bash non-zero exit', async () => {
+  it('lets the real Agent Loop consume a Bash failure and finish the Task', async () => {
     const ctx = new Context()
     contexts.push(ctx)
     await mountAgentLoopTestDependencies(ctx)
@@ -1068,6 +1068,7 @@ describe('session requirements document pipeline', () => {
     await ctx.plugin(SessionRequirements, config)
     const adapter = new MockAdapter([
       toolCallResponse('command-failure', 'bash', { command: 'exit 9', description: 'Fail command' }),
+      textResponse('The command failed; handled the error and finished the task.'),
     ])
     ctx.llm.registerAdapter(['mock'], adapter)
     const agent = ctx.agentLoop.create(SessionId('requirements-command-failure'), {
@@ -1075,7 +1076,7 @@ describe('session requirements document pipeline', () => {
     })
     appendRoundArtifacts(agent.session)
 
-    ctx.sessionRequirements.runAll(agent, { roundId: 'ROUND-01' as never })
+    ctx.sessionRequirements.runTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never })
     await agent.whenIdle()
 
     const toolResult = agent.session.events.find(event => event.type === 'tool/result')
@@ -1084,27 +1085,21 @@ describe('session requirements document pipeline', () => {
     expect(resultBlock?.isError).toBe(false)
     expect(resultBlock?.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n'))
       .toContain('[exit code: 9]')
-    expect(adapter.requests).toHaveLength(1)
+    expect(adapter.requests).toHaveLength(2)
 
-    const failed = agent.session.events.findLast(event => event.type === 'requirement/task-execution'
-      && event.data.taskId === 'TASK-A' && event.data.status === 'failed')
+    const completed = agent.session.events.findLast(event => event.type === 'requirement/task-execution'
+      && event.data.taskId === 'TASK-A' && event.data.status === 'completed')
     const ended = agent.session.events.findLast(event => event.type === 'turn/end')
-    expect(failed?.seq).toBeLessThan(ended?.seq ?? -1)
+    expect(completed).toBeDefined()
     expect(ended).toMatchObject({
-      data: { reason: { kind: 'aborted', reason: { kind: 'hook', reason: 'requirement task command failed' } } },
-    })
-    expect(agent.session.events.findLast(event => event.type === 'requirement/run-all')).toMatchObject({
-      data: { status: 'failed' },
-    })
-    expect(agent.session.events.findLast(event => event.type === 'requirement/round')).toMatchObject({
-      data: { status: 'failed' },
+      data: { reason: { kind: 'completed' } },
     })
     expect(agent.session.events.some(event => event.type === 'requirement/task-execution'
       && event.data.taskId === 'TASK-FINAL')).toBe(false)
     expect(reviewer).not.toHaveBeenCalled()
   })
 
-  it('attributes a nested PTC tool failure to its root Task turn', async () => {
+  it('allows the Task to recover from a nested PTC tool failure', async () => {
     const { ctx, agent, session, followup } = await setup()
     const cancel = vi.fn()
     Object.assign(agent, { cancel })
@@ -1135,12 +1130,139 @@ describe('session requirements document pipeline', () => {
     })
 
     expect(session.events.findLast(event => event.type === 'requirement/task-execution')).toMatchObject({
-      data: { taskId: 'TASK-A', status: 'failed', output: 'nested read failed' },
+      data: { taskId: 'TASK-A', status: 'processing' },
     })
     expect(session.events.findLast(event => event.type === 'requirement/run-all')).toMatchObject({
-      data: { status: 'failed' },
+      data: { status: 'running' },
     })
-    expect(cancel).toHaveBeenCalledOnce()
+    expect(cancel).not.toHaveBeenCalled()
+  })
+
+  it.each(['continue', 'stop'] as const)('checks after one hour and obeys an evidence-backed %s verdict', async (action) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const dispose = vi.fn(async () => {})
+    const { ctx, agent, session, followup, start } = await setup({ review: () => ({
+      ...reviewRun(), dispose,
+      result: Promise.resolve({ stopReason: 'completed', output: [], structured: {
+        action, reason: action === 'stop' ? 'Repeated work without progress' : 'Implementation is progressing',
+        evidence: action === 'stop' ? 'The same command and unchanged output recur across the inspected steps.' : '',
+      } }),
+    }) })
+    const cancel = vi.fn()
+    Object.assign(agent, { cancel })
+    appendRoundArtifacts(session)
+    ctx.sessionRequirements.runAll(agent, { roundId: 'ROUND-01' as never })
+    const message = followup.mock.calls[0]![0]
+    session.append('turn/start', { turn: 2 })
+    emitAgentEvent(ctx, agent, 'agent/inbox/claimed', { message, turn: 2 })
+    await vi.advanceTimersByTimeAsync(3_599_999)
+    expect(start).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(start).toHaveBeenCalledOnce()
+    expect(start.mock.calls[0]?.[1]).toMatchObject({
+      label: 'Task health check · TASK-A', parent: agent, maxDepth: 1, toolFilter: { allow: ['read'] },
+    })
+    const request = start.mock.calls[0]![1]
+    const prompt = request.prompt[0]
+    expect(prompt?.type === 'text' ? prompt.text.split('\n')[0] : undefined).toMatchSnapshot('health-check instruction')
+    expect(session.events.findLast(event => event.type === 'requirement/task-execution')?.data).toMatchObject({
+      taskId: 'TASK-A', status: action === 'stop' ? 'failed' : 'processing',
+    })
+    expect(cancel).toHaveBeenCalledTimes(action === 'stop' ? 1 : 0)
+    expect(dispose).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(3_600_000)
+    expect(start).toHaveBeenCalledOnce()
+  })
+
+  it.each([undefined, { action: 'stop', reason: 'Too long', evidence: '' }])('does not stop on an invalid health verdict: %j', async (structured) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { ctx, agent, session, followup } = await setup({ review: () => ({
+      ...reviewRun(), result: Promise.resolve({ stopReason: 'completed', output: [], structured }),
+    }) })
+    const cancel = vi.fn()
+    Object.assign(agent, { cancel })
+    appendRoundArtifacts(session)
+    ctx.sessionRequirements.runTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never })
+    emitAgentEvent(ctx, agent, 'agent/inbox/claimed', { message: followup.mock.calls[0]![0], turn: 2 })
+    await vi.advanceTimersByTimeAsync(3_600_000)
+    expect(cancel).not.toHaveBeenCalled()
+    expect(session.events.findLast(event => event.type === 'requirement/task-execution')?.data).toMatchObject({ status: 'processing' })
+  })
+
+  it('does not inspect a Task that completed before one hour', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { ctx, agent, session, followup, start } = await setup()
+    appendRoundArtifacts(session)
+    ctx.sessionRequirements.runTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never })
+    emitAgentEvent(ctx, agent, 'agent/inbox/claimed', { message: followup.mock.calls[0]![0], turn: 2 })
+    emit(ctx, session, session.append('turn/end', { turn: 2, reason: { kind: 'completed' } }))
+    await vi.advanceTimersByTimeAsync(3_600_000)
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('ignores a late stop verdict after the inspected Task has ended', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const pending = Promise.withResolvers<Awaited<SubagentRun['result']>>()
+    const dispose = vi.fn(async () => {})
+    const { ctx, agent, session, followup, start } = await setup({ review: () => ({
+      ...reviewRun(), result: pending.promise, dispose,
+    }) })
+    const cancel = vi.fn()
+    Object.assign(agent, { cancel })
+    appendRoundArtifacts(session)
+    ctx.sessionRequirements.runTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never })
+    emitAgentEvent(ctx, agent, 'agent/inbox/claimed', { message: followup.mock.calls[0]![0], turn: 2 })
+    await vi.advanceTimersByTimeAsync(3_600_000)
+    emit(ctx, session, session.append('turn/end', { turn: 2, reason: { kind: 'completed' } }))
+    expect(start.mock.calls[0]?.[1].signal?.aborted).toBe(true)
+    pending.resolve({ stopReason: 'completed', output: [], structured: { action: 'stop', reason: 'Loop', evidence: 'Repeated output' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(cancel).not.toHaveBeenCalled()
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(session.events.findLast(event => event.type === 'requirement/task-execution')?.data).toMatchObject({ status: 'completed' })
+  })
+
+  it('drains an active health child when its plugin is disposed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const dispose = vi.fn(async () => {})
+    const { ctx, agent, session, followup, start } = await setup({ review: request => ({
+      ...reviewRun(), dispose,
+      result: new Promise((resolve) => {
+        request.signal?.addEventListener('abort', () => { resolve({ stopReason: 'aborted', output: [] }) }, { once: true })
+      }),
+    }) })
+    appendRoundArtifacts(session)
+    ctx.sessionRequirements.runTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never })
+    emitAgentEvent(ctx, agent, 'agent/inbox/claimed', { message: followup.mock.calls[0]![0], turn: 2 })
+    await vi.advanceTimersByTimeAsync(3_600_000)
+    await ctx.fiber.dispose()
+    expect(start.mock.calls[0]?.[1].signal?.aborted).toBe(true)
+    expect(dispose).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(3_600_000)
+    expect(start).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the Task running when its health child times out', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const dispose = vi.fn(async () => {})
+    const { ctx, agent, session, followup, start } = await setup({ review: request => ({
+      ...reviewRun(), dispose,
+      result: new Promise((resolve) => {
+        request.signal?.addEventListener('abort', () => { resolve({ stopReason: 'aborted', output: [] }) }, { once: true })
+      }),
+    }) })
+    const cancel = vi.fn()
+    Object.assign(agent, { cancel })
+    appendRoundArtifacts(session)
+    ctx.sessionRequirements.runTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never })
+    emitAgentEvent(ctx, agent, 'agent/inbox/claimed', { message: followup.mock.calls[0]![0], turn: 2 })
+    await vi.advanceTimersByTimeAsync(3_600_000)
+    expect(start.mock.calls[0]?.[1].signal?.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(start.mock.calls[0]?.[1].signal?.aborted).toBe(true)
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(cancel).not.toHaveBeenCalled()
+    expect(session.events.findLast(event => event.type === 'requirement/task-execution')?.data).toMatchObject({ status: 'processing' })
   })
 
   it('does not automatically review an ordinary non-Task turn', async () => {

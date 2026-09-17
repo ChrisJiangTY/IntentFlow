@@ -8,6 +8,7 @@ import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/c
 import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { RequirementGraphProjection } from '@deepseek-ai/dsh-session-requirements/client'
 import { RequirementsView } from '../src/client/RequirementsView.tsx'
+import type { SessionRequirementNode } from '../src/client/knowledge-graph.ts'
 import type {
   RequirementClarificationNode,
   RequirementDocumentNode,
@@ -195,7 +196,9 @@ function props(
     addNote: vi.fn(() => action({ roundId, noteId: 'NOTE-01', eventSeq: 6 })),
     editNote: vi.fn(() => action({ roundId, noteId: 'NOTE-01', eventSeq: 7 })),
     requestReview: () => Promise.resolve(undefined),
-    openSession: vi.fn(),
+    openDeliveryUrl: vi.fn(() => true),
+    openDeliveryFile: vi.fn(() => true),
+    bindGraphReveal: vi.fn(() => () => {}),
     initialLanguage: 'zh',
     t,
     viewRequest: null,
@@ -376,7 +379,7 @@ describe('RequirementsView Notebook', () => {
     await waitFor(() => { expect(stopTask).toHaveBeenCalledWith({ roundId, taskId }) })
   })
 
-  it('renders only delivery outside the editable cell', () => {
+  it('renders only delivery outside the editable cell and opens its web link in the sidebar', () => {
     const value = snapshot()
     const execution: RequirementTaskExecutionNode = base('requirements-task-execution', {
       version: 1,
@@ -388,7 +391,8 @@ describe('RequirementsView Notebook', () => {
       turn: 2,
       output: '正在执行……\n\n## 交付文件\n\n- [页面](https://example.com/result) — `index.html` 已生成\n\n## 可验证结果\n\n24 个步骤全部通过\n\n## 说明\n\n仅完成数据层。',
     }, 6) as RequirementTaskExecutionNode
-    render(<RequirementsView {...props({}, { ...value, taskExecutions: [execution] })} />)
+    const openDeliveryUrl = vi.fn(() => true)
+    render(<RequirementsView {...props({ openDeliveryUrl }, { ...value, taskExecutions: [execution] })} />)
 
     const cell = document.querySelector<HTMLElement>(`[data-task-id="${taskId}"]`)
     const output = screen.getByRole('region', { name: '任务输出 建立 Notebook' })
@@ -400,17 +404,61 @@ describe('RequirementsView Notebook', () => {
     const collapse = within(output).getByRole('button', { name: '收起任务输出 建立 Notebook' })
     expect(collapse.getAttribute('aria-expanded')).toBe('true')
     expect(within(output).getAllByRole('heading').map(node => node.textContent)).toEqual(['交付结果'])
-    expect(within(output).getByRole('link', { name: '页面' }).getAttribute('href')).toBe('https://example.com/result')
+    const link = within(output).getByRole('link', { name: '页面' })
+    expect(link.getAttribute('href')).toBe('https://example.com/result')
+    expect(fireEvent.click(link)).toBe(false)
+    expect(openDeliveryUrl).toHaveBeenCalledWith('https://example.com/result')
+    openDeliveryUrl.mockClear()
+    fireEvent.click(link, { metaKey: true })
+    expect(openDeliveryUrl).not.toHaveBeenCalled()
     expect(within(output).queryByText('仅完成数据层。')).toBeNull()
     expect(within(output).queryByText('正在执行……')).toBeNull()
     expect(within(output).queryByText('24 个步骤全部通过')).toBeNull()
-    expect(within(output).getByText('index.html', { selector: 'code' })).toBeTruthy()
+    expect(within(output).getByRole('button', { name: '在右侧预览 index.html' })).toBeTruthy()
     fireEvent.click(collapse)
     expect(within(output).queryByRole('heading', { name: '交付结果' })).toBeNull()
     const expand = within(output).getByRole('button', { name: '展开任务输出 建立 Notebook' })
     expect(expand.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(expand)
     expect(within(output).getByRole('heading', { name: '交付结果' })).toBeTruthy()
+  })
+
+  it('opens inline HTML deliveries in the sidebar without turning commands into file buttons', () => {
+    const value = snapshot()
+    const execution = base('requirements-task-execution', {
+      version: 1, revision: 1, roundId, taskId, messageId: 'delivery' as never, status: 'completed',
+      output: '## 交付结果\n\n- `beverage-chronicle.html` — 点击打开\n- `./dist/index.htm`\n- `/tmp/demo.html`\n- `open index.html`\n- `javascript:demo.html`',
+    }, 10) as RequirementTaskExecutionNode
+    const openDeliveryFile = vi.fn(() => true)
+    render(<RequirementsView {...props({ openDeliveryFile }, { ...value, taskExecutions: [execution] })} />)
+    for (const path of ['beverage-chronicle.html', './dist/index.htm', '/tmp/demo.html']) {
+      fireEvent.click(screen.getByRole('button', { name: `在右侧预览 ${path}` }))
+      expect(openDeliveryFile).toHaveBeenLastCalledWith(path)
+    }
+    expect(screen.queryByRole('button', { name: '在右侧预览 open index.html' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '在右侧预览 javascript:demo.html' })).toBeNull()
+    openDeliveryFile.mockReturnValue(false)
+    fireEvent.click(screen.getByRole('button', { name: '在右侧预览 beverage-chronicle.html' }))
+    expect(screen.getByText(zh['cell.htmlUnavailable'], { exact: false })).toBeTruthy()
+  })
+
+  it('keeps the native link when the sidebar browser declines the delivery', () => {
+    const value = snapshot()
+    const execution: RequirementTaskExecutionNode = base('requirements-task-execution', {
+      version: 1,
+      revision: 1,
+      roundId,
+      taskId,
+      messageId: 'message-output' as never,
+      status: 'completed',
+      output: '## 交付文件\n\n- [页面](https://example.com/result)',
+    }, 6) as RequirementTaskExecutionNode
+    const openDeliveryUrl = vi.fn(() => false)
+    render(<RequirementsView {...props({ openDeliveryUrl }, { ...value, taskExecutions: [execution] })} />)
+
+    const link = screen.getByRole('link', { name: '页面' })
+    expect(fireEvent.click(link)).toBe(true)
+    expect(openDeliveryUrl).toHaveBeenCalledWith('https://example.com/result')
   })
 
   it('autosaves the title and indented statement without Save or Cancel controls', async () => {
@@ -744,8 +792,8 @@ describe('RequirementsView Notebook', () => {
     expect(container.querySelector('[data-cell="validation"][data-status="regression"]')).toBeTruthy()
   })
 
-  it('shows review evidence and opens the Workspace requirement graph on demand', () => {
-    const { container } = render(<RequirementsView {...props({}, reviewSnapshot())} />)
+  it('shows review evidence and history without the superseded inline graph entrypoints', () => {
+    render(<RequirementsView {...props({}, reviewSnapshot())} />)
     let cell = selectTask()
     fireEvent.click(within(cell).getByRole('button', { name: '更多单元格操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '查看详情与证据' }))
@@ -760,61 +808,52 @@ describe('RequirementsView Notebook', () => {
     expect(screen.getByText('Agent 第 2 轮审核')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '关闭详情' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '打开或关闭需求知识图谱' }))
-    expect(screen.queryByRole('complementary', { name: 'Session 需求代码图谱' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '打开或关闭需求知识图谱' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '命令' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '打开需求知识图谱' }))
-    const graph = screen.getByRole('complementary', { name: 'Session 需求代码图谱' })
-    expect(within(graph).getByText('Notebook 需求流')).toBeTruthy()
-    expect(within(graph).getByText('当前 Session')).toBeTruthy()
-    const node = within(graph).getByRole('button', { name: /需求 1：Notebook 需求节点/u })
-    expect(node.dataset.status).toBe('pending')
-    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
-    fireEvent.click(node)
-    expect(container.querySelector('[data-task-id="TASK-01"]')?.getAttribute('data-selected')).toBe('true')
+    expect(screen.queryByRole('menuitem', { name: '打开需求知识图谱' })).toBeNull()
   })
 
-  it('excludes other Sessions even when they share the Workspace', () => {
-    const otherSessionId = 'SESSION-02' as never
-    const otherRoundId = 'ROUND-02' as never
-    const sessions = sessionList()
-    const withOther: SessionListState = {
-      ...sessions,
-      ids: [sessionId, otherSessionId],
-      byId: {
-        ...sessions.byId,
-        [otherSessionId]: {
-          id: otherSessionId,
-          displayTitle: '第二个需求会话',
-          running: false,
-          blank: false,
-          updatedAt: 2,
-          projectionValues: {
-            requirementGraph: {
-              rounds: [{
-                roundId: otherRoundId,
-                round: 1,
-                summary: '跨会话需求',
-                documentRevision: 1,
-                nodes: [{
-                  requirementId: '1', title: '跨会话节点', acceptanceRefs: ['1.1'], taskIds: [], status: 'pending',
-                }],
-                relations: [],
-              }],
-            },
-          },
-        },
-      },
-    }
-    const workspaces = workspaceSnapshot([sessionId, otherSessionId])
-    const openSession = vi.fn()
-    render(<RequirementsView {...props({
-      openSession,
-      useSessions: <Selected,>(selector: (current: SessionListState) => Selected): Selected => selector(withOther),
-      useWorkspaces: <Selected,>(selector: (current: WorkspaceSnapshot) => Selected): Selected => selector(workspaces),
-    })} />)
+  it('lets the sidebar graph reveal its Task in the mounted Notebook', () => {
+    let reveal: ((node: SessionRequirementNode) => void) | undefined
+    const dispose = vi.fn()
+    const bindGraphReveal = vi.fn((listener: (node: SessionRequirementNode) => void) => {
+      reveal = listener
+      return dispose
+    })
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+    const { container, unmount } = render(<RequirementsView {...props({ bindGraphReveal })} />)
+    act(() => { reveal?.({
+      key: 'requirement:ROUND-01:1', roundId, round: 1, requirementId: '1', title: 'Notebook',
+      acceptanceRefs: ['1.1'], taskIds: [taskId], status: 'pending',
+    }) })
+    expect(container.querySelector('[data-task-id="TASK-01"]')?.getAttribute('data-selected')).toBe('true')
+    unmount()
+    expect(dispose).toHaveBeenCalledOnce()
+  })
 
-    expect(screen.queryByRole('button', { name: /需求 1：跨会话节点/u })).toBeNull()
-    expect(openSession).not.toHaveBeenCalled()
+  it('retains a graph reveal until its Task projection hydrates', async () => {
+    let reveal: ((node: SessionRequirementNode) => void) | undefined
+    const bindGraphReveal = vi.fn((listener: (node: SessionRequirementNode) => void) => {
+      reveal = listener
+      return () => {}
+    })
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+    const value = snapshot()
+    const initial = { ...value, taskLists: [] }
+    const injected = props({ bindGraphReveal }, initial)
+    const view = render(<RequirementsView {...injected} />)
+    act(() => { reveal?.({
+      key: 'requirement:ROUND-01:1', roundId, round: 1, requirementId: '1', title: 'Notebook',
+      acceptanceRefs: ['1.1'], taskIds: [taskId], status: 'pending',
+    }) })
+    expect(view.container.querySelector('[data-task-id="TASK-01"]')).toBeNull()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+
+    view.rerender(<RequirementsView {...props({ bindGraphReveal }, value)} />)
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-task-id="TASK-01"]')?.getAttribute('data-selected')).toBe('true')
+      expect(scrollIntoView).toHaveBeenCalledOnce()
+    })
   })
 })

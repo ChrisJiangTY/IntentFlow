@@ -1,0 +1,50 @@
+- region "Session requirement code graph":
+  - text: "NavScenario: first run bash to"
+  - button "Collapse all"
+  - button "Fit view"
+  - button "Zoom out graph": −
+  - button "Zoom in graph": ＋
+  - searchbox "Search documents, requirements, Tasks, or code paths"
+  - combobox "Filter by round":
+    - option "All rounds" [selected]
+    - 'option "Round 1: 构建并验证导航页面"'
+  - paragraph: Select a node to inspect details; use +/− to expand or collapse its next layer. Drag, scroll, or zoom the canvas.
+  - text: "01"
+  - strong: Requirement documents
+  - text: 1 02
+  - strong: Requirements
+  - text: 1 03
+  - strong: Tasks
+  - text: 3 04
+  - strong: Code changes
+  - text: "1"
+  - article:
+    - 'button "Inspect round 1 document: 构建并验证导航页面"':
+      - strong: 构建并验证导航页面
+    - button "Collapse 构建并验证导航页面" [expanded]
+  - article:
+    - 'button "Round 1, requirement 1: 导航页面, status: Failed or regressed"':
+      - strong: 导航页面
+    - button "Collapse 导航页面" [expanded]
+  - article:
+    - 'button "Inspect task: Build navigation HTML"':
+      - strong: Build navi…
+    - button "Collapse Build navigation HTML" [expanded]
+  - article:
+    - 'button "Inspect task: Check mobile navigation"':
+      - strong: Check mobi…
+    - button "Expand Check mobile navigation" [disabled]
+  - article:
+    - 'button "Inspect task: Final Test"':
+      - strong: Final Test
+    - button "Expand Final Test" [disabled]
+  - article:
+    - 'button "Inspect code changes: nav-a.md" [pressed]':
+      - strong: nav-a.md
+  - region "Graph node details":
+    - text: "Code changes · Round 1:"
+    - strong: nav-a.md
+    - paragraph: 1 change snippets
+    - button "Open file"
+    - group: "Build navigation HTML · Execution turn 2 Before # alpha nav After # updated nav"
+  - paragraph: Current conversation only. Edges show assigned work and recorded mutations, not passing tests; unrecorded shell or delegated changes may be absent.

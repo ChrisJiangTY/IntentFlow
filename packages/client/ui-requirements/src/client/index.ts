@@ -3,11 +3,13 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type {} from 'dsh-better-sidebar'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type { SidebarState } from 'dsh-better-sidebar/client/service'
 import type {
   RequirementDocumentEditRequest,
   RequirementRoundStartRequest,
@@ -24,10 +26,32 @@ import type {
 import { EMPTY_REQUIREMENTS_SNAPSHOT, notebookSnapshot, registerRequirementsAssembly } from './assembly.ts'
 import type { RequirementsSnapshot } from './contract.ts'
 import { en, NS, zh, type RequirementsKey } from './locales.ts'
+import { registerRequirementGraphSidebar } from './RequirementGraphSidebar.tsx'
 import { RequirementsView, type RequirementsViewInjected } from './RequirementsView.tsx'
+import type { TraceNavigation } from './knowledge-graph.ts'
 
 export type { RequirementsSnapshot, UseRequirements } from './contract.ts'
 export type { RequirementsKey } from './locales.ts'
+
+function splitHasDeliveryUrl(node: SidebarState['splits'], url: string): boolean {
+  if (node.kind === 'leaf') return node.tabs.some(tab => tab.type === 'browser' && tab.path === url)
+  return node.children.some(child => splitHasDeliveryUrl(child, url))
+}
+
+function stateHasDeliveryUrl(state: SidebarState | undefined, url: string): boolean {
+  return state !== undefined && (
+    splitHasDeliveryUrl(state.splits, url)
+    || splitHasDeliveryUrl(state.bottomSplits, url)
+    || state.floats.some(item => item.tab.type === 'browser' && item.tab.path === url)
+  )
+}
+
+function activateRequirementsView(label: string): void {
+  if (typeof document === 'undefined') return
+  const tab = [...document.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
+    .find(candidate => candidate.textContent.trim() === label)
+  tab?.click()
+}
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -37,11 +61,24 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Required services for the view slot, Session event assembly, commands, and locale. */
-export const inject = ['slots', 'remote', 'remote.commands', 'remote.sessionRequirements', 'sessions', 'uiConversation', 'locale']
+export const inject = ['slots', 'remote', 'remote.commands', 'remote.sessionRequirements', 'sessions', 'uiConversation', 'locale', 'betterSidebar']
 
 /** Register the requirements tab and its Session-scoped data source. */
 export function apply(ctx: Context): void {
   const sources = new Map<SessionId, ObservableSnapshot<RequirementsSnapshot>>()
+  const graphRevealers = new Map<SessionId, (node: TraceNavigation) => void>()
+  const pendingGraphReveals = new Map<SessionId, TraceNavigation>()
+  const openSidebarFile = (sessionId: SessionId, file: string): boolean => {
+    if (ctx.betterSidebar.getTab('editor') === undefined || !ctx.betterSidebar.isTabEnabled('editor')) return false
+    const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
+    let path = file
+    if (!/^(?:[\\/]|[a-z]:[\\/])/i.test(file)) {
+      if (cwd === undefined || cwd === '') return false
+      path = `${cwd.replace(/[\\/]+$/, '')}/${file}`
+    }
+    ctx.betterSidebar.openFile({ sessionId, ...(cwd === undefined ? {} : { cwd }) }, path)
+    return true
+  }
   ctx.provide('requirementsComposer', {
     submit: async (sessionId: SessionId, input: string): Promise<boolean> => {
       const result = await ctx.remote.sessionRequirements.startRound(sessionId, {
@@ -78,6 +115,30 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-requirements: dictionaries')
   registerRequirementsAssembly(ctx)
   const t = ctx.locale.bind(NS)
+  ctx.effect(() => {
+    const dispose = registerRequirementGraphSidebar({
+      sidebar: ctx.betterSidebar,
+      sessions: ctx.sessions.list,
+      sourceFor: sessionId => ctx.sessions.binding(sessionId) === undefined ? undefined : sourceFor(sessionId),
+      t,
+      onOpenFile: openSidebarFile,
+      onSelect: (sessionId, node) => {
+        const reveal = graphRevealers.get(sessionId)
+        if (reveal !== undefined) {
+          pendingGraphReveals.delete(sessionId)
+          reveal(node)
+          return
+        }
+        pendingGraphReveals.set(sessionId, node)
+        activateRequirementsView(t('view.requirements'))
+      },
+    })
+    return () => {
+      dispose()
+      graphRevealers.clear()
+      pendingGraphReveals.clear()
+    }
+  }, 'ui-requirements: requirement graph sidebar')
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',
     id: 'requirements',
@@ -86,7 +147,28 @@ export function apply(ctx: Context): void {
     label: () => t('view.requirements'),
     inject: (sessionId: SessionId): RequirementsViewInjected => ({
       hooks: { requirements: sourceFor(sessionId) },
-      openSession: (id) => { ctx.sessions.open(id) },
+      openDeliveryFile: file => openSidebarFile(sessionId, file),
+      openDeliveryUrl: (rawUrl) => {
+        if (typeof document === 'undefined'
+          || document.querySelector('[data-dsh-better-sidebar]') === null
+          || ctx.betterSidebar.getTab('browser') === undefined
+          || !ctx.betterSidebar.isTabEnabled('browser')) return false
+        const url = new URL(rawUrl)
+        ctx.betterSidebar.openTab({ type: 'browser', title: url.hostname, url: url.href }, { sessionId })
+        const snapshot = ctx.betterSidebar.getSnapshot()
+        return snapshot.sessionId === sessionId && stateHasDeliveryUrl(snapshot.state, url.href)
+      },
+      bindGraphReveal: (listener) => {
+        graphRevealers.set(sessionId, listener)
+        const pending = pendingGraphReveals.get(sessionId)
+        if (pending !== undefined) {
+          pendingGraphReveals.delete(sessionId)
+          listener(pending)
+        }
+        return () => {
+          if (graphRevealers.get(sessionId) === listener) graphRevealers.delete(sessionId)
+        }
+      },
       initialLanguage: ctx.locale.getLocale().active === 'zh' ? 'zh' : 'en',
       startRound: async (request: RequirementRoundStartRequest) => {
         const result = await ctx.remote.sessionRequirements.startRound(sessionId, request)
