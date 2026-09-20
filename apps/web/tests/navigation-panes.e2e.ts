@@ -527,7 +527,14 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     const graph = page.getByRole('region', { name: 'Session requirement code graph' })
     const documentNode = graph.getByRole('button', { name: 'Inspect round 1 document: 构建并验证导航页面' })
     await documentNode.waitFor()
-    const orbGeometry = await documentNode.locator('[class*="orb"]').evaluate(node => ({
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    const planeGeometry = () => graph.locator('g[data-layer] > path:first-child').evaluateAll(nodes => nodes.map((node) => {
+      const box = node.getBoundingClientRect()
+      return { path: node.getAttribute('d'), x: box.x, y: box.y, width: box.width, height: box.height }
+    }))
+    const initialPlanes = await planeGeometry()
+    expect(initialPlanes).toHaveLength(4)
+    const orbGeometry = await documentNode.locator('span[class*="orb"]').evaluate(node => ({
       radius: getComputedStyle(node).borderRadius, width: node.clientWidth, height: node.clientHeight,
     }))
     expect(orbGeometry.radius).toBe('50%')
@@ -563,7 +570,11 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await graph.getByRole('button', { name: 'Expand Build navigation HTML' }).click()
     await codeNode.waitFor()
     expect(await graph.locator('g[data-layer]').count()).toBe(4)
-    const scrollArea = graph.locator('[aria-label="Four-layer perspective graph canvas"]')
+    const edgeColors = await graph.locator('path[marker-end]').evaluateAll(paths => paths.map(path => getComputedStyle(path).stroke))
+    const arrowColors = await graph.locator('marker > path').evaluateAll(paths => paths.map(path => getComputedStyle(path).fill))
+    expect(new Set(edgeColors).size).toBe(1)
+    expect(new Set(arrowColors)).toEqual(new Set(edgeColors))
+    const scrollArea = graph.locator('[aria-label="Four-layer requirement graph canvas"]')
     await expect.poll(() => scrollArea.evaluate(node => node.scrollHeight - node.clientHeight)).toBeLessThanOrEqual(1)
     const viewportBox = await scrollArea.boundingBox()
     if (viewportBox === null) throw new Error('requirement graph viewport geometry is unavailable')
@@ -574,16 +585,67 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       expect(nodeBox.y + nodeBox.height).toBeLessThanOrEqual(viewportBox.y + viewportBox.height + 1)
     }
     await codeNode.click()
+    expect(await planeGeometry()).toEqual(initialPlanes)
+    const layoutToggle = graph.getByRole('button', { name: 'Switch graph layout' })
+    const visibleNodeCount = await graph.locator('article[data-node-key]').count()
+    for (const [mode, variant] of Object.entries({
+      radial: 'ring', layered: 'plane',
+    })) {
+      await layoutToggle.focus()
+      await page.keyboard.press(mode === 'radial' ? 'Enter' : 'Space')
+      expect(await layoutToggle.getAttribute('aria-pressed')).toBe(String(mode === 'radial'))
+      expect(await scrollArea.getAttribute('data-layout-mode')).toBe(mode)
+      expect(await graph.locator(`g[data-region-variant="${variant}"]`).count()).toBe(4)
+      expect(await graph.locator('article[data-node-key]').count()).toBe(visibleNodeCount)
+      expect(await codeNode.getAttribute('aria-pressed')).toBe('true')
+      expect(await graph.getByText('# updated nav', { exact: true }).count()).toBeGreaterThan(0)
+    }
+    expect(await planeGeometry()).toEqual(initialPlanes)
+    expect(await graph.getByRole('button', { name: 'Content', exact: true }).count()).toBe(0)
     expect(await graph.getByText('# updated nav', { exact: true }).count()).toBeGreaterThan(0)
-    await graph.getByRole('button', { name: 'Fit view', exact: true }).click()
     await expect.poll(() => scrollArea.evaluate(node => node.scrollHeight - node.clientHeight)).toBeLessThanOrEqual(1)
+    const detail = graph.getByRole('region', { name: 'Graph node details' })
+    expect(await detail.getByRole('button').allTextContents()).toEqual(['Locate Notebook'])
+    const detailBox = await detail.boundingBox()
+    if (detailBox === null) throw new Error('graph detail geometry is unavailable')
+    expect(detailBox.y + detailBox.height).toBeLessThanOrEqual(page.viewportSize()!.height)
+    const searchBox = await graph.getByRole('searchbox').boundingBox()
+    const layoutToggleBox = await layoutToggle.boundingBox()
+    const notebookBox = await detail.getByRole('button', { name: 'Locate Notebook' }).boundingBox()
+    if (searchBox === null || layoutToggleBox === null || notebookBox === null) throw new Error('compact graph controls are unavailable')
+    expect(searchBox.height).toBe(27)
+    const expandAllBox = await graph.getByRole('button', { name: 'Expand all', exact: true }).boundingBox()
+    if (expandAllBox === null) throw new Error('expand-all control is unavailable')
+    expect(searchBox.x - detailBox.x).toBeLessThanOrEqual(16)
+    expect(layoutToggleBox.x - detailBox.x).toBeLessThanOrEqual(16)
+    expect(layoutToggleBox.width).toBe(28)
+    expect(layoutToggleBox.height).toBe(28)
+    expect(await layoutToggle.evaluate(node => getComputedStyle(node).borderRadius)).toBe('50%')
+    expect(detailBox.x + detailBox.width - expandAllBox.x - expandAllBox.width).toBeLessThanOrEqual(16)
+    expect(notebookBox.height).toBe(26)
+    expect(detailBox.x + detailBox.width - notebookBox.x - notebookBox.width).toBeLessThanOrEqual(18)
+    const divider = graph.getByRole('separator', { name: 'Resize graph details' })
+    const dividerBox = await divider.boundingBox()
+    if (dividerBox === null) throw new Error('graph divider is unavailable')
+    await page.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y + dividerBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y - 70, { steps: 5 })
+    await page.mouse.up()
+    await expect.poll(async () => (await detail.boundingBox())!.height).toBeGreaterThan(detailBox.height + 40)
+    await divider.focus()
+    await page.keyboard.press('Home')
+    for (let index = 0; index < 3; index++) await page.keyboard.press('ArrowUp')
+    expect(await divider.getAttribute('aria-valuenow')).toBe('30')
     const previewDirectory = fileURLToPath(new URL('../../../.artifacts/', import.meta.url))
     await mkdir(previewDirectory, { recursive: true })
     await page.screenshot({ path: join(previewDirectory, 'session-graph.png') })
     const graphSnapshot = await captureStableAria(page, '[aria-label="Session requirement code graph"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(REQUIREMENTS_GRAPH_EXPECTED, graphSnapshot, MODE)
-    await graph.getByRole('button', { name: 'Collapse all' }).click()
+    await graph.getByRole('button', { name: 'Collapse 构建并验证导航页面' }).click()
     expect(await codeNode.count()).toBe(0)
+    await graph.getByRole('button', { name: 'Expand all', exact: true }).click()
+    await codeNode.waitFor()
+    await graph.getByRole('button', { name: 'Collapse 构建并验证导航页面' }).click()
     await graph.getByRole('searchbox').fill('nav-a.md')
     await graph.getByRole('region', { name: 'Graph search results' }).getByRole('button').click()
     await codeNode.waitFor()
@@ -593,7 +655,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     const graphBox = await graph.boundingBox()
     if (graphBox === null) throw new Error('requirement graph geometry is unavailable')
     expect(graphBox.y + graphBox.height).toBeLessThanOrEqual(wideViewport.height)
-    for (let step = 0; step < 6; step++) await graph.getByRole('button', { name: 'Zoom in' }).click()
+    for (let step = 0; step < 10; step++) await graph.getByRole('button', { name: 'Zoom in' }).click()
     await expect.poll(() => scrollArea.evaluate(node => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0)
     await scrollArea.evaluate((node) => { node.scrollTop = node.scrollHeight })
     expect(await scrollArea.evaluate(node => node.scrollTop)).toBeGreaterThan(0)
@@ -1038,4 +1100,64 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       'requirements-restored.expected.md', 'requirements-graph.expected.md',
     ])
   })
+
+  it.skipIf(MODE === 'record')('keeps dense layered nodes readable with blue curved links', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-layered-density'))
+    await ensureSeedOpen(page)
+    const session = scaffold.ctx.sessions.get(SessionId(SEED_ID))
+    if (session === undefined) throw new Error('opened navigation seed is not attached')
+    for (let round = 1; round <= 3; round++) {
+      const roundId = `ROUND-WEB-0${round}` as never
+      const common = { version: 1 as const, revision: 2, roundId }
+      const count = round === 3 ? 6 : 7
+      session.append('requirement/round', { ...common, round, sourceMessageId: `density-${round}` as never,
+        language: 'en', input: `Dense graph round ${round}`, status: 'completed', turn: 2 })
+      session.append('requirement/document', { ...common, turn: 2, summary: `Dense round ${round}`,
+        markdown: '# Dense graph', valid: true, issues: [] })
+      session.append('requirement/graph', { ...common, documentRevision: 2,
+        nodes: Array.from({ length: count }, (_, i) => ({ requirementId: String(i + 1),
+          title: `Requirement ${round}.${i + 1}`, acceptanceRefs: [`${i + 1}.1`] })), relations: [] })
+      const tasks = Array.from({ length: 9 }, (_, i) => ({ id: `density-task-${round}-${i}` as never,
+        order: i, kind: 'implementation' as const, title: `Task ${round}.${i + 1}`, summary: '', statement: '',
+        requirementRefs: [`${i % count + 1}.1`, `${(i + 1) % count + 1}.1`], status: 'completed' as const }))
+      session.append('requirement/task-list', { ...common, documentRevision: 2, tasks })
+      for (const [i, task] of tasks.entries()) {
+        const turn = 10 + round * 10 + i
+        session.append('requirement/task-execution', { ...common, taskId: task.id,
+          messageId: `density-execution-${round}-${i}` as never, status: 'completed', turn, output: 'Done' })
+        const fileCount = round === 3 ? 13 : 14
+        const diffs = Array.from({ length: fileCount }, (_, j) => j).filter(j => j % 9 === i)
+          .map(j => ({ path: `density/r${round}-${j}.ts`, oldText: null, newText: 'export {}' }))
+        const callId = `density-edit-${round}-${i}` as never
+        session.append('tool/call', { turn, step: 1, callId, name: 'edit', arguments: '{}' })
+        session.append('tool/result', { turn, step: 1,
+          message: createToolResultMessage({ callId, isError: false, content: [{ type: 'text', text: 'Updated' }] }),
+          meta: { diffs } }, { surfaceOp: 'append' })
+      }
+    }
+    const sidebar = page.locator('[data-dsh-better-sidebar]')
+    const expand = sidebar.getByRole('button', { name: 'Expand sidebar', exact: true })
+    if (await expand.count()) await expand.click()
+    const graph = page.getByRole('region', { name: 'Session requirement code graph' })
+    await expect.poll(() => graph.locator('article[data-layer="document"]').count()).toBe(3)
+    await graph.getByRole('button', { name: 'Expand all', exact: true }).click()
+    await expect.poll(() => graph.locator('article[data-node-key]').count()).toBe(91)
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    for (const [kind, count, rowCount] of [['requirement', 20, 2], ['task', 27, 2], ['code', 41, 3]] as const) {
+      const measurements = await graph.locator(`article[data-layer="${kind}"]`).evaluateAll(nodes => nodes.map(node => ({
+        top: (node as HTMLElement).style.top,
+        scale: Number((node as HTMLElement).style.scale),
+        width: node.querySelector('button > span')!.getBoundingClientRect().width,
+      })))
+      expect(measurements).toHaveLength(count)
+      expect(new Set(measurements.map(node => node.top)).size).toBe(rowCount)
+      expect(Math.min(...measurements.map(node => node.scale))).toBeGreaterThanOrEqual(.48)
+      expect(Math.min(...measurements.map(node => node.width))).toBeGreaterThan(12)
+    }
+    const colors = await graph.locator('path[marker-end]').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).stroke))
+    expect(new Set(colors).size).toBe(1)
+    const directory = fileURLToPath(new URL('../../../.artifacts/', import.meta.url))
+    await mkdir(directory, { recursive: true })
+    await graph.screenshot({ path: join(directory, 'layered-density.png') })
+  }, 60_000)
 })

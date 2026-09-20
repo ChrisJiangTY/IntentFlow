@@ -31,6 +31,8 @@ Web 组合包内置 `dsh-better-sidebar` 0.17.1，为工具 tab 提供宽度可�
 
 使用右侧工作区的 `+` 菜单打开工具 tab。浏览器 tab 启用时，从结果链接打开 Notebook 交付的网页会在当前 Session 侧栏中显示；否则链接保留浏览器原生行为。
 
+HTML 预览和浏览器 tab 通过[侧栏依赖补丁](../../../patches/dsh-better-sidebar@0.17.1.patch)允许游戏在点击后锁定鼠标。预览保留不透明源沙箱，鼠标锁定无需使用不安全解锁按钮。Escape 可释放鼠标，点击游戏可以重新捕获。
+
 ### 启动 Web GUI
 
 ```sh

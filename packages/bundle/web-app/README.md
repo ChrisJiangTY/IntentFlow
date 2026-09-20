@@ -31,6 +31,8 @@ Start the GUI, open your browser, and start talking to the agent. The flags fine
 
 Use the `+` menu in the right workspace to open tool tabs. When its browser tab is enabled, opening a Notebook-delivered web page from its result link shows the page in the current Session sidebar; otherwise the link keeps native browser behavior.
 
+HTML previews and browser tabs permit click-initiated pointer lock for games through the [sidebar dependency patch](../../../patches/dsh-better-sidebar@0.17.1.patch). Previews retain their opaque-origin sandbox; pointer lock does not require the unsafe unlock control. Escape releases the mouse, and clicking the game can capture it again.
+
 ### Starting the Web GUI
 
 ```sh

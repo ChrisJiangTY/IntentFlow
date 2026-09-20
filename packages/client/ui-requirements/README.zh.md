@@ -39,7 +39,13 @@ kind: "package-reference"
 
 状态允许时，选中的 Task 提供运行、移动、详情、撤回和辅助操作。运行说明下方的可折叠结果区仅显示“交付结果”并保留链接。右侧栏浏览器 tab 可用时，普通点击外部 HTTP 或 HTTPS 交付链接会在其中打开当前 Session 的页面；否则链接保留浏览器原生行为。带修饰键的点击始终保留原生行为。任务状态标记继续显示；说明、审核摘要和执行详情不进入结果展示。历史 Markdown 仅提取可识别的交付章节；非结构化输出保留在详情和轨迹中，不编造交付结果。Notebook 显示文本备注，但隐藏批注及其创建入口；已保存的批注保留在 Session 日志中。
 
-“需求图谱”是当前 Session 的默认右侧栏标签页；准备图谱不会展开已关闭的右侧栏，明确打开文件或浏览器时仍可正常获得焦点。标签页关闭后可从 `+` 菜单恢复。四个紧凑的透视平面在同一画布中只展示该 Session 的轮次文档 → 具体需求 → Task → 修改文件。带外环的球形节点只显示简短编号和一行概括；修订、状态和数量放在详情检查器中。默认只显示文档摘要。点击节点只打开详情，不改变可见性；其 `+`/`−` 控件可独立展开或收起下一层。共享节点只出现一次，只要仍有其他已展开父节点可达就会保留。搜索覆盖折叠节点，选择结果会展开其全部祖先路径。轮次筛选、缩放、“适应画面”和“收起全部”只改变当前标签页。“适应画面”会把当前可见的四层拓扑保持在画布内。实时更新保留展开选择。右侧栏负责横向调宽；图谱画布和证据详情可独立于 Notebook 滚动。
+“需求图谱”是当前 Session 的默认右侧栏标签页；准备图谱不会展开已关闭的右侧栏，明确打开文件或浏览器时仍可正常获得焦点。标签页关闭后可从 `+` 菜单恢复。画布左上角的圆形图标按钮可以切换同一份文档 → 具体需求 → Task → 修改文件数据的两种确定性呈现：“分层 · 曲线”是默认的固定四平面视图，采用少量有序行、清晰的节点尺寸和蓝色曲线；“径向 · 同心环”把四类节点从圆心映射到三个外环。
+
+切换布局会保留展开状态、搜索、轮次筛选、选中节点、缩放和详情区比例。几何变化后，系统会把已选节点带回可见区域；没有选中节点时则回到画布原点。带数字编号的圆环节点使用 Figma 素材；悬停显示标题，选择后在下方显示详情。
+
+默认仅显示文档节点。各节点的 `+`/`−` 独立展开或收起下一层，只要仍有其他已展开父节点可达，共享节点就会保留。首行的搜索和轮次筛选靠左，“全部展开”靠右，并显示当前轮次筛选范围内的全部节点，包括未关联需求的 Task。图谱控制行把 28px 布局切换按钮放在左侧，缩放放在右侧。图标表示当前视图，悬停提示说明当前视图及下一视图。搜索包含折叠节点，并展开结果的全部祖先路径。数字按 Session 内各层完整节点顺序编号，不受折叠与筛选影响。实时更新保留展开选择。
+
+每种布局随侧栏宽度等比缩放；垂直溢出时可滚动查看，手动缩放仍可用。密集的圆环或行会缩小节点，可通过搜索和收起分支聚焦相关节点。右侧栏负责横向调宽。独立滚动的详情区默认预留 30% 的内容高度。横向分隔线支持鼠标拖动和方向键、Home、End，在 15–60% 之间调节。选择节点保留调节后的比例；内容始终显示，仅保留靠右的紧凑“定位 Notebook”按钮。代码路径可打开侧栏文件查看器，文件的 Notebook 定位指向其首个已记录的所属 Task。
 
 验收标准引用连接需求与 Task，执行 Turn 标识连接 Task 与成功记录的文件修改。选择节点高亮有向祖先与后代；详情中的明确操作可定位 Notebook 文档、需求标题或 Task，也可在侧栏标签页打开代码文件。文件详情保留历史修改前后片段。映射 Task 全部完成时，“进行中”需求显示为“待终验”，不会显示“已验证”；只有最终验证成功后才验证需求。搜索可定位未关联 Task，但不会凭空添加需求连线。
 
@@ -47,7 +53,7 @@ Task 运行时，运行按钮替换为停止按钮。停止操作取消该任务
 
 Task 执行失败使用 `[!]` 和琥珀色状态。检查点或 Final Test 的审核警告使用独立的警告样式，但不会阻止按序执行。只有审核者记录确认的意外回归证据时才使用红色；只有审核者能够提供依据时才显示 Task 归因。
 
-Notebook 投影消费仅追加的 `requirement/round`、`requirement/clarification`、`requirement/document`、`requirement/task-list`、`requirement/task-execution`、`requirement/run-all`、`requirement/note`、`requirement/review` 和 `requirement/validation` 事件，以及用户版本和执行事件。图谱仅读取当前 Session 行中的 `requirementGraph` 与 `requirementChanges` 投影，并与完整 Notebook 关联。React 状态只保存选择、折叠、草稿、缩放和临时操作状态。
+Notebook 投影消费仅追加的 `requirement/round`、`requirement/clarification`、`requirement/document`、`requirement/task-list`、`requirement/task-execution`、`requirement/run-all`、`requirement/note`、`requirement/review` 和 `requirement/validation` 事件，以及用户版本和执行事件。图谱仅读取当前 Session 行中的 `requirementGraph` 与 `requirementChanges` 投影，并与完整 Notebook 关联。图谱交互状态只存在当前标签页；持久图谱数据仅来自当前 Session 投影。
 
 -----
 
@@ -98,6 +104,6 @@ Notebook 通过 Session 投影订阅读取宿主完整的 `requirementNotebook` 
 <details>
 <summary>维护者的工作上下文——点击展开</summary>
 
-参阅[集中需求审核 Agent Note](../../../.agents/notes/implemented/feature/2026-09-16-batched-requirement-review.zh.md)和[Workspace 需求知识图谱 Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.zh.md)。
+参阅[集中需求审核 Agent Note](../../../.agents/notes/implemented/feature/2026-09-16-batched-requirement-review.zh.md)、[渐进式图谱 Agent Note](../../../.agents/notes/implemented/feature/2026-09-17-progressive-requirement-graph.zh.md)、[可切换图谱布局 Agent Note](../../../.agents/notes/implemented/feature/2026-09-18-switchable-requirement-graph-layouts.zh.md)和[Workspace 需求知识图谱 Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.zh.md)。
 
 </details>

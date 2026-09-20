@@ -1,0 +1,115 @@
+diff --git a/lib/client-editor.js b/lib/client-editor.js
+index 87b3e8785626ab8bf400b7a6d64d698c43f482d0..473b26cd1c4c0c3885bd6ecf0bd3944b1aca2071 100644
+--- a/lib/client-editor.js
++++ b/lib/client-editor.js
+@@ -48215,7 +48215,7 @@ globalThis.__dshChunks__["editor"] = (require) => {
+ 			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
+ 				className: sidebar_module_css_default.editorHtml,
+ 				src: htmlUrl(scope, path),
+-				sandbox: htmlNoSandbox ? void 0 : "allow-scripts allow-popups allow-downloads allow-modals",
++				sandbox: htmlNoSandbox ? void 0 : "allow-scripts allow-pointer-lock allow-popups allow-downloads allow-modals",
+ 				referrerPolicy: "no-referrer",
+ 				allow: "",
+ 				title: path
+diff --git a/lib/client-registry.js b/lib/client-registry.js
+index b1630afa375df6b3ec03ceca5178bce14d7d67a9..651ba1cbf064c024b4dd06bdb7f66842e33e3273 100644
+--- a/lib/client-registry.js
++++ b/lib/client-registry.js
+@@ -17148,7 +17148,7 @@ Mode: this is a continuable side conversation. Your answers stay in this side th
+ 		* keep login flows working; allow-popups-to-escape-sandbox lets OAuth
+ 		* popups open as normal tabs (they are cross-origin to the GUI either way).
+ 		*/
+-		const BROWSER_IFRAME_SANDBOX = "allow-scripts allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox";
++		const BROWSER_IFRAME_SANDBOX = "allow-scripts allow-pointer-lock allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox";
+ 		/** allow-same-origin appended for explicitly allowlisted local addresses. */
+ 		const BROWSER_IFRAME_SANDBOX_SAME_ORIGIN = `${BROWSER_IFRAME_SANDBOX} allow-same-origin`;
+ 		/**
+diff --git a/lib/client.js b/lib/client.js
+index 4f339ef28ed7eebd08cf7195b145924ca383b6be..36d01935cbcc758e94ce991ad2c0d8ce36fb154f 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -17148,7 +17148,7 @@ Mode: this is a continuable side conversation. Your answers stay in this side th
+ 		* keep login flows working; allow-popups-to-escape-sandbox lets OAuth
+ 		* popups open as normal tabs (they are cross-origin to the GUI either way).
+ 		*/
+-		const BROWSER_IFRAME_SANDBOX = "allow-scripts allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox";
++		const BROWSER_IFRAME_SANDBOX = "allow-scripts allow-pointer-lock allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox";
+ 		/** allow-same-origin appended for explicitly allowlisted local addresses. */
+ 		const BROWSER_IFRAME_SANDBOX_SAME_ORIGIN = `${BROWSER_IFRAME_SANDBOX} allow-same-origin`;
+ 		/**
+diff --git a/lib/index.js b/lib/index.js
+index a3bab6f349e58d100d3133acd806295ed7a9e1fa..29f0dd2b35007118ce1894a6eecc184cb7ef4aed 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -4327,7 +4327,7 @@ function apply(ctx, config) {
+ 					"cache-control": "no-cache",
+ 					"x-content-type-options": "nosniff",
+ 					"referrer-policy": "no-referrer",
+-					"content-security-policy": "sandbox allow-scripts allow-popups allow-downloads allow-modals; object-src 'none'"
++					"content-security-policy": "sandbox allow-scripts allow-pointer-lock allow-popups allow-downloads allow-modals; object-src 'none'"
+ 				});
+ 				res.end(body);
+ 			} catch (error) {
+diff --git a/lib/types/client/BrowserView.d.ts b/lib/types/client/BrowserView.d.ts
+index e2101db0a93d4b0ddbf6d3b3c18e08990be17e4f..a22939beb00b2b84b77ada8c536a304fd8bc16d7 100644
+--- a/lib/types/client/BrowserView.d.ts
++++ b/lib/types/client/BrowserView.d.ts
+@@ -6,7 +6,7 @@ import type { TabComponentProps } from './service.ts';
+  * keep login flows working; allow-popups-to-escape-sandbox lets OAuth
+  * popups open as normal tabs (they are cross-origin to the GUI either way).
+  */
+-export declare const BROWSER_IFRAME_SANDBOX = "allow-scripts allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox";
++export declare const BROWSER_IFRAME_SANDBOX = "allow-scripts allow-pointer-lock allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox";
+ /**
+  * The sandbox tokens for one URL: allowlisted loopback addresses (local dev
+  * servers the user explicitly trusts) additionally get `allow-same-origin`
+diff --git a/lib/types/client/TextEditor.d.ts b/lib/types/client/TextEditor.d.ts
+index 2a1c433e903cefcd534d341b57c66ff6c23eecf5..1b608648d8ee353136fb78370b4be2fc5f48f6cd 100644
+--- a/lib/types/client/TextEditor.d.ts
++++ b/lib/types/client/TextEditor.d.ts
+@@ -6,5 +6,5 @@ import type { FileViewerProps } from './service.ts';
+  * must not hijack the GUI). The user can disable the sandbox per-feature
+  * in the side card settings (warned); the toggle below reflects it.
+  */
+-export declare const HTML_IFRAME_SANDBOX = "allow-scripts allow-popups allow-downloads allow-modals";
++export declare const HTML_IFRAME_SANDBOX = "allow-scripts allow-pointer-lock allow-popups allow-downloads allow-modals";
+ export declare function TextEditor(props: FileViewerProps): import("react").JSX.Element;
+diff --git a/src/client/BrowserView.tsx b/src/client/BrowserView.tsx
+index c44d41a3106619e14e1ccb584f7b4f2897f9ee47..cff73003a290b5ddb7e9165aaa0c74a33cdb131f 100644
+--- a/src/client/BrowserView.tsx
++++ b/src/client/BrowserView.tsx
+@@ -41,7 +41,7 @@ import css from './sidebar.module.css'
+  * popups open as normal tabs (they are cross-origin to the GUI either way).
+  */
+ export const BROWSER_IFRAME_SANDBOX =
+-  'allow-scripts allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox'
++  'allow-scripts allow-pointer-lock allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox'
+ 
+ /** allow-same-origin appended for explicitly allowlisted local addresses. */
+ const BROWSER_IFRAME_SANDBOX_SAME_ORIGIN =
+diff --git a/src/client/TextEditor.tsx b/src/client/TextEditor.tsx
+index 25114c907091233c03cd0b74447c3f39f3479636..6d3d89ce3a9fca0ec078b9e9eab1d9d3b982354c 100644
+--- a/src/client/TextEditor.tsx
++++ b/src/client/TextEditor.tsx
+@@ -55,7 +55,7 @@ interface SelectionPopup {
+  * must not hijack the GUI). The user can disable the sandbox per-feature
+  * in the side card settings (warned); the toggle below reflects it.
+  */
+-export const HTML_IFRAME_SANDBOX = 'allow-scripts allow-popups allow-downloads allow-modals'
++export const HTML_IFRAME_SANDBOX = 'allow-scripts allow-pointer-lock allow-popups allow-downloads allow-modals'
+ 
+ export function TextEditor(props: FileViewerProps) {
+   const { ctx, scope, path, viewerId, content, truncated } = props
+diff --git a/src/index.ts b/src/index.ts
+index 46c94816c6ede48f7df69fedb700716fe183d685..f7bdc8b8bd810cf1b7ab4da983100d5571acbb69 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -947,7 +947,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
+           // The sandbox directive (no allow-same-origin → opaque origin) is
+           // the previewer's security boundary even for top-level loads;
+           // object-src 'none' blocks plugin embeds.
+-          'content-security-policy': "sandbox allow-scripts allow-popups allow-downloads allow-modals; object-src 'none'",
++          'content-security-policy': "sandbox allow-scripts allow-pointer-lock allow-popups allow-downloads allow-modals; object-src 'none'",
+         })
+         res.end(body)
+       } catch (error) {
