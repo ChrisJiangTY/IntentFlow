@@ -66,7 +66,7 @@ import { requirementAcceptanceRefs, requirementGraphNodes } from './document-gra
 import { requirementGraphProjectionDefinition } from './projection.ts'
 import { requirementNotebookProjectionDefinition } from './notebook-projection.ts'
 import { requirementChangesProjectionDefinition } from './change-projection.ts'
-import { TASK_TEXT_POLICY, TASK_TEXT_SCHEMA, validateTaskText, type TaskText } from './task-text.ts'
+import { TASK_TEXT_POLICY, TASK_TEXT_SCHEMA, TaskTextValidationError, validateTaskText, type TaskText } from './task-text.ts'
 
 export type * from './types.ts'
 
@@ -88,6 +88,10 @@ export interface Config {
   readonly maxClarificationRounds: number
   /** Maximum questions accepted in one clarification batch. */
   readonly maxQuestionsPerRound: number
+  /** Maximum concurrent translations after the complete generated task list is validated. */
+  readonly taskTranslationConcurrency: number
+  /** Maximum child attempts to correct one generated task's invalid human text. */
+  readonly taskTranslationMaxAttempts: number
   /** Elapsed Task execution time before one independent health check, in milliseconds. */
   readonly taskHealthCheckAfterMs: number
   /** Maximum duration of the health-check child, in milliseconds. */
@@ -232,7 +236,7 @@ const TASK_PROPERTIES = {
   markdown: {
     type: 'string' as const,
     required: true,
-    description: 'Complete Chinese Markdown checklist for every numbered subtask and its concrete implementation details.',
+    description: 'Complete Chinese Markdown checklist with concrete implementation and verification steps for this task.',
   },
   requirement_refs: {
     type: 'array' as const,
@@ -439,6 +443,41 @@ function markdownNoteText(value: string): string {
 
 function hasTaskContent(task: RequirementTask): boolean {
   return task.title.trim() !== '' || task.statement.trim() !== ''
+}
+
+function finishesActiveTasks(tasks: readonly RequirementTask[], taskId: RequirementTaskId): boolean {
+  return tasks.some(task => task.id === taskId && hasTaskContent(task))
+    && tasks.every(task => task.id === taskId || !hasTaskContent(task)
+      || task.status === 'completed' || task.status === 'withdrawn')
+}
+
+function activeTasksCompleted(tasks: readonly RequirementTask[]): boolean {
+  return tasks.some(task => task.status === 'completed')
+    && tasks.every(task => !hasTaskContent(task) || task.status === 'completed' || task.status === 'withdrawn')
+}
+
+function requireTaskCoverage(tasks: readonly RequirementTask[], knownRefs: ReadonlySet<string>): void {
+  const covered = new Set(tasks.filter(task => task.status !== 'withdrawn' && hasTaskContent(task))
+    .flatMap(task => task.requirementRefs))
+  const missing = [...knownRefs].filter(ref => !covered.has(ref))
+  if (missing.length > 0) {
+    throw new TypeError(`active tasks must cover every acceptance criterion; missing ${missing.join(', ')}`)
+  }
+}
+
+function lastCompletedTaskExecution(
+  session: Session,
+  roundId: RequirementRoundId,
+  tasks: readonly RequirementTask[],
+): RequirementTaskExecutionEvent | undefined {
+  let latest: RequirementTaskExecutionEvent | undefined
+  for (const task of tasks) {
+    if (task.status !== 'completed' || !hasTaskContent(task)) continue
+    const execution = latestTaskExecution(session, roundId, task.id)
+    if (execution?.status === 'completed' && execution.turn !== undefined
+      && (latest?.turn === undefined || execution.turn > latest.turn)) latest = execution
+  }
+  return latest
 }
 
 function requirementPrompt(
@@ -663,12 +702,6 @@ interface SubmittedTask {
   readonly kind: 'implementation' | 'checkpoint'
 }
 
-interface SubmittedFinalTask {
-  readonly title: string
-  readonly markdown: string
-  readonly requirement_refs: readonly string[]
-}
-
 interface SubmittedQuestion {
   readonly id: string
   readonly question: string
@@ -771,7 +804,6 @@ function submittedTask(
   order: number,
   input: SubmittedTask,
   knownRefs: ReadonlySet<string>,
-  kind: RequirementTask['kind'] = input.kind,
 ): RequirementTask {
   const title = normalizedTaskText(input.title, 'title')
   const body = normalizedTaskText(input.markdown, 'statement')
@@ -795,7 +827,7 @@ function submittedTask(
   return {
     id: stableTaskId(roundId, title, statement),
     order,
-    kind,
+    kind: input.kind,
     title,
     summary: '',
     statement,
@@ -859,6 +891,8 @@ export class SessionRequirements extends TypertRemoteService {
     reviewerTools: s.array(s.string()).required(),
     maxClarificationRounds: s.number().step(1).min(1).required(),
     maxQuestionsPerRound: s.number().step(1).min(1).required(),
+    taskTranslationConcurrency: s.number().step(1).min(1).default(3),
+    taskTranslationMaxAttempts: s.number().step(1).min(1).default(2),
     taskHealthCheckAfterMs: s.number().step(1).min(1).max(2_147_483_647).default(3_600_000),
     taskHealthCheckTimeoutMs: s.number().step(1).min(1).max(2_147_483_647).default(300_000),
   })
@@ -873,7 +907,7 @@ export class SessionRequirements extends TypertRemoteService {
 
   /**
    * @param ctx - Host context carrying live agents and the subagent registry.
-   * @param config - Explicit reviewer provider, prompt cap, and read-only tools.
+   * @param config - Reviewer provider, prompt cap, read-only tools, and task-translation limits.
    */
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'sessionRequirements')
@@ -953,12 +987,12 @@ export class SessionRequirements extends TypertRemoteService {
     }))
     ctx.tools.register(defineTool({
       name: 'submit_requirement_tasks',
-      description: 'Commit the complete executable task list generated from the active Chinese requirement document. Every item is mandatory and the final-test block is supplied separately.',
+      description: 'Commit ordered implementation and checkpoint tasks from the active Chinese requirement document. Each task verifies its assigned criteria; together they cover every acceptance criterion.',
       parameters: {
         tasks: {
           type: 'array',
           required: true,
-          description: 'At least one implementation or checkpoint task, in dependency order.',
+          description: 'At least one implementation or checkpoint task, in dependency order. Each task includes its own verification.',
           items: {
             type: 'object',
             additionalProperties: false,
@@ -967,12 +1001,6 @@ export class SessionRequirements extends TypertRemoteService {
               ...TASK_PROPERTIES,
             },
           },
-        },
-        final_test: {
-          type: 'object',
-          required: true,
-          additionalProperties: false,
-          properties: TASK_PROPERTIES,
         },
       },
       output: {
@@ -987,7 +1015,7 @@ export class SessionRequirements extends TypertRemoteService {
         },
         render: (_args, value) => [{ type: 'text', text: `已从需求文档 v${value.documentRevision} 生成 ${value.taskCount} 个任务块。` }],
       },
-      execute: (args, exec) => Promise.resolve(this.submitTasks(args.tasks, args.final_test, exec)),
+      execute: (args, exec) => Promise.resolve(this.submitTasks(args.tasks, exec)),
     }))
     ctx.effect(() => async () => {
       this.taskTextShutdown.abort('session-requirements disposed')
@@ -1014,9 +1042,6 @@ export class SessionRequirements extends TypertRemoteService {
           const execution = session.events.findLast(candidate => candidate.type === 'requirement/task-execution'
             && candidate.data.turn === event.data.turn && candidate.data.status === 'reviewing')
           if (execution?.type !== 'requirement/task-execution') return
-          const task = latestTaskList(session, execution.data.roundId)?.tasks
-            .find(candidate => candidate.id === execution.data.taskId)
-          if (task === undefined || !taskRequiresReview(task.kind)) return
           void this.review(agent, event.data.turn)
         } catch (error: unknown) {
           ctx.logger.warn('dsh-session-requirements: failed to project Session event: %o', error)
@@ -1237,7 +1262,6 @@ export class SessionRequirements extends TypertRemoteService {
 
   private async submitTasks(
     inputs: readonly SubmittedTask[],
-    finalInput: SubmittedFinalTask,
     exec: ToolRunContext,
   ): Promise<{ accepted: true; documentRevision: number; taskCount: number }> {
     const round = this.activeToolRound(exec, ['generating-tasks'])
@@ -1245,25 +1269,14 @@ export class SessionRequirements extends TypertRemoteService {
     if (agent === undefined) throw new Error('requirement task submission requires an owning agent session')
     const document = latestDocument(agent.session, round.roundId)
     if (document === undefined || !document.valid) throw new Error('the active requirement document is missing or invalid')
-    if (inputs.length === 0) throw new TypeError('at least one implementation task is required')
+    if (inputs.length === 0) throw new TypeError('at least one implementation or checkpoint task is required')
     const knownRefs = requirementAcceptanceRefs(document.markdown)
     const tasks = inputs.map((input, order) => submittedTask(round.roundId, order, input, knownRefs))
-    const finalTask = submittedTask(
-      round.roundId,
-      tasks.length,
-      { ...finalInput, kind: 'checkpoint' },
-      knownRefs,
-      'final-test',
-    )
-    const finalRefs = new Set(finalTask.requirementRefs)
-    const missing = [...knownRefs].filter(ref => !finalRefs.has(ref))
-    if (missing.length > 0) throw new TypeError(`final-test must verify every acceptance criterion; missing ${missing.join(', ')}`)
-    const translated: RequirementTask[] = []
-    for (const task of [...tasks, finalTask]) {
-      const text = await this.transformTask(agent, task, undefined, exec.signal)
-      if (text.markdown !== task.statement) throw new TypeError('translation must preserve the complete Agent task verbatim')
-      translated.push({ ...task, title: text.title, summary: text.summary })
-    }
+    const coveredRefs = new Set(tasks.flatMap(task => task.requirementRefs))
+    const missing = [...knownRefs].filter(ref => !coveredRefs.has(ref))
+    if (missing.length > 0) throw new TypeError(`tasks must verify every acceptance criterion; missing ${missing.join(', ')}`)
+    const translated = await this.translateGeneratedTasks(agent, tasks, exec.signal)
+    exec.signal.throwIfAborted()
     this.requireLiveAgent(agent)
     if (latestDocument(agent.session, round.roundId)?.revision !== document.revision
       || latestRound(agent.session, round.roundId)?.status !== 'generating-tasks') {
@@ -1272,7 +1285,7 @@ export class SessionRequirements extends TypertRemoteService {
     this.appendTaskList(agent.session, round.roundId, translated, document.revision)
     this.updateRound(agent.session, round.roundId, { status: 'tasks-ready' })
     exec.concludeTurn()
-    return { accepted: true, documentRevision: document.revision, taskCount: tasks.length + 1 }
+    return { accepted: true, documentRevision: document.revision, taskCount: tasks.length }
   }
 
   /**
@@ -1549,14 +1562,13 @@ export class SessionRequirements extends TypertRemoteService {
     const document = latestDocument(session, request.roundId)
     if (document === undefined) throw new Error(`requirement document for round "${request.roundId}" does not exist`)
     const finalIndex = list.tasks.findIndex(task => task.kind === 'final-test')
-    if (finalIndex < 0) throw new Error('requirement task list has no Final Test')
     const afterIndex = request.afterTaskId === undefined
-      ? finalIndex - 1
+      ? finalIndex < 0 ? list.tasks.length - 1 : finalIndex - 1
       : list.tasks.findIndex(task => task.id === request.afterTaskId)
     if (request.afterTaskId !== undefined && afterIndex < 0) {
       throw new Error(`requirement task "${request.afterTaskId}" does not exist`)
     }
-    if (afterIndex >= finalIndex) throw new Error('tasks cannot be inserted after Final Test')
+    if (finalIndex >= 0 && afterIndex >= finalIndex) throw new Error('tasks cannot be inserted after Final Test')
     const taskId = stableTaskId(request.roundId, `manual-${list.revision + 1}`, `${title}\n${summary}\n${statement}`)
     const knownRefs = requirementAcceptanceRefs(document.markdown)
     const parsedRefs = taskRefsFromStatement(statement, knownRefs)
@@ -1585,7 +1597,7 @@ export class SessionRequirements extends TypertRemoteService {
 
   /**
    * Rewrite execution instructions from a human edit, or translate changed Agent text.
-   * A successful change returns the task and Final Test to pending; stale results are rejected.
+   * A successful change returns the task and any completed trailing Final Test to pending; stale results are rejected.
    * @param agent - exact live Agent that owns the round.
    * @param request - task identity and replacement text.
    * @returns the durable task identity and task-list event sequence.
@@ -1628,14 +1640,16 @@ export class SessionRequirements extends TypertRemoteService {
     }
     this.requireTaskListEditable(current)
     const updated = { ...rewritten, ...(humanEdit ? { humanInstruction: summary } : {}), status: 'pending' as const }
-    const event = this.appendTaskList(session, request.roundId, current.tasks.map(item => item.id === request.taskId
+    const tasks = current.tasks.map(item => item.id === request.taskId
       ? updated
-      : item.kind === 'final-test' && item.status === 'completed' ? { ...item, status: 'pending' } : { ...item }), list.documentRevision)
+      : item.kind === 'final-test' && item.status === 'completed' ? { ...item, status: 'pending' as const } : { ...item })
+    requireTaskCoverage(tasks, knownRefs)
+    const event = this.appendTaskList(session, request.roundId, tasks, list.documentRevision)
     this.updateRound(session, request.roundId, { status: 'tasks-ready' })
     return { roundId: request.roundId, taskId: request.taskId, eventSeq: event.seq, task: updated }
   }
 
-  private transformTask(agent: Agent, task: RequirementTask, humanInstruction?: string, signal?: AbortSignal): Promise<TaskText> {
+  private queueTaskText<T>(agent: Agent, work: (state: ReviewState) => Promise<T>): Promise<T> {
     let state = this.states.get(agent.session)
     if (state === undefined) {
       state = { controllers: new Set(), tail: Promise.resolve() }
@@ -1643,35 +1657,91 @@ export class SessionRequirements extends TypertRemoteService {
     }
     const owner = state
     this.liveStates.add(owner)
-    const operation = owner.tail.catch(() => {}).then(async () => {
-      const controller = new AbortController()
-      owner.controllers.add(controller)
-      let run: SubagentRun | undefined
-      try {
-        this.requireLiveAgent(agent)
-        const prompt = `${humanInstruction === undefined
-          ? '将已确定的完整Agent任务翻译成人类标题和摘要。markdown必须逐字返回原文，禁止改写。'
-          : '根据人类最新指令重新编写完整Agent任务。人类指令优先于旧任务及旧需求；删除冲突或已取消的步骤，保留未冲突的必要上下文。只改写任务，不执行任务。markdown包含目标、输入与范围、约束、具体动作、验收与验证、产出和失败处理；沿用任务编号。summary可以简述意图，系统会保存人类原文。'}\n${TASK_TEXT_POLICY}\n\n${JSON.stringify({ task, ...(humanInstruction === undefined ? {} : { humanInstruction }) })}`
-        if (prompt.length > this.config.maxInputChars) throw new Error('complete task exceeds configured maxInputChars; increase the limit before translating')
-        const combined = AbortSignal.any([this.taskTextShutdown.signal, controller.signal, ...(signal === undefined ? [] : [signal])])
-        combined.throwIfAborted()
-        run = await this.ctx.subagents.start(this.config.reviewerProvider, {
-          label: humanInstruction === undefined ? 'Translate task for human' : 'Revise task from human instruction',
-          prompt: [{ type: 'text', text: prompt }], parent: agent, signal: combined,
-          maxDepth: 1, toolFilter: { allow: [] }, outputSchema: TASK_TEXT_SCHEMA,
-        })
-        const result = await run.result
-        combined.throwIfAborted()
-        if (result.stopReason !== 'completed') throw new Error(`task translation failed: ${result.stopReason}`)
-        return validateTaskText(result.structured)
-      } finally {
-        try { await run?.dispose() } finally { owner.controllers.delete(controller) }
-      }
-    })
+    const operation = owner.tail.catch(() => {}).then(() => work(owner))
     owner.tail = operation.then(() => {}, () => {})
     const tail = owner.tail
     void tail.finally(() => { if (owner.tail === tail) this.liveStates.delete(owner) })
     return operation
+  }
+
+  private transformTask(agent: Agent, task: RequirementTask, humanInstruction?: string, signal?: AbortSignal): Promise<TaskText> {
+    return this.queueTaskText(agent, state => this.runTaskText(agent, task, state, humanInstruction, signal))
+  }
+
+  private translateGeneratedTasks(agent: Agent, tasks: readonly RequirementTask[], signal: AbortSignal): Promise<RequirementTask[]> {
+    return this.queueTaskText(agent, async (state) => {
+      const translated: RequirementTask[] = []
+      const pending = tasks.map((task, index) => ({ task, index }))
+      let failed = false
+      const worker = async () => {
+        while (!failed) {
+          const item = pending.shift()
+          if (item === undefined) return
+          try {
+            const text = await this.translateGeneratedTask(agent, item.task, state, signal)
+            translated[item.index] = { ...item.task, title: text.title, summary: text.summary }
+          } catch (error: unknown) {
+            failed = true
+            throw error
+          }
+        }
+      }
+      const workers = Array.from({ length: Math.min(tasks.length, this.config.taskTranslationConcurrency) }, () => worker())
+      const settled = await Promise.allSettled(workers)
+      const rejected = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+      if (rejected !== undefined) throw rejected.reason
+      return translated
+    })
+  }
+
+  private async translateGeneratedTask(
+    agent: Agent, task: RequirementTask, state: ReviewState, signal: AbortSignal,
+  ): Promise<TaskText> {
+    let retryReason: string | undefined
+    for (let attempt = 0; attempt < this.config.taskTranslationMaxAttempts; attempt++) {
+      try {
+        const text = await this.runTaskText(agent, task, state, undefined, signal, retryReason)
+        if (text.markdown !== task.statement) {
+          throw new TaskTextValidationError('translation must preserve the complete Agent task verbatim')
+        }
+        return text
+      } catch (error: unknown) {
+        if (!(error instanceof TaskTextValidationError)
+          || attempt + 1 >= this.config.taskTranslationMaxAttempts
+          || signal.aborted || this.taskTextShutdown.signal.aborted) throw error
+        retryReason = error.message
+      }
+    }
+    throw new Error('task translation attempts exhausted')
+  }
+
+  private async runTaskText(
+    agent: Agent, task: RequirementTask, owner: ReviewState,
+    humanInstruction?: string, signal?: AbortSignal, retryReason?: string,
+  ): Promise<TaskText> {
+    const controller = new AbortController()
+    owner.controllers.add(controller)
+    let run: SubagentRun | undefined
+    try {
+      this.requireLiveAgent(agent)
+      const prompt = `${humanInstruction === undefined
+        ? '将已确定的完整Agent任务翻译成人类标题和摘要。markdown必须逐字返回原文，禁止改写。'
+        : '根据人类最新指令重新编写完整Agent任务。人类指令优先于旧任务及旧需求；删除冲突或已取消的步骤，保留未冲突的必要上下文。只改写任务，不执行任务。markdown包含目标、输入与范围、约束、具体动作、验收与验证、产出和失败处理；沿用任务编号。summary可以简述意图，系统会保存人类原文。'}\n${TASK_TEXT_POLICY}${retryReason === undefined ? '' : `\n上次翻译未通过校验：${retryReason}。请重新生成标题和摘要，摘要不得包含文件名、路径、命令或步骤数量；markdown仍须逐字返回原文。`}\n\n${JSON.stringify({ task, ...(humanInstruction === undefined ? {} : { humanInstruction }) })}`
+      if (prompt.length > this.config.maxInputChars) throw new Error('complete task exceeds configured maxInputChars; increase the limit before translating')
+      const combined = AbortSignal.any([this.taskTextShutdown.signal, controller.signal, ...(signal === undefined ? [] : [signal])])
+      combined.throwIfAborted()
+      run = await this.ctx.subagents.start(this.config.reviewerProvider, {
+        label: humanInstruction === undefined ? 'Translate task for human' : 'Revise task from human instruction',
+        prompt: [{ type: 'text', text: prompt }], parent: agent, signal: combined,
+        maxDepth: 1, toolFilter: { allow: [] }, outputSchema: TASK_TEXT_SCHEMA,
+      })
+      const result = await run.result
+      combined.throwIfAborted()
+      if (result.stopReason !== 'completed') throw new Error(`task translation failed: ${result.stopReason}`)
+      return validateTaskText(result.structured)
+    } finally {
+      try { await run?.dispose() } finally { owner.controllers.delete(controller) }
+    }
   }
 
   /**
@@ -1724,9 +1794,34 @@ export class SessionRequirements extends TypertRemoteService {
     if (task.status !== 'pending') {
       throw new Error(`requirement task "${request.taskId}" can no longer be withdrawn`)
     }
-    const event = this.appendTaskList(session, request.roundId, list.tasks.map(item => item.id === request.taskId
-      ? { ...item, status: 'withdrawn' }
-      : { ...item }), list.documentRevision)
+    const document = latestDocument(session, request.roundId)
+    if (document === undefined) throw new Error(`requirement document for round "${request.roundId}" does not exist`)
+    const tasks = list.tasks.map(item => item.id === request.taskId
+      ? { ...item, status: 'withdrawn' as const }
+      : { ...item })
+    requireTaskCoverage(tasks, requirementAcceptanceRefs(document.markdown))
+    const needsReview = activeTasksCompleted(tasks)
+    const reviewCandidate = needsReview
+      ? lastCompletedTaskExecution(session, request.roundId, tasks)
+      : undefined
+    if (needsReview && reviewCandidate?.turn === undefined) {
+      throw new Error('completed tasks have no recorded turn to review')
+    }
+    const event = this.appendTaskList(session, request.roundId, tasks, list.documentRevision)
+    if (reviewCandidate?.turn !== undefined) {
+      this.appendTaskExecution(session, reviewCandidate, {
+        roundId: request.roundId,
+        taskId: reviewCandidate.taskId,
+        messageId: reviewCandidate.messageId,
+        status: 'reviewing',
+        turn: reviewCandidate.turn,
+        ...(reviewCandidate.output === undefined ? {} : { output: reviewCandidate.output }),
+      })
+      this.appendTaskList(session, request.roundId,
+        taskListWithStatus({ ...list, tasks }, reviewCandidate.taskId, 'reviewing'), list.documentRevision)
+      this.updateRound(session, request.roundId, { status: 'reviewing', turn: reviewCandidate.turn })
+      void this.review(agent, reviewCandidate.turn)
+    }
     return { roundId: request.roundId, taskId: request.taskId, eventSeq: event.seq }
   }
 
@@ -1860,16 +1955,22 @@ export class SessionRequirements extends TypertRemoteService {
   }
 
   private taskGenerationPrompt(round: RequirementRoundEvent, document: RequirementDocumentEvent): string {
-    return `为第 ${round.round} 轮需求 Notebook 生成完整的中文实施任务。先只读检查实际仓库和可用命令，不要修改文件，不要进入 Plan 模式。最终调用 submit_requirement_tasks。\n\n需求文档 v${document.revision}：\n${document.markdown}\n\n每个任务对应一个可交付结果，按依赖顺序排列。先完成 markdown，包含目标、输入和范围、约束、连续编号的 - [ ] N.x 具体动作、验收与验证、产出、失败处理。所有项目必做，不得提前勾选。title 为中文动作标题；此阶段不生成 summary，提交后由独立翻译器读取完整任务并生成人类说明。requirement_refs 引用真实验收编号。final_test 单独提交并覆盖全部验收要求；允许修复本轮问题并重新验证，不得删除测试、放宽断言或隐藏失败。`
+    return `为第 ${round.round} 轮需求 Notebook 生成完整的中文实施任务。先只读检查实际仓库和可用命令，不要修改文件，不要进入 Plan 模式。最终调用 submit_requirement_tasks。\n\n需求文档 v${document.revision}：\n${document.markdown}\n\n每个任务对应一个可交付结果，按依赖顺序排列。先完成 markdown，包含目标、输入和范围、约束、连续编号的 - [ ] N.x 具体动作、验收与验证、产出、失败处理。每个任务都要验证自己关联的验收标准；发现问题就在该任务中修复并重新验证，不得删除测试、放宽断言或隐藏失败。所有项目必做，不得提前勾选。title 为中文动作标题；此阶段不生成 summary，提交后由独立翻译器读取完整任务并生成人类说明。requirement_refs 引用真实验收编号，其并集必须覆盖文档中的全部验收标准。不要提交 final_test，也不要另设重复验证全部标准的任务。`
   }
 
   private taskPrompt(round: RequirementRoundEvent, task: RequirementTask, tasks: readonly RequirementTask[]): string {
     const finalInstruction = task.kind === 'final-test'
       ? '\n\n这是最后的 Final Test。运行完整验证；发现由本轮修改引入的问题时可以修复并重新验证，但不得删除测试、放宽断言或隐藏失败。'
       : ''
+    const nextTask = tasks
+      .filter(item => item.id !== task.id && (item.status === 'pending' || item.status === 'failed') && hasTaskContent(item))
+      .sort((left, right) => left.order - right.order)[0]
+    const handoff = nextTask === undefined
+      ? '没有其他待执行或失败的任务。请给出 1 至 2 条针对实际交付物的修改建议，并邀请用户选择或提出调整；不要虚构后续任务。'
+      : `下一项待处理任务是「${nextTask.title}」：${nextTask.summary}。请用大白话说明接下来会完成什么。`
     const directions = tasks.filter(item => item.humanInstruction !== undefined)
       .map(item => ({ task: item.title, instruction: item.humanInstruction }))
-    return `继续执行第 ${round.round} 轮需求 Notebook 的任务 ${task.order + 1}：${task.title}\n\n任务说明：\n${task.statement}\n\n本轮人类最新修改（优先于冲突的旧需求、旧任务和旧验收标准；Final Test 必须按修改后的意图验证）：\n${JSON.stringify(directions)}\n\n只完成这个任务，保留未冲突的其他需求，并在完成后给出可验证结果。${finalInstruction}\n\n最终回复仅含两个二级标题：\n## 交付结果\n列出实际完成的产物，用可点击的文件或页面链接加一句用途说明；没有文件时直接描述实际结果，未交付则如实说明。\n## 说明\n用简短自然语言说明如何使用、完成范围、必要限制、失败或待处理事项；无补充则写“无”。不得把计划写成已完成，不得隐瞒失败。不要附加开场白、执行过程、命令日志、步骤统计、验收对照表、测试明细或其他章节；这些证据留在工具与轨迹记录中。`
+    return `继续执行第 ${round.round} 轮需求 Notebook 的任务 ${task.order + 1}：${task.title}\n\n任务说明：\n${task.statement}\n\n本轮人类最新修改（优先于冲突的旧需求、旧任务和旧验收标准；验证必须按修改后的意图执行）：\n${JSON.stringify(directions)}\n\n只完成这个任务，保留未冲突的其他需求，并在完成后给出可验证结果。${finalInstruction}\n\n最终回复仅含两个二级标题：\n## 交付结果\n用中文写一个供“需求”页直接展示的短段落，正文可见内容为 50–300 字（不计 Markdown 符号与链接目标）。按顺序说清：本步实际做出了什么；用户怎样打开并开始使用（交付网页时，用行内代码标出 Notebook 支持预览的可点击文件名，如 \`web-calculator/index.html\`，并明确写“点击该文件名打开”；其他产物给出确切打开或使用方式；没有可打开的产物时，说明用户怎样查看或使用结果，不要编造链接）；${handoff} 只写用户能直接理解的成果和行动，不要写 SHA-256、日志路径、断言数量、命令记录、测试清单或验证过程。失败或未交付时如实说明，不能把计划说成已完成。\n## 说明\n用简短自然语言说明必要限制、失败或待处理事项；无补充则写“无”。不得把计划写成已完成，不得隐瞒失败。不要附加开场白、执行过程、命令日志、步骤统计、验收对照表、测试明细或其他章节；这些证据留在工具与轨迹记录中。`
   }
 
   private notePrompt(round: RequirementRoundEvent, kind: 'text' | 'comment', content: string): string {
@@ -2165,7 +2266,8 @@ export class SessionRequirements extends TypertRemoteService {
       const list = latestTaskList(session, candidate.data.roundId)
       const task = list?.tasks.find(item => item.id === candidate.data.taskId)
       const succeeded = completed && task !== undefined
-      const reviewRequired = succeeded && taskRequiresReview(task.kind)
+      const reviewRequired = succeeded && list !== undefined
+        && (taskRequiresReview(task.kind) || finishesActiveTasks(list.tasks, task.id))
       const status = !succeeded ? 'failed' : reviewRequired ? 'reviewing' : 'completed'
       this.appendTaskExecution(session, candidate.data, {
         roundId: candidate.data.roundId,
@@ -2475,8 +2577,8 @@ export class SessionRequirements extends TypertRemoteService {
       turn,
       ...(execution.data.output === undefined ? {} : { output: execution.data.output }),
     })
-    this.appendTaskList(session, execution.data.roundId,
-      taskListWithStatus(list, task.id, accepted ? 'completed' : 'failed'), list.documentRevision)
+    const updatedTasks = taskListWithStatus(list, task.id, accepted ? 'completed' : 'failed')
+    this.appendTaskList(session, execution.data.roundId, updatedTasks, list.documentRevision)
 
     const runAll = this.runAllStates.get(session)
     if (!accepted) {
@@ -2488,7 +2590,7 @@ export class SessionRequirements extends TypertRemoteService {
       return
     }
 
-    if (task.kind === 'final-test') {
+    if (activeTasksCompleted(updatedTasks)) {
       if (runAll?.roundId === execution.data.roundId) {
         this.appendRunAll(session, execution.data.roundId, 'completed')
         this.runAllStates.delete(session)
@@ -2504,6 +2606,7 @@ export class SessionRequirements extends TypertRemoteService {
   private continueRunAll(session: Session, roundId: RequirementRoundId): void {
     const runAll = this.runAllStates.get(session)
     if (runAll?.roundId === roundId) {
+      if (latestTaskList(session, roundId)?.tasks.some(task => task.status === 'reviewing')) return
       if (runAll.stopRequested) {
         this.appendRunAll(session, roundId, 'stopped')
         this.runAllStates.delete(session)

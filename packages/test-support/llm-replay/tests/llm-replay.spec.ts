@@ -1189,6 +1189,28 @@ describe('installLlmReplay (per-session keying)', () => {
     await expect(drain(ctx.llm.stream(live('live-A')))).rejects.toThrow(/exhausted/)
   })
 
+  it('matches distinct recorded first prompts when concurrent children request out of order', async () => {
+    const promptEvent = (prompt: string): SessionEvent => ({
+      type: 'user/message', seq: 0, time: 0,
+      data: createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'user' } }),
+    })
+    const first = writeSession('session.jsonl', { id: 'first', createdAt: 1 }, [TEXT_CHUNKS])
+    const secondFile = writeSession('session.1.jsonl', { id: 'second', createdAt: 2 }, [second])
+    writeFileSync(first, sessionJsonl([promptEvent('first task'), ...TEXT_CHUNKS.map((chunk, index) => chunkEvent(index + 1, 1, 1, chunk))],
+      { id: 'first', createdAt: 1 }), 'utf8')
+    writeFileSync(secondFile, sessionJsonl([promptEvent('second task'), ...second.map((chunk, index) => chunkEvent(index + 1, 1, 1, chunk))],
+      { id: 'second', createdAt: 2 }), 'utf8')
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    const handle = installLlmReplay(ctx, { file: first, childFiles: [secondFile] })
+    const request = (id: string, prompt: string): GenerateOptions => ({
+      ...live(id), messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'user' } })],
+    })
+    expect(await drain(ctx.llm.stream(request('live-second', 'second task')))).toEqual(second)
+    expect(await drain(ctx.llm.stream(request('live-first', 'first task')))).toEqual(TEXT_CHUNKS)
+    expect(() => { handle.assertConsumed() }).not.toThrow()
+  })
+
   it('keeps each session\'s cursor independent (interleaved calls)', async () => {
     const a2: StreamChunk[] = [{ type: 'text-delta', index: 0, text: 'a2' }, { type: 'finish', reason: { kind: 'stop' } }]
     const b2: StreamChunk[] = [{ type: 'text-delta', index: 0, text: 'b2' }, { type: 'finish', reason: { kind: 'stop' } }]

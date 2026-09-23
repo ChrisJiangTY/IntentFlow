@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-llm-replay` 让快照测试无需 API 密钥即可运行：它安装一个回放 LLM（大语言模型）适配器，从已记录的会话 JSONL fixture（测试前置数据）重建模型流，使测试针对固定 transcript（文本记录）启动真实 agent（智能体）。fixture 是持久化会话日志的投影——`assistant/chunk` 事件按调用分组为分片序列，显式标记的本地压缩（compaction）调用回放为一条规范流。`replay.override.json` 伴随文件覆盖日志无法重建的情况：任何分片之前就抛出、取消/挂起，或注入重试。实时会话按首次调用顺序绑定到已记录脚本，因此父会话与 subagent 场景各自获得自己的脚本。它是 ACP 与 headless 快照套件以及 Web 浏览器 e2e 流水线的模型来源。
+`dsh-llm-replay` 让快照测试无需 API 密钥即可运行：它安装一个回放 LLM（大语言模型）适配器，从已记录的会话 JSONL fixture（测试前置数据）重建模型流，使测试针对固定 transcript（文本记录）启动真实 agent（智能体）。fixture 是持久化会话日志的投影——`assistant/chunk` 事件按调用分组为分片序列，显式标记的本地压缩（compaction）调用回放为一条规范流。`replay.override.json` 伴随文件覆盖日志无法重建的情况：任何分片之前就抛出、取消/挂起，或注入重试。实时会话优先按唯一的首条用户提示绑定已记录脚本，否则按首次调用顺序绑定，使并发启动的 subagent 各自获得对应的已记录输出。它是 ACP 与 headless 快照套件以及 Web 浏览器 e2e 流水线的模型来源。
 
 ## 目录
 
@@ -69,7 +69,7 @@ fixture 是运行一次真实 agent 所产生的持久化会话日志（`<scenar
 
 ### 嵌套 agent
 
-父 agent 委托给进程内 subagent 的场景会按会话记录日志：父会话使用 `session.jsonl`，每个子会话各使用一个（`session.1.jsonl` 等）。实时会话 id 每次运行都会重新随机生成，因此回放按首次调用顺序把每个实时会话绑定到已记录脚本：第一个发起模型调用的实时会话取得第一个脚本，下一个新会话取得下一个，依此类推，每个会话分别推进自己的游标。不同实时会话数量超过已记录脚本数时会明确报错。
+父 agent 委托给进程内 subagent 的场景会按会话记录日志：父会话使用 `session.jsonl`，每个子会话各使用一个（`session.1.jsonl` 等）。实时会话 id 每次运行都会重新随机生成，因此新会话会认领其模型请求中出现了已记录首条用户提示、且唯一匹配的未认领脚本。没有匹配或匹配不唯一时，它按首次调用顺序认领下一个未认领脚本。每个会话分别推进自己的游标；不同实时会话数量超过已记录脚本数时会明确报错。
 
 ### 失败模式与覆盖
 
@@ -106,7 +106,7 @@ fixture 是运行一次真实 agent 所产生的持久化会话日志（`<scenar
 
 ### 绑定与流式流程
 
-`installLlmReplay` 加载有序脚本，然后安装路由回放适配器（`providers` 非空时）或 catch-all `llm/stream` waterfall 监听器。每次实时 `stream()` 调用以其调用会话 id 为键：新会话认领下一个未认领脚本（父会话在前，因为它必须先开始流式输出才能委托），没有 `sessionId` 的调用共享一个绑定主脚本的匿名会话。返回的 `ReplayHandle` 携带用于 HMR（热模块替换）安全的 disposer，以及 `assertConsumed()`——除非每个已记录脚本都绑定到实时会话且每个已绑定游标都已耗尽，否则它会抛出异常。
+`installLlmReplay` 加载有序脚本，然后安装路由回放适配器（`providers` 非空时）或 catch-all `llm/stream` waterfall 监听器。每次实时 `stream()` 调用以其调用会话 id 为键：新会话认领唯一匹配其提示的已记录脚本，或下一个未认领脚本；没有 `sessionId` 的调用共享一个匿名会话。返回的 `ReplayHandle` 携带用于 HMR（热模块替换）安全的 disposer，以及 `assertConsumed()`——除非每个已记录脚本都绑定到实时会话且每个已绑定游标都已耗尽，否则它会抛出异常。
 
 </details>
 

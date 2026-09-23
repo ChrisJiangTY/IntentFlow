@@ -24,6 +24,9 @@ import { zh } from '../src/client/locales.ts'
 
 const t = makeTranslate(zh, commonZh)
 
+// jsdom does not implement element scrolling.
+Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+
 afterEach(cleanup)
 
 const roundId = 'ROUND-01' as never
@@ -43,6 +46,52 @@ it('keeps earlier deliveries visible while a revised task starts a new execution
     tasks: list.data.tasks.map(task => task.id === taskId ? { ...task, humanInstruction: '修改后的要求' } : task),
   } }] })} />)
   expect(screen.getByText('第一次交付')).toBeTruthy()
+})
+
+it('scrolls to the newest Notebook cell when Requirements opens', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+  const scrollIntoView = vi.fn()
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+  try {
+    const session = 'SESSION-SCROLL-01' as never
+    const { container } = render(<RequirementsView {...props({ sessionId: session })} />)
+    const target = container.querySelector('[data-round-id="ROUND-01"] [data-cell="validation"]')
+    expect(target).toBeTruthy()
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'end', behavior: 'instant' })
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(target)
+  } finally {
+    cleanup()
+    if (descriptor === undefined) delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    else Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', descriptor)
+  }
+})
+
+it('keeps a manually collapsed round closed across Requirements view re-entry', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+  const scrollIntoView = vi.fn()
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+  try {
+    const session = 'SESSION-COLLAPSED-01' as never
+    const viewProps = props({ sessionId: session })
+    const firstView = render(<RequirementsView {...viewProps} />)
+    fireEvent.click(screen.getByRole('button', { name: '收起轮次' }))
+    expect(screen.getByRole('button', { name: '展开轮次' })).toBeTruthy()
+    firstView.unmount()
+
+    scrollIntoView.mockClear()
+    const { container } = render(<RequirementsView {...viewProps} />)
+    expect(screen.getByRole('button', { name: '展开轮次' })).toBeTruthy()
+    expect(container.querySelector('[data-round-id="ROUND-01"] [data-cell]')).toBeNull()
+    const heading = container.querySelector('[data-round-id="ROUND-01"] header')
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(heading)
+
+    fireEvent.click(screen.getByRole('button', { name: '展开轮次' }))
+    expect(container.querySelector('[data-round-id="ROUND-01"] [data-cell="validation"]')).toBeTruthy()
+  } finally {
+    cleanup()
+    if (descriptor === undefined) delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    else Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', descriptor)
+  }
 })
 
 it('keeps tasks visible and read-only after their requirement document changes', () => {
@@ -843,6 +892,7 @@ describe('RequirementsView Notebook', () => {
     const initial = { ...value, taskLists: [] }
     const injected = props({ bindGraphReveal }, initial)
     const view = render(<RequirementsView {...injected} />)
+    scrollIntoView.mockClear()
     act(() => { reveal?.({
       key: 'requirement:ROUND-01:1', roundId, round: 1, requirementId: '1', title: 'Notebook',
       acceptanceRefs: ['1.1'], taskIds: [taskId], status: 'pending',

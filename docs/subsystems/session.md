@@ -798,7 +798,7 @@ Coordinates clarified requirement documents, executable Tasks, and serialized in
 
 /**
  * Rewrite execution instructions from a human edit, or translate changed Agent text.
- * A successful change returns the task and Final Test to pending; stale results are rejected.
+ * A successful change returns the task and any completed trailing Final Test to pending; stale results are rejected.
  * @param agent - exact live Agent that owns the round.
  * @param request - task identity and replacement text.
  * @returns the durable task identity and task-list event sequence.

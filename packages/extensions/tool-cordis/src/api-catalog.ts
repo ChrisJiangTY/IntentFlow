@@ -1807,7 +1807,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote(\'editTask\') async editTask(agent: Agent, request: RequirementTaskEditRequest): Promise<RequirementTaskMutationResult>',
-        description: 'Rewrite execution instructions from a human edit, or translate changed Agent text. A successful change returns the task and Final Test to pending; stale results are rejected.',
+        description: 'Rewrite execution instructions from a human edit, or translate changed Agent text. A successful change returns the task and any completed trailing Final Test to pending; stale results are rejected.',
         parameters: [{ name: 'agent', description: 'exact live Agent that owns the round.' }, { name: 'request', description: 'task identity and replacement text.' }],
         returns: 'the durable task identity and task-list event sequence.',
       },

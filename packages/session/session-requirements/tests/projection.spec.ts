@@ -132,6 +132,45 @@ describe('requirement graph Session projection', () => {
       .map(node => node.status)).toEqual(['in-progress', 'in-progress'])
   })
 
+  it('verifies a round without a Final Test after its task review and invalidates edited work', () => {
+    const tasks = event('requirement/task-list', {
+      version: 1,
+      revision: 1,
+      roundId,
+      documentRevision: 1,
+      tasks: [
+        { id: 'TASK-1' as never, order: 0, kind: 'implementation', title: '页面', summary: '用户可以查看页面。', statement: '页面', requirementRefs: ['1.1', '1.2'], status: 'completed' },
+        { id: 'TASK-2' as never, order: 1, kind: 'checkpoint', title: '反馈', summary: '用户可以获得反馈。', statement: '反馈', requirementRefs: ['2.1'], status: 'completed' },
+      ],
+    }, 3)
+    expect(fold([...baseEvents, tasks])?.rounds[0]?.nodes.map(node => node.status))
+      .toEqual(['in-progress', 'in-progress'])
+
+    const validation = event('requirement/validation', {
+      version: 1,
+      revision: 1,
+      roundId,
+      turn: 3,
+      reviewedThroughSeq: 3,
+      status: 'completed',
+      summary: { zh: '任务证据审核通过。', en: 'Task evidence review passed.' },
+      regressions: [],
+      failedTaskIds: [],
+    }, 4)
+    expect(fold([...baseEvents, tasks, validation])?.rounds[0]?.nodes.map(node => node.status))
+      .toEqual(['verified', 'verified'])
+
+    const invalidated = event('requirement/task-list', {
+      ...tasks.data,
+      revision: 2,
+      tasks: tasks.data.tasks.map(task => task.id === 'TASK-1'
+        ? { ...task, status: 'pending' as const }
+        : task),
+    }, 5)
+    expect(fold([...baseEvents, tasks, validation, invalidated])?.rounds[0]?.nodes.map(node => node.status))
+      .toEqual(['pending', 'in-progress'])
+  })
+
   it('demotes a verified node when final validation attributes a regression to its Task', () => {
     const tasks = event('requirement/task-list', {
       version: 1,

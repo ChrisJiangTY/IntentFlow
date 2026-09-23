@@ -171,9 +171,12 @@ function validate(event: SessionEvent, fail: InvariantFailure): void {
       fail(`requirement/task-list at seq ${event.seq} has an invalid payload`)
     }
     const ids = new Set<string>()
+    if (data.tasks.length === 0) {
+      fail(`requirement/task-list at seq ${event.seq} must contain a task`)
+    }
     const finalTasks = data.tasks.filter(task => task.kind === 'final-test')
-    if (finalTasks.length !== 1 || data.tasks.at(-1)?.kind !== 'final-test') {
-      fail(`requirement/task-list at seq ${event.seq} must end with exactly one Final Test`)
+    if (finalTasks.length > 1 || (finalTasks.length === 1 && data.tasks.at(-1)?.kind !== 'final-test')) {
+      fail(`requirement/task-list at seq ${event.seq} may contain only one trailing Final Test`)
     }
     for (const [index, task] of data.tasks.entries()) {
       const summary: unknown = task.summary

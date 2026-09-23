@@ -2,8 +2,8 @@
  * Keyless snapshot-test LLM replay. It derives one model-call script per
  * recorded session from `assistant/chunk` events and explicitly marked local
  * compaction calls, then binds fresh live sessions to parent/child scripts by
- * first-call order. Throw and hang cases require an explicit override because
- * a session log cannot reconstruct them alone.
+ * unique recorded prompts or first-call order. Throw and hang cases require an
+ * explicit override because a session log cannot reconstruct them alone.
  * @module @deepseek-ai/dsh-llm-replay
  */
 
@@ -95,9 +95,9 @@ export interface ReplayProviderConfig {
 /** Resolved plugin configuration. */
 export interface ReplayConfig {
   /**
-   * Path to the PRIMARY (parent) `session.jsonl` fixture. For a single-session
-   * scenario this is the only log; for a nested-agent scenario it is the parent,
-   * and the child logs ride in {@link childFiles}.
+   * Path to the PRIMARY `session.jsonl` fixture. For a single-session scenario
+   * this is the only log; a nested-agent scenario usually places the parent
+   * here and the child logs in {@link childFiles}.
    */
   file: string
   /**
@@ -111,8 +111,8 @@ export interface ReplayConfig {
   /**
    * Additional recorded child-session logs (a nested-agent scenario's subagent
    * sessions). Each is derived independently; the full set is ordered by
-   * `createdAt` so the parent (earliest) binds to the first live session. Empty
-   * for a single-session scenario.
+   * `createdAt` for requests without a unique recorded prompt match. Empty for
+   * a single-session scenario.
    */
   childFiles?: string[]
   /**
@@ -150,21 +150,31 @@ export interface ReplayHandle {
 }
 
 /**
- * Recorded calls plus header facts used to order parent and child scripts.
- * Recorded ids are diagnostic; fresh live ids bind by ordered first use.
+ * Recorded calls plus header facts used to bind parent and child scripts.
+ * Recorded ids are diagnostic; fresh live ids bind by unique prompt when
+ * available, otherwise by ordered first use.
  */
 export interface SessionScript {
   /** The recorded session id (diagnostics only — the live id differs). */
   recordedId: string
-  /** Session creation time; the deterministic ordering key (parent < child). */
+  /** Session creation time; the fallback ordering key. */
   createdAt: number
   /** The per-`stream()`-call replay entries, in recorded call order. */
   entries: ReplayEntry[]
+  /** Exact first user prompt, when recorded, for binding concurrent child requests. */
+  initialPrompt?: string
   /**
-   * Whether this is the PRIMARY (parent) session. Breaks a `createdAt` tie in
-   * favor of the parent, which always issues the first model call.
+   * Whether this is the PRIMARY fixture. Breaks a `createdAt` tie in its favor
+   * when prompt matching cannot identify a script.
    */
   primary: boolean
+}
+
+function firstUserPrompt(events: readonly SessionEvent[]): string | undefined {
+  const message = events.find(event => event.type === 'user/message' && event.data.source.kind === 'user')
+  if (message?.type !== 'user/message') return undefined
+  const prompt = message.data.content.filter(block => block.type === 'text').map(block => block.text).join('')
+  return prompt === '' ? undefined : prompt
 }
 
 /**
@@ -615,11 +625,14 @@ export function loadSessionScripts(config: ReplayConfig): SessionScript[] {
   // The override path replaces the derived script but carries no header; read
   // the header off the JSONL when it exists, else use a stable default so an
   // override-only fixture (header-less) still orders first as the primary.
-  const primaryHeader = existsSync(config.file)
-    ? parseSessionHeader(readFileSync(config.file, 'utf8'))
+  const primaryText = existsSync(config.file) ? readFileSync(config.file, 'utf8') : undefined
+  const primaryHeader = primaryText !== undefined
+    ? parseSessionHeader(primaryText)
     : { id: '', createdAt: 0 }
+  const primaryPrompt = primaryText === undefined ? undefined : firstUserPrompt(parseSessionLog(primaryText))
   const primary: SessionScript = {
     recordedId: primaryHeader.id, createdAt: primaryHeader.createdAt, entries: primaryEntries, primary: true,
+    ...(primaryPrompt === undefined ? {} : { initialPrompt: primaryPrompt }),
   }
   const children: SessionScript[] = []
   for (const childFile of config.childFiles ?? []) {
@@ -631,15 +644,16 @@ export function loadSessionScripts(config: ReplayConfig): SessionScript[] {
     // Derive the child's script from its own events only — events AT OR after the seed
     // boundary.
     const ownEvents = parseSessionLog(text).slice(header.seedLength)
+    const initialPrompt = firstUserPrompt(ownEvents)
     children.push({
       recordedId: header.id,
       createdAt: header.createdAt,
       entries: deriveReplayScript(ownEvents),
+      ...(initialPrompt === undefined ? {} : { initialPrompt }),
       primary: false,
     })
   }
-  // Synchronous children start in creation order; the id only stabilizes timestamp ties.
-  // XXX(concurrent-subagents): concurrent children need an explicit first-call ordinal.
+  // Creation order remains the fallback when a request has no unique recorded prompt.
   children.sort((a, b) => a.createdAt - b.createdAt || a.recordedId.localeCompare(b.recordedId))
   return [primary, ...children]
 }
@@ -807,11 +821,12 @@ function providerAccepted(entry: ReplayEntry): boolean {
 }
 
 /**
- * Install per-session positional replay. A newly seen live session takes the
- * next ordered recorded script, then advances its own cursor synchronously at
- * invocation time; calls without `sessionId` share one anonymous session. A
- * non-empty provider catalog registers a routed replay adapter; otherwise a
- * catch-all waterfall intercepts requests.
+ * Install per-session replay. A newly seen live session takes its unique
+ * recorded first-user-prompt match when one exists, otherwise the next
+ * ordered script. Each session advances its own cursor synchronously at
+ * invocation time; calls without `sessionId` share one anonymous session.
+ * A non-empty provider catalog registers a routed replay adapter; otherwise
+ * a catch-all waterfall intercepts requests.
  *
  * @param ctx - the context whose LLM service receives the replay route or waterfall.
  * @param config - the resolved fixture paths (env-var defaulting is `apply`'s job).
@@ -823,19 +838,26 @@ export function installLlmReplay(ctx: Context, config: ReplayConfig): ReplayHand
     throw new Error(`llm-replay: paceMs must be a non-negative integer, got ${String(config.paceMs)}`)
   }
   const scripts = loadSessionScripts(config)
-  // Live-session → its bound script + cursor. A new live session id claims the
-  // next not-yet-bound script (scripts are in bind order); `nextScript` is the
-  // index of the next unclaimed one.
+  // A unique recorded prompt selects a concurrent child without depending on
+  // model-request scheduling. Other calls retain positional binding.
   const bound = new Map<string, { entries: ReplayEntry[]; cursor: number }>()
   const liveSessionIds: (string | undefined)[] = Array.from({ length: scripts.length })
-  let nextScript = 0
+  const claimed = new Set<number>()
   const ANON = '\0anon\0' // the key for a call that carries no sessionId
   const replay = (options: GenerateOptions): AsyncIterable<StreamChunk> => {
     const key = options.sessionId ?? ANON
     let state = bound.get(key)
     let unrecorded = false
     if (state === undefined) {
-      const script = scripts[nextScript]
+      const prompts = options.messages
+        .filter(message => message.role === 'user')
+        .map(message => message.content.filter(block => block.type === 'text').map(block => block.text).join(''))
+      const matches = scripts.flatMap((script, scriptIndex) =>
+        !claimed.has(scriptIndex) && script.initialPrompt !== undefined && prompts.includes(script.initialPrompt)
+          ? [scriptIndex] : [])
+      const scriptIndex = (matches.length === 1 ? matches[0] : undefined)
+        ?? scripts.findIndex((_, index) => !claimed.has(index))
+      const script = scripts[scriptIndex]
       if (script === undefined) {
         // More distinct live sessions made calls than the scenario recorded —
         // an unrecorded subagent appeared. Defer the throw into the returned
@@ -843,15 +865,14 @@ export function installLlmReplay(ctx: Context, config: ReplayConfig): ReplayHand
         unrecorded = true
         state = { entries: [], cursor: 0 }
       } else {
-        const scriptIndex = nextScript
-        nextScript++
+        claimed.add(scriptIndex)
         state = { entries: script.entries, cursor: 0 }
         bound.set(key, state)
         if (key !== ANON) liveSessionIds[scriptIndex] = key
       }
     }
     const boundState = state
-    const seenSessions = nextScript
+    const seenSessions = claimed.size
     const totalScripts = scripts.length
     const index = boundState.cursor++
     const entry: ReplayEntry | undefined = boundState.entries[index]
@@ -895,8 +916,8 @@ export function installLlmReplay(ctx: Context, config: ReplayConfig): ReplayHand
     dispose,
     assertConsumed(): void {
       const problems: string[] = []
-      if (nextScript < scripts.length) {
-        problems.push(`${scripts.length - nextScript} recorded script(s) never bound to a live session`)
+      if (claimed.size < scripts.length) {
+        problems.push(`${scripts.length - claimed.size} recorded script(s) never bound to a live session`)
       }
       for (const [key, state] of bound) {
         if (state.cursor < state.entries.length) {

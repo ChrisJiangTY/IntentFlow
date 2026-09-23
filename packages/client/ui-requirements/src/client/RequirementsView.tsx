@@ -138,6 +138,8 @@ interface DocumentDraft {
 type InspectorMode = 'details' | 'history'
 
 const TASK_STATEMENT_INDENT = '  '
+const collapsedRoundsBySession = new Map<string, Set<string>>()
+const EMPTY_COLLAPSED_ROUNDS: ReadonlySet<string> = new Set()
 
 function taskSource(title: string, statement: string): string {
   if (statement === '') return title
@@ -219,6 +221,7 @@ function taskStatusKey(status: RequirementTaskListNode['data']['tasks'][number][
  * @returns the complete requirements Notebook view.
  */
 export function RequirementsView({
+  sessionId,
   useRequirements,
   editDocument,
   generateTasks,
@@ -243,7 +246,21 @@ export function RequirementsView({
   const snapshot = useRequirements(value => value)
   const rootRef = useRef<HTMLDivElement>(null)
   const [language, setLanguage] = useState<RequirementContentLanguage>(initialLanguage)
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const sessionKey = String(sessionId)
+  const [collapsedState, setCollapsedState] = useState(() => ({
+    sessionKey,
+    rounds: new Set(collapsedRoundsBySession.get(sessionKey) ?? []),
+  }))
+  const collapsed = collapsedState.sessionKey === sessionKey
+    ? collapsedState.rounds
+    : collapsedRoundsBySession.get(sessionKey) ?? EMPTY_COLLAPSED_ROUNDS
+  const setCollapsed = (update: Set<string> | ((current: Set<string>) => Set<string>)): void => {
+    const next = typeof update === 'function' ? update(new Set(collapsed)) : update
+    const rounds = new Set(next)
+    collapsedRoundsBySession.set(sessionKey, rounds)
+    setCollapsedState({ sessionKey, rounds })
+  }
+  const initialScrollDone = useRef(false)
   const [collapsedOutputs, setCollapsedOutputs] = useState<Set<string>>(new Set())
   const [expandedTaskSpecs, setExpandedTaskSpecs] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<SelectedCell | undefined>()
@@ -337,6 +354,21 @@ export function RequirementsView({
     code: { copyLabel: t('copy'), copiedLabel: t('copied') },
     footnotes: t('markdown.footnotes'),
   }), [t])
+
+  useLayoutEffect(() => {
+    if (initialScrollDone.current || latestRound === undefined) return
+    const roundKey = String(latestRound.data.roundId)
+    const roundElement = [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-round-id]') ?? [])]
+      .find(element => element.dataset.roundId === roundKey)
+    if (roundElement === undefined) return
+    const target = collapsed.has(roundKey)
+      ? roundElement.querySelector<HTMLElement>('header')
+      : [...roundElement.querySelectorAll<HTMLElement>('[data-cell]')].at(-1)
+        ?? roundElement.querySelector<HTMLElement>('header')
+    if (target === null) return
+    initialScrollDone.current = true
+    target.scrollIntoView({ block: 'end', behavior: 'instant' })
+  }, [collapsed, latestRound?.data.roundId])
 
   useLayoutEffect(() => {
     for (const [taskId, draft] of taskDrafts.current) {
@@ -573,6 +605,7 @@ export function RequirementsView({
     const listBusy = taskList?.data.tasks.some(item => item.status === 'in_progress' || item.status === 'reviewing') ?? false
     const futureTask = task?.status === 'pending' || task?.status === 'failed'
     const canMove = futureTask && task.kind !== 'final-test' && !listBusy
+    const nextTask = taskList?.data.tasks[taskIndex + 1]
     const menuKey = `${roundId}:${taskId}`
     const move = (direction: 'up' | 'down'): void => {
       void changeTaskOrder(roundId, taskId, direction)
@@ -580,7 +613,7 @@ export function RequirementsView({
     return (
       <div className={css.cellToolbar} role="toolbar" aria-label={t('cell.toolbar')} onClick={(event) => { event.stopPropagation() }}>
         <button type="button" aria-label={t('cell.movePrevious')} disabled={!canMove || taskIndex <= 0 || taskList?.data.tasks[taskIndex - 1]?.status === 'completed'} onClick={() => { move('up') }}><IconChevronUpOutline14 size={13} /></button>
-        <button type="button" aria-label={t('cell.moveNext')} disabled={!canMove || taskList === undefined || taskIndex < 0 || taskList.data.tasks[taskIndex + 1]?.kind === 'final-test'} onClick={() => { move('down') }}><IconChevronDownOutline14 size={13} /></button>
+        <button type="button" aria-label={t('cell.moveNext')} disabled={!canMove || nextTask === undefined || nextTask.kind === 'final-test'} onClick={() => { move('down') }}><IconChevronDownOutline14 size={13} /></button>
         <span className={css.moreAnchor}>
           <button type="button" aria-label={t('cell.more')} aria-expanded={moreOpen === menuKey} onClick={() => { setMoreOpen(current => current === menuKey ? undefined : menuKey) }}><IconEllipsisOutline16 size={14} /></button>
           {moreOpen === menuKey && (

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-15-human-directed-task-text.md
-2026-09-15-human-directed-task-text.md: 5982324b75b7be15cd1f6aecefe4209e512bf0e3
-2026-09-15-human-directed-task-text.zh.md: 0e79473b7cc9879d6470993b5473ccac1f796a4d
+2026-09-15-human-directed-task-text.md: ed4c0498e6bd9c0b9aa5a3d299c28530bb563e8e
+2026-09-15-human-directed-task-text.zh.md: 95a059d8c9b5c477eb70e2666e6b457c2432587b

@@ -10,7 +10,7 @@ Cancelling a Task when any tool fails prevents the implementing Agent from recov
 
 ## Decision
 
-The Requirements controller does not cancel Tasks on native or nested tool errors, Bash failures, signals, or command timeouts. Normal implementation Turn completion completes the Task. Non-completed Turn endings and explicit user stops still stop ordered execution. Checkpoint and Final Test acceptance reviews remain unchanged.
+The Requirements controller does not cancel Tasks on native or nested tool errors, Bash failures, signals, or command timeouts. Normal implementation Turn completion completes the Task. Non-completed Turn endings and explicit user stops still stop ordered execution. Checkpoint and final round reviews use the same independent reviewer.
 
 Each execution attempt starts one read-only child after a configurable hour of runtime. The main Task continues while the child inspects bounded Task and current-Turn evidence. Only a completed `stop` verdict containing a reason and concrete evidence stops that same active attempt. Tool failures, duration, and unfinished work alone are not sufficient grounds. A healthy, inconclusive, unavailable, malformed, or timed-out diagnosis leaves the Task running. The child has a separate configurable five-minute timeout and cannot spawn descendants. Settlement, Session disposal, and plugin disposal abort diagnosis; stale results cannot stop later work.
 
@@ -30,4 +30,4 @@ Recoverable tool errors remain in the normal model-visible transcript. A long Ta
 
 ## Testing
 
-Focused tests exercise native and nested tool recovery, real Agent Loop continuation after a non-zero Bash exit, ordinary completion, one-hour scheduling, evidence-backed stop and continue verdicts, malformed verdicts, diagnostic timeout, late results, and disposal. Existing checkpoint and Final Test tests preserve acceptance review behavior.
+Focused tests exercise native and nested tool recovery, real Agent Loop continuation after a non-zero Bash exit, ordinary completion, one-hour scheduling, evidence-backed stop and continue verdicts, malformed verdicts, diagnostic timeout, late results, and disposal. Checkpoint and final round tests preserve acceptance review behavior.

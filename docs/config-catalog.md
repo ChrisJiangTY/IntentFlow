@@ -1379,7 +1379,7 @@ export interface ReplayModelConfig {
 
 Depends on: [`ModelModality`](../packages/llm/llm/src/index.ts) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts)
 
-Source: [`packages/test-support/llm-replay/src/index.ts:918`](../packages/test-support/llm-replay/src/index.ts)
+Source: [`packages/test-support/llm-replay/src/index.ts:939`](../packages/test-support/llm-replay/src/index.ts)
 
 <a id="deepseek-aidsh-llm-retry"></a>
 
@@ -2018,6 +2018,10 @@ export interface Config {
   readonly maxClarificationRounds: number
   /** Maximum questions accepted in one clarification batch. */
   readonly maxQuestionsPerRound: number
+  /** Maximum concurrent translations after the complete generated task list is validated. */
+  readonly taskTranslationConcurrency: number
+  /** Maximum child attempts to correct one generated task's invalid human text. */
+  readonly taskTranslationMaxAttempts: number
   /** Elapsed Task execution time before one independent health check, in milliseconds. */
   readonly taskHealthCheckAfterMs: number
   /** Maximum duration of the health-check child, in milliseconds. */

@@ -47,6 +47,22 @@ it('expands every layer in the selected round, including unassigned tasks', () =
   expect(screen.getAllByRole('button', { name: '查看任务：实现交互' })).toHaveLength(1)
 })
 
+it('starts with the latest requirement document selected and splits graph and document evenly', () => {
+  const graph = fixture()
+  const latest = { ...graph.documents[0]!, key: 'd2', roundId: 'round2' as never, round: 2, title: '第二轮', markdown: '# 需求文档\n\n最新需求正文：**支持手写**。\n\n- 离线打开\n- 保存笔迹' }
+  setup({ ...graph, documents: [...graph.documents, latest] })
+
+  expect(screen.getByRole('button', { name: '查看第 2 轮文档：第二轮' }).getAttribute('aria-pressed')).toBe('true')
+  const detail = screen.getByRole('region', { name: '图谱节点详情' })
+  expect(detail.textContent).toContain('最新需求正文')
+  expect(within(detail).getByRole('heading', { name: '需求文档', level: 1 })).toBeTruthy()
+  expect(within(detail).getByText('支持手写').tagName).toBe('STRONG')
+  expect(within(detail).getAllByRole('listitem')).toHaveLength(2)
+  expect(detail.textContent).not.toContain('# 需求文档')
+  expect(detail.textContent).not.toContain('包含品类筛选与搜索')
+  expect(screen.getByRole('separator', { name: '调整图谱详情高度' }).getAttribute('aria-valuenow')).toBe('50')
+})
+
 it('keeps planes fixed and wraps dense nodes in ascending row-major order', () => {
   const graph = fixture()
   const { container, props, rerender } = setup(graph)
@@ -154,7 +170,7 @@ it('toggles layered and radial layouts without losing the current graph explorat
     const roundSelect = screen.getByRole('combobox', { name: '按轮次筛选' }) as unknown as { readonly value: string }
     expect(searchInput.value).toBe('page')
     expect(roundSelect.value).toBe(roundId)
-    expect(screen.getByRole('separator', { name: '调整图谱详情高度' }).getAttribute('aria-valuenow')).toBe('35')
+    expect(screen.getByRole('separator', { name: '调整图谱详情高度' }).getAttribute('aria-valuenow')).toBe('55')
   }
   expect(paths.size).toBe(2)
   expect(container.querySelector<HTMLElement>('[data-has-selection][data-layout-mode="layered"]')?.style.transform).toBe(layeredTransform)
@@ -291,9 +307,9 @@ it('resizes the reserved detail area with bounded keyboard controls without chan
   const { container } = setup()
   const divider = screen.getByRole('separator', { name: '调整图谱详情高度' })
   const geometry = [...container.querySelectorAll('g[data-layer] > path:first-child')].map(node => node.getAttribute('d'))
-  expect(divider.getAttribute('aria-valuenow')).toBe('30')
+  expect(divider.getAttribute('aria-valuenow')).toBe('50')
   fireEvent.keyDown(divider, { key: 'ArrowUp' })
-  expect(divider.getAttribute('aria-valuenow')).toBe('35')
+  expect(divider.getAttribute('aria-valuenow')).toBe('55')
   fireEvent.keyDown(divider, { key: 'End' })
   fireEvent.keyDown(divider, { key: 'ArrowUp' })
   expect(divider.getAttribute('aria-valuenow')).toBe('60')
@@ -305,11 +321,13 @@ it('resizes the reserved detail area with bounded keyboard controls without chan
 
 it('shows only the selected requirement section, excluding sibling requirements', () => {
   const graph = fixture()
-  setup({ ...graph, documents: [{ ...graph.documents[0]!, markdown: '### 需求 1：品类筛选\n\n用户故事：快速找到饮料。\n\n#### 验收标准\n\n1. 支持筛选。\n\n### 需求 2：关键词搜索\n\n仅属于搜索的正文。' }] })
+  setup({ ...graph, documents: [{ ...graph.documents[0]!, markdown: '### 需求 1：品类筛选\n\n**用户故事：** 快速找到饮料。\n\n#### 验收标准\n\n1. 支持筛选。\n\n### 需求 2：关键词搜索\n\n仅属于搜索的正文。' }] })
   expand('饮料编年史')
   fireEvent.click(screen.getByRole('button', { name: /需求 1：品类筛选/ }))
   const detail = screen.getByRole('region', { name: '图谱节点详情' })
   expect(detail.textContent).toContain('快速找到饮料')
+  expect(within(detail).getByText('用户故事：').tagName).toBe('STRONG')
+  expect(detail.textContent).not.toContain('**')
   expect(detail.textContent).toContain('支持筛选')
   expect(detail.textContent).not.toContain('仅属于搜索的正文')
 })

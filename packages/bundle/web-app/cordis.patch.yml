@@ -82,6 +82,8 @@
         reviewerTools: [read, glob, grep]
         maxClarificationRounds: 2
         maxQuestionsPerRound: 5
+        taskTranslationConcurrency: 3
+        taskTranslationMaxAttempts: 2
         taskHealthCheckAfterMs: 3600000
         taskHealthCheckTimeoutMs: 300000
 

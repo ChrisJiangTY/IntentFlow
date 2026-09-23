@@ -2,7 +2,7 @@
 
 import { useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { fromMarkdown } from 'mdast-util-from-markdown'
-import { extractMarkdownPlainText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { extractMarkdownPlainText, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { RequirementsKey, NS } from './locales.ts'
 import { focusedTraceKeys, type SessionRequirementGraph, type TraceNavigation } from './knowledge-graph.ts'
@@ -70,6 +70,7 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set())
   const [selected, setSelected] = useState<string>()
+  const selectionTouched = useRef(false)
   const [query, setQuery] = useState('')
   const [roundFilter, setRoundFilter] = useState('')
   const [zoom, setZoom] = useState(1)
@@ -77,7 +78,11 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
   const nextLayout = layoutMode === 'layered' ? 'radial' : 'layered'
   const [revealKey, setRevealKey] = useState<string>()
   const [fileError, setFileError] = useState(false)
-  const [detailPercent, setDetailPercent] = useState(30)
+  const [detailPercent, setDetailPercent] = useState(50)
+  const markdownLabels = useMemo(() => ({
+    code: { copyLabel: t('copy'), copiedLabel: t('copied') },
+    footnotes: t('markdown.footnotes'),
+  }), [t])
   const body = useRef<HTMLDivElement>(null)
   const resizing = useRef(false)
   const [viewportSize, setViewportSize] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT })
@@ -101,6 +106,16 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
   const results = useMemo(() => searchTrace(all, query), [all, query])
   const file = selectedNode?.kind === 'code' ? selectedNode : undefined
   const outgoing = (key: string) => filtered.edges.filter(edge => edge.source === key)
+  const chooseNode = (key: string | undefined): void => {
+    selectionTouched.current = true
+    setSelected(key)
+  }
+
+  useLayoutEffect(() => {
+    if (selectionTouched.current) return
+    const latestDocument = graph.documents.at(-1)
+    if (latestDocument !== undefined) setSelected(latestDocument.key)
+  }, [graph.documents])
 
   useLayoutEffect(() => {
     const element = viewport.current
@@ -144,7 +159,7 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
     const detached = [...ancestors, node.key].filter(key =>
       !graph.documents.some(document => document.key === key) && !graph.edges.some(edge => edge.target === key))
     setRevealed(current => new Set([...current, ...detached]))
-    setSelected(node.key); setFileError(false); setRevealKey(node.key)
+    chooseNode(node.key); setFileError(false); setRevealKey(node.key)
   }
   const panStart = (event: PointerEvent<HTMLDivElement>): void => {
     if (event.button !== 0 || event.pointerType === 'touch' || (event.target instanceof Element && event.target.closest('button'))) return
@@ -171,8 +186,8 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
   return <section className={css.panel} role="region" aria-label={t('graph.aria')}>
     <div className={css.searchBar}>
       <input type="search" aria-label={t('graph.search')} placeholder={t('graph.search')} value={query} onChange={(event) => { setQuery(event.target.value) }} />
-      {query !== '' && <button type="button" onClick={() => { setQuery(''); setSelected(undefined) }}>{t('graph.clearSearch')}</button>}
-      <select aria-label={t('graph.filterRound')} value={roundFilter} onChange={(event) => { setRoundFilter(event.target.value); setSelected(undefined) }}>
+      {query !== '' && <button type="button" onClick={() => { setQuery(''); chooseNode(undefined) }}>{t('graph.clearSearch')}</button>}
+      <select aria-label={t('graph.filterRound')} value={roundFilter} onChange={(event) => { setRoundFilter(event.target.value); chooseNode(undefined) }}>
         <option value="">{t('graph.allRounds')}</option>
         {graph.documents.map(document => <option key={document.key} value={document.roundId}>{t('round.label', { round: document.round })} {document.title}</option>)}
       </select>
@@ -257,7 +272,7 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
                     width: NODE_WIDTH, height: NODE_HEIGHT, scale: String(position.scale) }}>
                   <button type="button" className={css.nodeSelect} aria-label={ariaLabel(node)} aria-pressed={selectedNode?.key === node.key}
                     data-status={node.kind === 'requirement' ? node.status : node.kind === 'task' ? node.task.status : undefined}
-                    title={node.kind === 'code' ? node.path : title} onClick={() => { setSelected(node.key); setFileError(false) }}>
+                    title={node.kind === 'code' ? node.path : title} onClick={() => { chooseNode(node.key); setFileError(false) }}>
                     <span className={css.orb} aria-hidden="true">
                       <img className={css.ringImage} src={graphNodeAssets[node.kind].ring} alt="" draggable={false} />
                       <img className={css.orbImage} src={graphNodeAssets[node.kind].orb} alt="" draggable={false} />
@@ -300,10 +315,10 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
           </nav>
           <div className={css.detailContent}>
             <header><small>{t(LAYER_LABELS[selectedNode.kind])} · {roundLabel(selectedNode)}</small><strong>{selectedNode.kind === 'code' ? <a href="#" aria-label={t('graph.openFile')} onClick={(event) => { event.preventDefault(); setFileError(!onOpenFile(selectedNode.path)) }}>{selectedNode.path}</a> : titleOf(selectedNode)}</strong></header>
-            {selectedNode.kind === 'document' && <><p>{t('graph.revision', { revision: selectedNode.revision })}</p><div className={css.documentContent}>{selectedNode.markdown}</div></>}
+            {selectedNode.kind === 'document' && <><p>{t('graph.revision', { revision: selectedNode.revision })}</p><MarkdownText text={selectedNode.markdown} labels={markdownLabels} /></>}
             {selectedNode.kind === 'requirement' && <>
               <p>{t(statusOf(selectedNode, graph) ?? 'graph.status.pending')} · {t('graph.criteriaCount', { count: selectedNode.acceptanceRefs.length })} · {selectedNode.acceptanceRefs.join(', ')}</p>
-              <div className={css.documentContent}>{requirementContent(graph, selectedNode)}</div>
+              <MarkdownText text={requirementContent(graph, selectedNode)} labels={markdownLabels} />
               {outgoing(selectedNode.key).length === 0 && <p>{t('graph.noTasks')}</p>}
             </>}
             {selectedNode.kind === 'task' && <>

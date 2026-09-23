@@ -125,11 +125,15 @@ describe('requirement document pipeline invariant', () => {
     })).toThrow('dependency cycle')
   })
 
-  it('accepts drafts while requiring one last Final Test', async () => {
+  it('accepts drafts without a Final Test and historical lists with one last Final Test', async () => {
     const { session, roundId } = await setup()
     expect(() => session.append('requirement/task-list', {
       version: 1, revision: 1, roundId, documentRevision: 1,
-      tasks: [task('A', 0, 'pending', ''), task('B', 1, 'withdrawn', ''), task('C', 2, 'reviewing'), finalTask(3)],
+      tasks: [task('A', 0, 'pending', ''), task('B', 1, 'withdrawn', ''), task('C', 2, 'reviewing')],
+    })).not.toThrow()
+    expect(() => session.append('requirement/task-list', {
+      version: 1, revision: 2, roundId, documentRevision: 1,
+      tasks: [task('A', 0, 'pending'), finalTask(1)],
     })).not.toThrow()
   })
 
@@ -137,17 +141,21 @@ describe('requirement document pipeline invariant', () => {
     const { session, roundId } = await setup()
     expect(() => session.append('requirement/task-list', {
       version: 1, revision: 1, roundId, documentRevision: 1,
-      tasks: [task('A', 0, status, ''), finalTask(1)],
+      tasks: [task('A', 0, status, '')],
     })).toThrow('empty executable task')
   })
 
-  it('rejects a missing, duplicate, or displaced Final Test', async () => {
+  it('rejects an empty task list or a duplicate or displaced historical Final Test', async () => {
     const { session, roundId } = await setup()
     expect(() => session.append('requirement/task-list', {
-      version: 1, revision: 1, roundId, documentRevision: 1, tasks: [task('A', 0, 'pending')],
-    })).toThrow('Final Test')
+      version: 1, revision: 1, roundId, documentRevision: 1, tasks: [],
+    })).toThrow()
     expect(() => session.append('requirement/task-list', {
       version: 1, revision: 1, roundId, documentRevision: 1, tasks: [finalTask(0), task('A', 1, 'pending')],
+    })).toThrow('Final Test')
+    expect(() => session.append('requirement/task-list', {
+      version: 1, revision: 1, roundId, documentRevision: 1,
+      tasks: [task('A', 0, 'pending'), finalTask(1), { ...finalTask(2), id: 'FINAL-2' as never }],
     })).toThrow('Final Test')
   })
 
@@ -156,7 +164,7 @@ describe('requirement document pipeline invariant', () => {
     const first = task('A', 0, 'pending')
     expect(() => session.append('requirement/task-list', {
       version: 1, revision: 1, roundId, documentRevision: 1,
-      tasks: [first, { ...first, order: 1 }, finalTask(2)],
+      tasks: [first, { ...first, order: 1 }],
     })).toThrow('duplicate task id')
   })
 
@@ -164,7 +172,7 @@ describe('requirement document pipeline invariant', () => {
     const { session, roundId } = await setup()
     expect(() => session.append('requirement/task-list', {
       version: 1, revision: 1, roundId, documentRevision: 1,
-      tasks: [task('A', 1, 'pending'), finalTask(2)],
+      tasks: [task('A', 1, 'pending')],
     })).toThrow('invalid task order')
   })
 

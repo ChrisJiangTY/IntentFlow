@@ -19,6 +19,8 @@ const config = {
   reviewerProvider: 'spawn',
   maxInputChars: 20_000,
   reviewerTools: ['read'],
+  taskTranslationConcurrency: 3,
+  taskTranslationMaxAttempts: 2,
   maxClarificationRounds: 2,
   maxQuestionsPerRound: 5,
   taskHealthCheckAfterMs: 3_600_000,
@@ -171,7 +173,7 @@ function exec(agent: Agent): ToolRunContext {
   } as unknown as ToolRunContext
 }
 
-function taskTextRun(request: SubagentStartRequest): SubagentRun {
+function taskTextRun(request: SubagentStartRequest, summary = '用户可以查看清晰的结果。'): SubagentRun {
   const content = request.prompt[0]
   if (content?.type !== 'text') throw new Error('expected task text prompt')
   const input = JSON.parse(content.text.slice(content.text.lastIndexOf('\n\n') + 2)) as {
@@ -179,10 +181,49 @@ function taskTextRun(request: SubagentStartRequest): SubagentRun {
     humanInstruction?: string
   }
   return { ...reviewRun(), result: Promise.resolve({ stopReason: 'completed', output: [], structured: {
-    title: input.task.title || '创建任务', summary: '用户可以查看清晰的结果。',
+    title: input.task.title || '创建任务', summary,
     markdown: input.humanInstruction === undefined ? input.task.statement : `**目标**：${input.humanInstruction}\n- [ ] 1.1 按最新要求实现并验证`,
   } }) }
 }
+
+function submittedTaskTitle(request: SubagentStartRequest): string {
+  const content = request.prompt[0]
+  if (content?.type !== 'text') throw new Error('expected task text prompt')
+  const input = JSON.parse(content.text.slice(content.text.lastIndexOf('\n\n') + 2)) as {
+    task: { title: string }
+  }
+  return input.task.title
+}
+
+async function prepareTaskSubmission(owner: Awaited<ReturnType<typeof setup>>): Promise<ToolDefinition> {
+  const { ctx, agent, session, followup, tools } = owner
+  appendRoundArtifacts(session)
+  const repaired = ctx.sessionRequirements.editDocument(agent, {
+    roundId: 'ROUND-01' as never, revision: 1, markdown: documentMarkdown,
+  })
+  ctx.sessionRequirements.generateTasks(agent, {
+    roundId: 'ROUND-01' as never, documentRevision: repaired.documentRevision,
+  })
+  const generation = followup.mock.calls[0]?.[0]
+  if (generation === undefined) throw new Error('expected generation message')
+  session.append('turn/start', { turn: 2 })
+  emit(ctx, session, session.append('user/message', generation, { surfaceOp: 'append' }))
+  await Promise.resolve()
+  const submit = tools.get('submit_requirement_tasks')
+  if (submit === undefined) throw new Error('expected task submission tool')
+  return submit
+}
+
+const twoImplementationTasks = [
+  {
+    kind: 'implementation', title: '实现导航栏',
+    markdown: '- [ ] 1.1 实现导航栏', requirement_refs: ['1.1'],
+  },
+  {
+    kind: 'implementation', title: '实现表单',
+    markdown: '- [ ] 2.1 实现表单', requirement_refs: ['1.2'],
+  },
+] as const
 
 function emit(ctx: Context, session: Session, event: SessionEvent): void {
   ctx.emit('session/event', session, event)
@@ -334,7 +375,28 @@ describe('session requirements document pipeline', () => {
     const prompt = followup.mock.calls[0]?.[0]?.content[0]
     expect(prompt?.type === 'text' ? prompt.text : '').toContain('只显示结果，不再需要导航栏。')
     expect(prompt?.type === 'text' ? prompt.text : '').toContain('最终回复仅含两个二级标题：\n## 交付结果')
+    expect(prompt?.type === 'text' ? prompt.text : '').toContain('正文可见内容为 50–300 字')
+    expect(prompt?.type === 'text' ? prompt.text : '').toContain('下一项待处理任务是「最终测试」')
+    expect(prompt?.type === 'text' ? prompt.text : '').toContain('点击该文件名打开')
     expect(prompt?.type === 'text' ? prompt.text : '').toContain('不得隐瞒失败')
+  })
+
+  it('asks the last active task to suggest useful changes instead of inventing another task', async () => {
+    const { ctx, agent, session, followup } = await setup()
+    appendRoundArtifacts(session)
+    const taskList = session.events.findLast(event => event.type === 'requirement/task-list')
+    if (taskList?.type !== 'requirement/task-list') throw new Error('expected tasks')
+    session.append('requirement/task-list', {
+      ...taskList.data,
+      revision: taskList.data.revision + 1,
+      tasks: taskList.data.tasks.map(task => task.id === 'TASK-FINAL' ? { ...task, status: 'withdrawn' as const } : task),
+    })
+
+    ctx.sessionRequirements.runTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never })
+    const prompt = followup.mock.calls[0]?.[0]?.content[0]
+    expect(prompt?.type === 'text' ? prompt.text : '').toContain('没有其他待执行或失败的任务')
+    expect(prompt?.type === 'text' ? prompt.text : '').toContain('针对实际交付物的修改建议')
+    expect(prompt?.type === 'text' ? prompt.text : '').toContain('不要虚构后续任务')
   })
 
   it('saves different task descriptions concurrently without losing either edit', async () => {
@@ -559,7 +621,7 @@ describe('session requirements document pipeline', () => {
     })).toThrow('generated tasks are stale')
   })
 
-  it('generates mandatory top-level task blocks with an immutable last Final Test', async () => {
+  it('generates tasks that collectively cover every acceptance criterion without a Final Test', async () => {
     const { ctx, agent, session, followup, tools } = await setup()
     appendRoundArtifacts(session)
     const repaired = ctx.sessionRequirements.editDocument(agent, {
@@ -573,6 +635,7 @@ describe('session requirements document pipeline', () => {
     const generationPrompt = generation.content[0]
     expect(generationPrompt?.type === 'text' ? generationPrompt.text : '').toContain('先完成 markdown')
     expect(generationPrompt?.type === 'text' ? generationPrompt.text : '').toContain('独立翻译器读取完整任务')
+    expect(generationPrompt?.type === 'text' ? generationPrompt.text : '').not.toContain('final_test 单独提交')
     session.append('turn/start', { turn: 2 })
     const input = session.append('user/message', generation, { surfaceOp: 'append' })
     emit(ctx, session, input)
@@ -585,30 +648,171 @@ describe('session requirements document pipeline', () => {
         kind: 'implementation', title: '实现页面',
         markdown: '- [ ] 1.2 实现导航栏和表单', requirement_refs: ['1.1', '1.2'],
       }],
-      final_test: {
-        title: '最终测试', markdown: '- [ ] 2.1 运行所有相关测试并修复本轮问题',
-        requirement_refs: ['1.1', '1.2'],
-      },
     }, exec(agent))).rejects.toThrow('checklist numbering')
+
+    await expect(submit.execute({
+      tasks: [{
+        kind: 'implementation', title: '实现页面',
+        markdown: '- [ ] 1.1 实现导航栏', requirement_refs: ['1.1'],
+      }],
+    }, exec(agent))).rejects.toThrow('1.2')
 
     await submit.execute({
       tasks: [{
         kind: 'implementation', title: '实现页面',
         markdown: '- [ ] 1.1 实现导航栏和表单', requirement_refs: ['1.1', '1.2'],
       }],
-      final_test: {
-        title: '最终测试', markdown: '- [ ] 2.1 运行所有相关测试并修复本轮问题',
-        requirement_refs: ['1.1', '1.2'],
-      },
     }, exec(agent))
 
     const list = session.events.findLast(event => event.type === 'requirement/task-list')
     expect(list?.type === 'requirement/task-list' ? list.data.documentRevision : undefined).toBe(2)
     expect(list?.type === 'requirement/task-list' ? list.data.tasks.map(task => task.kind) : [])
-      .toEqual(['implementation', 'final-test'])
-    expect(() => ctx.sessionRequirements.withdrawTask(agent, {
-      roundId: 'ROUND-01' as never, taskId: list?.type === 'requirement/task-list' ? list.data.tasks[1]!.id : 'missing' as never,
-    })).toThrow('Final Test')
+      .toEqual(['implementation'])
+  })
+
+  it('retries only the task with an invalid generated summary', async () => {
+    const calls = new Map<string, number>()
+    const owner = await setup({ transform: (request) => {
+      const title = submittedTaskTitle(request)
+      const count = (calls.get(title) ?? 0) + 1
+      calls.set(title, count)
+      return taskTextRun(request, title === '实现表单' && count === 1
+        ? '在 LATEST.md 中登记入口。'
+        : `用户可以查看${title}的结果。`)
+    } })
+    const submit = await prepareTaskSubmission(owner)
+    const before = owner.session.events.filter(event => event.type === 'requirement/task-list').length
+
+    await expect(submit.execute({
+      tasks: twoImplementationTasks,
+    }, exec(owner.agent))).resolves.toMatchObject({ accepted: true, taskCount: 2 })
+
+    expect(calls.get('实现导航栏')).toBe(1)
+    expect(calls.get('实现表单')).toBe(2)
+    const lists = owner.session.events.filter(event => event.type === 'requirement/task-list')
+    expect(lists).toHaveLength(before + 1)
+    const list = lists.at(-1)
+    expect(list?.type === 'requirement/task-list' ? list.data.tasks.map(task => task.title) : [])
+      .toEqual(['实现导航栏', '实现表单'])
+  })
+
+  it('starts valid task translations concurrently and commits their original order after all finish', async () => {
+    type TranslationResult = Awaited<SubagentRun['result']>
+    const pending: { request: SubagentStartRequest; resolve: (result: TranslationResult) => void }[] = []
+    let closing = false
+    const owner = await setup({ transform: (request) => {
+      if (closing) return taskTextRun(request)
+      const result = new Promise<TranslationResult>((resolve) => { pending.push({ request, resolve }) })
+      return { ...taskTextRun(request), result }
+    } })
+    const submit = await prepareTaskSubmission(owner)
+    const before = owner.session.events.filter(event => event.type === 'requirement/task-list').length
+
+    await expect(submit.execute({
+      tasks: [twoImplementationTasks[0], { ...twoImplementationTasks[1], markdown: '- [ ] F.1 实现表单' }],
+    }, exec(owner.agent))).rejects.toThrow('numbered checklist item')
+    expect(owner.start).not.toHaveBeenCalled()
+
+    const submission = submit.execute({
+      tasks: twoImplementationTasks,
+    }, exec(owner.agent))
+    try {
+      await vi.waitFor(() => { expect(pending.length).toBeGreaterThanOrEqual(2) })
+      expect(owner.session.events.filter(event => event.type === 'requirement/task-list')).toHaveLength(before)
+
+      pending[1]!.resolve(await taskTextRun(pending[1]!.request).result)
+      await Promise.resolve()
+      expect(owner.session.events.filter(event => event.type === 'requirement/task-list')).toHaveLength(before)
+      pending[0]!.resolve(await taskTextRun(pending[0]!.request).result)
+      await submission
+
+      expect(pending.map(item => submittedTaskTitle(item.request)))
+        .toEqual(['实现导航栏', '实现表单'])
+      const lists = owner.session.events.filter(event => event.type === 'requirement/task-list')
+      expect(lists).toHaveLength(before + 1)
+      const list = lists.at(-1)
+      expect(list?.type === 'requirement/task-list' ? list.data.tasks.map(task => task.title) : [])
+        .toEqual(['实现导航栏', '实现表单'])
+    } finally {
+      closing = true
+      for (const item of pending) item.resolve(await taskTextRun(item.request).result)
+      await submission.catch(() => {})
+    }
+  })
+
+  it('does not publish any new task block if one summary remains invalid after retry', async () => {
+    const calls = new Map<string, number>()
+    const owner = await setup({ transform: (request) => {
+      const title = submittedTaskTitle(request)
+      calls.set(title, (calls.get(title) ?? 0) + 1)
+      return taskTextRun(request, title === '实现表单'
+        ? '运行 pnpm test 验证。'
+        : `用户可以查看${title}的结果。`)
+    } })
+    const submit = await prepareTaskSubmission(owner)
+    const before = owner.session.events.filter(event => event.type === 'requirement/task-list')
+
+    await expect(submit.execute({
+      tasks: twoImplementationTasks,
+    }, exec(owner.agent))).rejects.toThrow('without commands')
+
+    expect(calls.get('实现表单')).toBeGreaterThan(1)
+    expect(calls.get('实现导航栏')).toBe(1)
+    expect(owner.session.events.filter(event => event.type === 'requirement/task-list')).toEqual(before)
+  })
+
+  it('waits for another translator to finish and dispose before a failed batch releases the review queue', async () => {
+    type TranslationResult = Awaited<SubagentRun['result']>
+    let resolveSibling!: (result: TranslationResult) => void
+    let releaseDispose!: () => void
+    const siblingResult = new Promise<TranslationResult>((resolve) => { resolveSibling = resolve })
+    const disposal = new Promise<void>((resolve) => { releaseDispose = resolve })
+    const siblingDispose = vi.fn(() => disposal)
+    let siblingRequest: SubagentStartRequest | undefined
+    const owner = await setup({ transform: (request) => {
+      const title = submittedTaskTitle(request)
+      const run = taskTextRun(request, title === '实现导航栏'
+        ? '运行 pnpm test 验证。' : '用户可以查看清晰的结果。')
+      if (title !== '实现表单') return run
+      siblingRequest = request
+      return { ...run, result: siblingResult, dispose: siblingDispose }
+    } })
+    const submit = await prepareTaskSubmission(owner)
+    const before = owner.session.events.filter(event => event.type === 'requirement/task-list').length
+    let settled = false
+    const submission = submit.execute({
+      tasks: twoImplementationTasks,
+    }, exec(owner.agent))
+    void submission.then(() => { settled = true }, () => { settled = true })
+    let review: Promise<void> | undefined
+    try {
+      await vi.waitFor(() => {
+        expect(owner.start.mock.calls.filter(([, request]) => submittedTaskTitle(request) === '实现导航栏')).toHaveLength(2)
+      })
+      review = owner.ctx.sessionRequirements.review(owner.agent, 3)
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      expect(owner.start.mock.calls.some(([, request]) => request.label?.startsWith('Requirements review'))).toBe(false)
+      expect(owner.session.events.filter(event => event.type === 'requirement/task-list')).toHaveLength(before)
+
+      if (siblingRequest === undefined) throw new Error('expected second translation')
+      resolveSibling(await taskTextRun(siblingRequest).result)
+      await vi.waitFor(() => { expect(siblingDispose).toHaveBeenCalledOnce() })
+      expect(settled).toBe(false)
+      expect(owner.start.mock.calls.some(([, request]) => request.label?.startsWith('Requirements review'))).toBe(false)
+      expect(owner.session.events.filter(event => event.type === 'requirement/task-list')).toHaveLength(before)
+
+      releaseDispose()
+      await expect(submission).rejects.toThrow('without commands')
+      await review
+      expect(owner.start.mock.calls.some(([, request]) => request.label?.startsWith('Requirements review'))).toBe(true)
+      expect(owner.session.events.filter(event => event.type === 'requirement/task-list')).toHaveLength(before)
+    } finally {
+      if (siblingRequest !== undefined) resolveSibling(await taskTextRun(siblingRequest).result)
+      releaseDispose()
+      await submission.catch(() => {})
+      await review?.catch(() => {})
+    }
   })
 
   it('keeps the task generation source revision stable and reorders a task exactly once', async () => {
@@ -645,6 +849,290 @@ describe('session requirements document pipeline', () => {
     const tasks = session.events.findLast(event => event.type === 'requirement/task-list')
     expect(tasks?.type === 'requirement/task-list' ? tasks.data.tasks.map(task => task.id) : [])
       .toEqual([inserted.taskId, 'TASK-A', 'TASK-FINAL'])
+  })
+
+  it('appends a new task to a list without a Final Test', async () => {
+    const { ctx, agent, session } = await setup()
+    appendRoundArtifacts(session)
+    const initial = session.events.findLast(event => event.type === 'requirement/task-list')
+    if (initial?.type !== 'requirement/task-list') throw new Error('expected tasks')
+    session.append('requirement/task-list', {
+      ...initial.data, revision: 2, tasks: [initial.data.tasks[0]!],
+    })
+
+    const added = ctx.sessionRequirements.addTask(agent, {
+      roundId: 'ROUND-01' as never,
+      title: '补充结果区',
+      summary: '用户可以查看结果。',
+      statement: '- [ ] 2.1 补充结果区\n\n_关联需求：1.2_',
+    })
+    const list = session.events.findLast(event => event.type === 'requirement/task-list')
+    expect(list?.type === 'requirement/task-list' ? list.data.tasks.map(task => task.id) : [])
+      .toEqual(['TASK-A', added.taskId])
+    expect(list?.type === 'requirement/task-list' ? list.data.tasks.map(task => task.order) : [])
+      .toEqual([0, 1])
+  })
+
+  it('rejects withdrawing a Task when it owns the only active acceptance reference', async () => {
+    const { ctx, agent, session } = await setup()
+    appendRoundArtifacts(session)
+    const initial = session.events.findLast(event => event.type === 'requirement/task-list')
+    if (initial?.type !== 'requirement/task-list') throw new Error('expected tasks')
+    const tasks = [initial.data.tasks[0]!, {
+      ...initial.data.tasks[0]!, id: 'TASK-B' as never, order: 1,
+      title: '实现表单', statement: '- [ ] 2.1 实现表单\n\n_关联需求：1.2_',
+      requirementRefs: ['1.2'],
+    }]
+    session.append('requirement/task-list', { ...initial.data, revision: 2, tasks })
+    const before = session.events.filter(event => event.type === 'requirement/task-list').length
+
+    expect(() => ctx.sessionRequirements.withdrawTask(agent, {
+      roundId: 'ROUND-01' as never, taskId: 'TASK-B' as never,
+    })).toThrow('missing 1.2')
+    expect(session.events.filter(event => event.type === 'requirement/task-list')).toHaveLength(before)
+    expect(session.events.findLast(event => event.type === 'requirement/task-list')).toMatchObject({
+      data: { tasks: [expect.anything(), expect.objectContaining({ id: 'TASK-B', status: 'pending' })] },
+    })
+  })
+
+  it('rejects an edited Task that leaves an acceptance criterion unassigned', async () => {
+    const { ctx, agent, session } = await setup()
+    appendRoundArtifacts(session)
+    const initial = session.events.findLast(event => event.type === 'requirement/task-list')
+    if (initial?.type !== 'requirement/task-list') throw new Error('expected tasks')
+    const task = {
+      ...initial.data.tasks[0]!, id: 'TASK-B' as never, order: 1,
+      title: '实现表单', statement: '- [ ] 2.1 实现表单\n\n_关联需求：1.2_',
+      requirementRefs: ['1.2'],
+    }
+    session.append('requirement/task-list', {
+      ...initial.data, revision: 2, tasks: [initial.data.tasks[0]!, task],
+    })
+    const before = session.events.filter(event => event.type === 'requirement/task-list').length
+
+    await expect(ctx.sessionRequirements.editTask(agent, {
+      roundId: 'ROUND-01' as never, taskId: task.id,
+      title: task.title, summary: task.summary,
+      statement: '- [ ] 2.1 实现表单\n\n_关联需求：1.1_', humanEdit: false,
+    })).rejects.toThrow('missing 1.2')
+    expect(session.events.filter(event => event.type === 'requirement/task-list')).toHaveLength(before)
+    expect(session.events.findLast(event => event.type === 'requirement/task-list')).toMatchObject({
+      data: { tasks: [expect.anything(), expect.objectContaining({ id: 'TASK-B', requirementRefs: ['1.2'] })] },
+    })
+  })
+
+  it('reviews the last completed Task after the remaining pending Task is withdrawn', async () => {
+    const { ctx, agent, session, followup, start } = await setup({ review: () => reviewRun('TASK-A') })
+    appendRoundArtifacts(session)
+    const initial = session.events.findLast(event => event.type === 'requirement/task-list')
+    if (initial?.type !== 'requirement/task-list') throw new Error('expected tasks')
+    session.append('requirement/task-list', {
+      ...initial.data, revision: 2,
+      tasks: [{
+        ...initial.data.tasks[0]!,
+        statement: '- [ ] 1.1 实现导航栏和表单\n\n_关联需求：1.1、1.2_',
+        requirementRefs: ['1.1', '1.2'],
+      }, {
+        ...initial.data.tasks[0]!, id: 'TASK-B' as never, order: 1,
+        title: '补充表单检查', statement: '- [ ] 2.1 检查表单\n\n_关联需求：1.2_',
+        requirementRefs: ['1.2'],
+      }],
+    })
+
+    ctx.sessionRequirements.runTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never })
+    await finishTurn(ctx, session, followup.mock.calls[0]![0], 2)
+    await vi.waitFor(() => {
+      expect(session.events.findLast(event => event.type === 'requirement/task-execution')).toMatchObject({
+        data: { taskId: 'TASK-A', status: 'completed' },
+      })
+    })
+    expect(start).not.toHaveBeenCalled()
+
+    ctx.sessionRequirements.withdrawTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-B' as never })
+    await vi.waitFor(() => {
+      expect(session.events.findLast(event => event.type === 'requirement/validation')).toMatchObject({
+        data: { status: 'completed', turn: 2 },
+      })
+    })
+    expect(start).toHaveBeenCalledOnce()
+    expect(followup).toHaveBeenCalledOnce()
+    expect(session.events.findLast(event => event.type === 'requirement/task-list')).toMatchObject({
+      data: { tasks: [
+        expect.objectContaining({ id: 'TASK-A', status: 'completed' }),
+        expect.objectContaining({ id: 'TASK-B', status: 'withdrawn' }),
+      ] },
+    })
+    expect(session.events.findLast(event => event.type === 'requirement/round')).toMatchObject({
+      data: { status: 'completed' },
+    })
+  })
+
+  it('keeps Run All active until review settles when its remaining Task is withdrawn', async () => {
+    let releaseIdle!: () => void
+    const idle = new Promise<void>((resolve) => { releaseIdle = resolve })
+    const review = reviewRun('TASK-A')
+    const pendingReview = Promise.withResolvers<Awaited<SubagentRun['result']>>()
+    const { ctx, agent, session, followup, start } = await setup({
+      review: () => ({ ...review, result: pendingReview.promise }),
+    })
+    const idlePassed = vi.fn()
+    Object.assign(agent, { whenIdle: vi.fn(async () => { await idle; idlePassed() }) })
+    appendRoundArtifacts(session)
+    const initial = session.events.findLast(event => event.type === 'requirement/task-list')
+    if (initial?.type !== 'requirement/task-list') throw new Error('expected tasks')
+    session.append('requirement/task-list', {
+      ...initial.data, revision: 2,
+      tasks: [{ ...initial.data.tasks[0]!, requirementRefs: ['1.1', '1.2'] }, {
+        ...initial.data.tasks[0]!, id: 'TASK-B' as never, order: 1,
+        title: '补充表单检查', statement: '- [ ] 2.1 检查表单\n\n_关联需求：1.2_',
+        requirementRefs: ['1.2'],
+      }],
+    })
+
+    try {
+      ctx.sessionRequirements.runAll(agent, { roundId: 'ROUND-01' as never })
+      await finishTurn(ctx, session, followup.mock.calls[0]![0], 2)
+      await vi.waitFor(() => {
+        expect(session.events.findLast(event => event.type === 'requirement/task-execution')).toMatchObject({
+          data: { taskId: 'TASK-A', status: 'completed' },
+        })
+      })
+      ctx.sessionRequirements.withdrawTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-B' as never })
+      await vi.waitFor(() => { expect(start).toHaveBeenCalledOnce() })
+      releaseIdle()
+      await vi.waitFor(() => { expect(idlePassed).toHaveBeenCalledOnce() })
+      expect(session.events.findLast(event => event.type === 'requirement/run-all')).toMatchObject({
+        data: { status: 'running' },
+      })
+      expect(followup).toHaveBeenCalledOnce()
+
+      pendingReview.resolve(await review.result)
+      await vi.waitFor(() => {
+        expect(session.events.findLast(event => event.type === 'requirement/run-all')).toMatchObject({
+          data: { status: 'completed' },
+        })
+        expect(session.events.findLast(event => event.type === 'requirement/validation')).toMatchObject({
+          data: { status: 'completed' },
+        })
+      })
+    } finally {
+      releaseIdle()
+      pendingReview.resolve(await review.result)
+    }
+  })
+
+  it('reviews the only task in Run All and completes the round without another Task', async () => {
+    const { ctx, agent, session, followup, start } = await setup({ review: () => reviewRun('TASK-A') })
+    appendRoundArtifacts(session)
+    const initial = session.events.findLast(event => event.type === 'requirement/task-list')
+    if (initial?.type !== 'requirement/task-list') throw new Error('expected tasks')
+    session.append('requirement/task-list', {
+      ...initial.data, revision: 2, tasks: [initial.data.tasks[0]!],
+    })
+
+    ctx.sessionRequirements.runAll(agent, { roundId: 'ROUND-01' as never })
+    await finishTurn(ctx, session, followup.mock.calls[0]![0], 2)
+    await vi.waitFor(() => {
+      expect(session.events.findLast(event => event.type === 'requirement/validation')).toMatchObject({
+        data: { status: 'completed', failedTaskIds: [], regressions: [] },
+      })
+      expect(session.events.findLast(event => event.type === 'requirement/run-all')).toMatchObject({
+        data: { status: 'completed' },
+      })
+    })
+    expect(followup).toHaveBeenCalledOnce()
+    expect(start).toHaveBeenCalledOnce()
+    expect(start.mock.calls[0]?.[1]).toMatchObject({
+      parent: agent, maxDepth: 1, toolFilter: { allow: ['read'] },
+    })
+    expect(session.events.findLast(event => event.type === 'requirement/round')).toMatchObject({
+      data: { status: 'completed' },
+    })
+  })
+
+  it('fails Run All when the last ordinary Task receives a blocking review', async () => {
+    const { ctx, agent, session, followup, start } = await setup({
+      review: () => reviewRun('TASK-A', 'blocking'),
+    })
+    appendRoundArtifacts(session)
+    const initial = session.events.findLast(event => event.type === 'requirement/task-list')
+    if (initial?.type !== 'requirement/task-list') throw new Error('expected tasks')
+    session.append('requirement/task-list', {
+      ...initial.data, revision: 2, tasks: [initial.data.tasks[0]!],
+    })
+
+    ctx.sessionRequirements.runAll(agent, { roundId: 'ROUND-01' as never })
+    await finishTurn(ctx, session, followup.mock.calls[0]![0], 2)
+    await vi.waitFor(() => {
+      expect(session.events.findLast(event => event.type === 'requirement/task-execution')).toMatchObject({
+        data: { taskId: 'TASK-A', status: 'failed' },
+      })
+      expect(session.events.findLast(event => event.type === 'requirement/run-all')).toMatchObject({
+        data: { status: 'failed' },
+      })
+    })
+    expect(start).toHaveBeenCalledOnce()
+    expect(followup).toHaveBeenCalledOnce()
+    expect(session.events.findLast(event => event.type === 'requirement/round')).toMatchObject({
+      data: { status: 'failed' },
+    })
+    expect(session.events.some(event => event.type === 'requirement/validation')).toBe(false)
+  })
+
+  it('reviews the last outstanding Task even when it precedes completed Tasks', async () => {
+    const { ctx, agent, session, followup, start } = await setup({ review: () => reviewRun('TASK-A') })
+    appendRoundArtifacts(session)
+    const initial = session.events.findLast(event => event.type === 'requirement/task-list')
+    if (initial?.type !== 'requirement/task-list') throw new Error('expected tasks')
+    session.append('requirement/task-list', {
+      ...initial.data, revision: 2,
+      tasks: [initial.data.tasks[0]!, {
+        ...initial.data.tasks[0]!, id: 'TASK-B' as never, order: 1,
+        statement: '- [ ] 2.1 实现表单\n\n_关联需求：1.2_',
+        requirementRefs: ['1.2'], status: 'completed',
+      }],
+    })
+
+    ctx.sessionRequirements.runTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never })
+    await finishTurn(ctx, session, followup.mock.calls[0]![0], 2)
+    await vi.waitFor(() => {
+      expect(session.events.findLast(event => event.type === 'requirement/validation')).toMatchObject({
+        data: { status: 'completed' },
+      })
+    })
+    expect(followup).toHaveBeenCalledOnce()
+    expect(start).toHaveBeenCalledOnce()
+  })
+
+  it('uses the final checkpoint review to complete a round without a Final Test', async () => {
+    const { ctx, agent, session, followup, start } = await setup({ review: () => reviewRun('TASK-B') })
+    appendRoundArtifacts(session)
+    const initial = session.events.findLast(event => event.type === 'requirement/task-list')
+    if (initial?.type !== 'requirement/task-list') throw new Error('expected tasks')
+    session.append('requirement/task-list', {
+      ...initial.data, revision: 2,
+      tasks: [initial.data.tasks[0]!, {
+        ...initial.data.tasks[0]!, id: 'TASK-B' as never, order: 1, kind: 'checkpoint',
+        statement: '- [ ] 2.1 验证表单\n\n_关联需求：1.2_',
+        requirementRefs: ['1.2'], status: 'pending',
+      }],
+    })
+
+    ctx.sessionRequirements.runAll(agent, { roundId: 'ROUND-01' as never })
+    await finishTurn(ctx, session, followup.mock.calls[0]![0], 2)
+    await vi.waitFor(() => { expect(followup).toHaveBeenCalledTimes(2) })
+    expect(start).not.toHaveBeenCalled()
+    await finishTurn(ctx, session, followup.mock.calls[1]![0], 3)
+    await vi.waitFor(() => {
+      expect(session.events.findLast(event => event.type === 'requirement/validation')).toMatchObject({
+        data: { status: 'completed' },
+      })
+      expect(session.events.findLast(event => event.type === 'requirement/run-all')).toMatchObject({
+        data: { status: 'completed' },
+      })
+    })
+    expect(followup).toHaveBeenCalledTimes(2)
+    expect(start).toHaveBeenCalledOnce()
   })
 
   it('invalidates a completed Final Test when a nonempty task is added', async () => {

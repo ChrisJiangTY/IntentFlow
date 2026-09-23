@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-llm-replay` makes snapshot tests run without an API key: it installs a replay LLM adapter that serves model streams reconstructed from a recorded session JSONL fixture, so a test boots the real agent against a fixed transcript. The fixture is a projection of the persisted session log — `assistant/chunk` events group into per-call chunk sequences, and an explicitly marked local compaction call replays as one canonical stream. A `replay.override.json` sidecar covers what a log cannot reconstruct: a throw before any chunk, a cancel/hang, or an injected retry. Live sessions bind to recorded scripts by first-call order, so parent-and-subagent scenarios each get their own script. It is the model source behind the ACP and headless snapshot suites and the Web browser e2e lane.
+`dsh-llm-replay` makes snapshot tests run without an API key: it installs a replay LLM adapter that serves model streams reconstructed from a recorded session JSONL fixture, so a test boots the real agent against a fixed transcript. The fixture is a projection of the persisted session log — `assistant/chunk` events group into per-call chunk sequences, and an explicitly marked local compaction call replays as one canonical stream. A `replay.override.json` sidecar covers what a log cannot reconstruct: a throw before any chunk, a cancel/hang, or an injected retry. Live sessions bind to recorded scripts by a unique first user prompt when available, or by first-call order otherwise, so concurrently started subagents receive their own recorded output. It is the model source behind the ACP and headless snapshot suites and the Web browser e2e lane.
 
 ## Table of Contents
 
@@ -69,7 +69,7 @@ The fixture is a projection of a persisted session log (`<scenario>/session.json
 
 ### Nested agents
 
-A scenario where a parent agent delegates to in-process subagents records one log per session: the parent (`session.jsonl`) plus one per child (`session.1.jsonl`, …). Live session ids are freshly random each run, so replay binds each live session to a recorded script by first-call order: the first live session to make a model call claims the first script, the next new session the next, and so on, with each session advancing its own cursor. More distinct live sessions than recorded scripts fails loud.
+A scenario where a parent agent delegates to in-process subagents records one log per session: the parent (`session.jsonl`) plus one per child (`session.1.jsonl`, …). Live session ids are freshly random each run, so a new live session claims the single unclaimed script whose recorded first user prompt appears in its model request. If that match is absent or ambiguous, it claims the next unclaimed script by first-call order. Each session advances its own cursor, and more distinct live sessions than recorded scripts fails loud.
 
 ### Failure modes and overrides
 
@@ -106,7 +106,7 @@ Replay is built on one idea: the projected session log is the fixture. `deriveRe
 
 ### Binding and stream flow
 
-`installLlmReplay` loads the ordered scripts, then installs either a routed replay adapter (when `providers` is non-empty) or a catch-all `llm/stream` waterfall listener. Each live `stream()` call is keyed by its calling session id: a new session claims the next unclaimed script (parent first, because it streams before it can delegate), and calls without a `sessionId` share one anonymous session bound to the primary script. The returned `ReplayHandle` carries a disposer for HMR safety and `assertConsumed()`, which throws unless every recorded script bound to a live session and every bound cursor drained.
+`installLlmReplay` loads the ordered scripts, then installs either a routed replay adapter (when `providers` is non-empty) or a catch-all `llm/stream` waterfall listener. Each live `stream()` call is keyed by its calling session id: a new session claims its unique recorded prompt match or the next unclaimed script, and calls without a `sessionId` share one anonymous session. The returned `ReplayHandle` carries a disposer for HMR safety and `assertConsumed()`, which throws unless every recorded script bound to a live session and every bound cursor drained.
 
 </details>
 

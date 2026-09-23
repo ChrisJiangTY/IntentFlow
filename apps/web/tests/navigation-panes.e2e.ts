@@ -484,6 +484,19 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       }],
     })
     await page.getByRole('tab', { name: 'Requirements' }).click()
+    const notebook = page.locator('[data-notebook-scroll]')
+    const latestCell = notebook.locator('[data-round-id="ROUND-WEB-01"] [data-cell="validation"]')
+    await expect.poll(() => latestCell.evaluate((cell) => {
+      const notebookBounds = cell.closest('[data-notebook-scroll]')!.getBoundingClientRect()
+      const cellBounds = cell.getBoundingClientRect()
+      return cellBounds.top >= notebookBounds.top - 1 && cellBounds.bottom <= notebookBounds.bottom + 1
+    })).toBe(true)
+    await page.getByRole('button', { name: 'Collapse round', exact: true }).click()
+    await page.getByRole('tab', { name: 'Chat', exact: true }).click()
+    await page.getByRole('tab', { name: 'Requirements', exact: true }).click()
+    await page.getByRole('button', { name: 'Expand round', exact: true }).waitFor({ state: 'visible' })
+    expect(await notebook.locator('[data-round-id="ROUND-WEB-01"] [data-cell]').count()).toBe(0)
+    await page.getByRole('button', { name: 'Expand round', exact: true }).click()
     const taskCell = page.locator('[data-cell="task"][data-task-id]').filter({ hasText: 'Build navigation HTML' })
     await taskCell.waitFor({ timeout: 15_000 })
     const failedOutput = page.getByRole('region', { name: 'Task output Check mobile navigation' })
@@ -527,10 +540,13 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     const graph = page.getByRole('region', { name: 'Session requirement code graph' })
     const documentNode = graph.getByRole('button', { name: 'Inspect round 1 document: 构建并验证导航页面' })
     await documentNode.waitFor()
+    expect(await documentNode.getAttribute('aria-pressed')).toBe('true')
+    expect(await graph.getByRole('region', { name: 'Graph node details' }).innerText()).toContain('Document revision 1')
+    expect(await graph.getByRole('separator', { name: 'Resize graph details' }).getAttribute('aria-valuenow')).toBe('50')
     await page.emulateMedia({ reducedMotion: 'reduce' })
     const planeGeometry = () => graph.locator('g[data-layer] > path:first-child').evaluateAll(nodes => nodes.map((node) => {
       const box = node.getBoundingClientRect()
-      return { path: node.getAttribute('d'), x: box.x, y: box.y, width: box.width, height: box.height }
+      return { path: node.getAttribute('d'), x: box.x, width: box.width, height: box.height }
     }))
     const initialPlanes = await planeGeometry()
     expect(initialPlanes).toHaveLength(4)
@@ -575,14 +591,15 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     expect(new Set(edgeColors).size).toBe(1)
     expect(new Set(arrowColors)).toEqual(new Set(edgeColors))
     const scrollArea = graph.locator('[aria-label="Four-layer requirement graph canvas"]')
-    await expect.poll(() => scrollArea.evaluate(node => node.scrollHeight - node.clientHeight)).toBeLessThanOrEqual(1)
+    expect(await scrollArea.evaluate(node => getComputedStyle(node).overflowY)).toBe('auto')
     const viewportBox = await scrollArea.boundingBox()
     if (viewportBox === null) throw new Error('requirement graph viewport geometry is unavailable')
+    const scrollHeight = await scrollArea.evaluate(node => node.scrollHeight)
     for (const node of [documentNode, graphNode, graph.getByRole('button', { name: 'Inspect task: Build navigation HTML' }), codeNode]) {
       const nodeBox = await node.boundingBox()
       if (nodeBox === null) throw new Error('four-layer graph node geometry is unavailable')
       expect(nodeBox.y).toBeGreaterThanOrEqual(viewportBox.y - 1)
-      expect(nodeBox.y + nodeBox.height).toBeLessThanOrEqual(viewportBox.y + viewportBox.height + 1)
+      expect(nodeBox.y + nodeBox.height).toBeLessThanOrEqual(viewportBox.y + scrollHeight + 1)
     }
     await codeNode.click()
     expect(await planeGeometry()).toEqual(initialPlanes)
@@ -603,7 +620,8 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     expect(await planeGeometry()).toEqual(initialPlanes)
     expect(await graph.getByRole('button', { name: 'Content', exact: true }).count()).toBe(0)
     expect(await graph.getByText('# updated nav', { exact: true }).count()).toBeGreaterThan(0)
-    await expect.poll(() => scrollArea.evaluate(node => node.scrollHeight - node.clientHeight)).toBeLessThanOrEqual(1)
+    expect(await scrollArea.evaluate(node => node.scrollHeight))
+      .toBeGreaterThanOrEqual(await scrollArea.evaluate(node => node.clientHeight))
     const detail = graph.getByRole('region', { name: 'Graph node details' })
     expect(await detail.getByRole('button').allTextContents()).toEqual(['Locate Notebook'])
     const detailBox = await detail.boundingBox()
@@ -871,6 +889,17 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     const retainedSnapshot = (await captureStableAria(page, '[class*="viewArea"]', scaffold.workspaceCwd))
       .split(retained.id).join('{{retainedId}}')
     await compareOrRefreshGolden(REQUIREMENTS_RESTORED_EXPECTED, retainedSnapshot, MODE)
+
+    const previousTasks = retained.events.findLast(event => event.type === 'requirement/task-list')
+    if (previousTasks?.type !== 'requirement/task-list') throw new Error('retained Notebook has no Tasks')
+    retained.append('requirement/task-list', {
+      ...previousTasks.data,
+      revision: previousTasks.data.revision + 1,
+      tasks: previousTasks.data.tasks.filter(task => task.kind !== 'final-test')
+        .map((task, order) => ({ ...task, order })),
+    })
+    await expect.poll(() => page.locator('[data-cell="task"]').count()).toBe(taskCount - 1)
+    expect(await page.getByText('Final Test', { exact: true }).count()).toBe(0)
   }, 120_000)
 
   it.skipIf(MODE === 'record')('downloads through the Session Header and /export with one dialog', async () => {

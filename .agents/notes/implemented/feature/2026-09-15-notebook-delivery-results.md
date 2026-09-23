@@ -14,6 +14,8 @@ Task execution requests exactly two final sections: delivery results and notes. 
 
 The Notebook parses Markdown and displays only recognized delivery sections, including historical delivery-file headings. It preserves links and shows an explicit placeholder when delivery sections are absent. Notes, review summaries, and additional notices are not part of the result display; Task status markers still distinguish failures from completion. The independent review still consumes the complete execution evidence.
 
+Task prompts ask the delivery section to use 50–300 visible Chinese characters to say what the Task produced, how to open or use it, and what pending or failed Task comes next. When no other pending or failed Task remains, the prompt asks for one or two changes suited to the delivered result. The range and wording are model instructions, not host validation; Notebook still displays only the recognized section, and raw evidence remains in the Session log.
+
 This narrows result presentation in the [Notebook pipeline](2026-09-02-requirement-notebook-pipeline.md); its identity, review, and persistence decisions remain active.
 
 ## Alternatives considered

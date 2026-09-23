@@ -8,6 +8,19 @@ import { compareOrRefreshGolden, launchWebScaffold, recordFixture, webSnapshotMo
 const directory = fileURLToPath(new URL('../../../snapshots/web/requirement-task-result', import.meta.url))
 const mode = webSnapshotMode()
 
+function deliverySection(markdown: string): string {
+  return markdown.split(/^## 交付结果\s*$/mu)[1]?.split(/^## /mu)[0] ?? ''
+}
+
+function visibleDeliveryLength(markdown: string): number {
+  const visible = deliverySection(markdown)
+    .replace(/!?\[([^\]]+)\]\([^)]+\)/gu, '$1')
+    .replace(/`([^`]+)`/gu, '$1')
+    .replace(/(?:\*\*|__|[*_~])/gu, '')
+    .replace(/^\s*[>#]+\s?/gmu, '')
+  return Array.from(visible.replace(/\s/gu, '')).length
+}
+
 describe('human-facing task delivery report', () => {
   it('runs failed implementation Tasks directly and performs one final comprehensive review', async () => {
     const scaffold = await launchWebScaffold(mode === 'record' ? {} : {
@@ -60,6 +73,17 @@ describe('human-facing task delivery report', () => {
       expect(output).toContain('欢迎体验')
       expect(output?.match(/^## .+$/gmu)).toEqual(['## 交付结果', '## 说明'])
       expect(output).not.toContain('```')
+      const firstDelivery = deliverySection(output ?? '')
+      expect(visibleDeliveryLength(output ?? '')).toBeGreaterThanOrEqual(50)
+      expect(visibleDeliveryLength(output ?? '')).toBeLessThanOrEqual(300)
+      expect(firstDelivery).toContain('核对文案')
+
+      const final = session.events.findLast(event => event.type === 'requirement/task-execution' && event.data.taskId === 'TASK-FINAL')
+      const finalOutput = final?.type === 'requirement/task-execution' ? final.data.output : undefined
+      expect(finalOutput).toMatch(/^## 交付结果\n/u)
+      expect(visibleDeliveryLength(finalOutput ?? '')).toBeGreaterThanOrEqual(50)
+      expect(visibleDeliveryLength(finalOutput ?? '')).toBeLessThanOrEqual(300)
+      expect(deliverySection(finalOutput ?? '')).toMatch(/建议|可改|可以继续|可增加|可以考虑|如果想/u)
       expect(spy).toHaveBeenCalledOnce()
       if (mode !== 'record') {
         const execution = session.events.flatMap(event => event.type === 'requirement/task-execution'

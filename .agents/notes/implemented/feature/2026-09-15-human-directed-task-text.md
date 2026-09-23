@@ -12,7 +12,9 @@ People edit Notebook descriptions to change what the Agent does. A display-only 
 
 The host validates technical tasks before independent, tool-free children translate their titles and descriptions. Translation must return the execution statement verbatim. Human edits instead ask a child to rewrite the complete statement; the host preserves the human's text as both the displayed description and durable `humanInstruction`. Execution and review prioritize that instruction over conflicting older requirements.
 
-The human editor saves on blur or before execution. Saves for each Task serialize and rebase later drafts onto committed execution text. The host checks the edited Task and source document again before committing into the latest list. A sibling Task's saved edit does not invalidate another Task's translation; a changed or withdrawn target still does. Whole-list revision checks reject valid batch saves, while committing the captured list would overwrite sibling edits. Failed or stale transformations preserve the previous durable task and leave an error in the editor. Successful edits reopen the task and a completed Final Test, and invalidate old validation evidence.
+The [translation recovery decision](../bug-fix/2026-09-22-retry-parallel-task-translation.md) owns bounded concurrent generation and targeted retries for invalid generated text. It does not change how human-authored instructions are stored or applied.
+
+The human editor saves on blur or before execution. Saves for each Task serialize and rebase later drafts onto committed execution text. The host checks the edited Task and source document again before committing into the latest list. A sibling Task's saved edit does not invalidate another Task's translation; a changed or withdrawn target still does. Whole-list revision checks reject valid batch saves, while committing the captured list would overwrite sibling edits. Failed or stale transformations preserve the previous durable task and leave an error in the editor. Successful edits reopen the task and invalidate old validation evidence; a recorded Final Test, when present, also returns to pending.
 
 This decision supersedes the same-response translation and display-only description editing choices in the [Notebook pipeline note](2026-09-02-requirement-notebook-pipeline.md). That note remains active for Notebook identity, evidence presentation, and passive note semantics.
 
@@ -26,7 +28,7 @@ This decision supersedes the same-response translation and display-only descript
 
 ## Consequences
 
-Each generated Task or edited nonempty task costs one additional child run through the configured provider. Full prompts must fit the configured input limit; the host refuses truncation. Mechanical checks enforce generated-language, length, sentence, and technical-noise rules; they do not prove semantic fidelity. User-authored descriptions are not restricted to generated-summary length limits. Unacknowledged drafts remain tab-local.
+Each generated Task uses at least one child run through the configured provider; a rejected generated translation can add a bounded targeted retry. Editing a nonempty task uses one child run. Full prompts must fit the configured input limit; the host refuses truncation. Mechanical checks enforce generated-language, length, sentence, and technical-noise rules; they do not prove semantic fidelity. User-authored descriptions are not restricted to generated-summary length limits. Unacknowledged drafts remain tab-local.
 
 ## Testing
 
