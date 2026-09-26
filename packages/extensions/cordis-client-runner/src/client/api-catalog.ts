@@ -255,7 +255,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'setFontSize(px: number): void',
-        description: 'Change the conversation content font size — the only font-size write entry. Accepted values are written through the settings scope and emit `theme/change`.',
+        description: 'Change the shared base size for conversation and Requirements workspace text — the only font-size write entry. Headings scale with that base. Accepted values use the settings scope and emit `theme/change`.',
         parameters: [{ name: 'px', description: 'integer px within FONT_SIZE_MIN..FONT_SIZE_MAX; out-of-range or fractional values throw.' }],
       },
       {

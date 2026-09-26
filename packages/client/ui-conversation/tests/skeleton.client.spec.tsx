@@ -177,9 +177,11 @@ function mount(
   const useConversationViews: SessionSlotProps['useConversationViews'] = selector => selector(viewTabs)
   /** Owner share handed to the two composer tool-row seats, per render. */
   const seatOwners: { key: string; owner: unknown }[] = []
+  const viewOwners: object[] = []
   let pickerOwner: unknown
   const renderSlot = ((key: string, owner: object, opts?: { only?: string; fallback?: ReactNode }) => {
     slotCalls.push(key)
+    if (key === 'conversation.view') viewOwners.push(owner)
     if (key === 'conversation.input.model' || key === 'conversation.input.plan') {
       seatOwners.push({ key, owner })
     }
@@ -311,7 +313,7 @@ function mount(
   }
   const view = render(<ConversationRoot {...props} />)
   return {
-    view, store, wiring, sink, retargetWorkspace, session, conversation, slotCalls, lineageOwners, seatOwners, open,
+    view, store, wiring, sink, retargetWorkspace, session, conversation, slotCalls, lineageOwners, seatOwners, viewOwners, open,
     pickerOwner: () => pickerOwner,
     rerender: () => { view.rerender(<ConversationRoot {...props} />) },
   }
@@ -391,7 +393,11 @@ describe('ConversationRoot resident composer', () => {
       viewTabs: [{ id: 'chat', label: 'Chat' }, { id: 'requirements', label: 'Requirements' }],
     })
     expect(b.view.getByTestId('view-requirements')).toBeTruthy()
-    expect(b.view.getByRole('tab', { name: 'Requirements' }).getAttribute('aria-selected')).toBe('true')
+    expect(b.viewOwners.at(-1)).toMatchObject({
+      navigation: { activeId: 'requirements', tabs: [
+        { id: 'chat', label: 'Chat' }, { id: 'requirements', label: 'Requirements' },
+      ] },
+    })
     const box = b.view.getByRole('textbox')
     act(() => { b.wiring.setDraft('start a requirement round') })
     fireEvent.keyDown(box, { key: 'Enter' })

@@ -6,7 +6,8 @@
     - img
   - tablist:
     - tab "Chat" [selected]
-    - tab "Trajectory"
+    - tab "Trace"
+    - tab "Requirements"
 - text: Render this mathematical proof. {{clock}}
 - button "Copy":
   - img

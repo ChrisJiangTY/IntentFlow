@@ -4,8 +4,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { LocaleSnapshot } from '@deepseek-ai/dsh-client-locale/client'
 import type { RequirementGraphProjection } from '@deepseek-ai/dsh-session-requirements/client'
 import { RequirementsView } from '../src/client/RequirementsView.tsx'
 import type { SessionRequirementNode } from '../src/client/knowledge-graph.ts'
@@ -20,7 +22,7 @@ import type {
   RequirementValidationNode,
   RequirementsSnapshot,
 } from '../src/client/contract.ts'
-import { zh } from '../src/client/locales.ts'
+import { en, zh } from '../src/client/locales.ts'
 
 const t = makeTranslate(zh, commonZh)
 
@@ -248,7 +250,7 @@ function props(
     openDeliveryUrl: vi.fn(() => true),
     openDeliveryFile: vi.fn(() => true),
     bindGraphReveal: vi.fn(() => () => {}),
-    initialLanguage: 'zh',
+    useLocale: <Selected,>(selector: (current: LocaleSnapshot) => Selected): Selected => selector({ active: 'zh', locales: [], revision: 0 }),
     t,
     viewRequest: null,
     openView: vi.fn(),
@@ -269,7 +271,7 @@ function openTaskSpec(title = '建立 Notebook'): { readonly cell: HTMLElement; 
   const cell = selectTask(title)
   const spec = cell.parentElement?.querySelector<HTMLElement>('[data-task-agent-spec]')
   if (spec === null || spec === undefined) throw new Error(`Agent execution instructions ${title} are missing`)
-  fireEvent.click(within(spec).getByRole('button', { name: `展开 Agent 运行说明 ${title}` }))
+  fireEvent.click(within(spec).getByRole('button', { name: `展开智能体运行说明 ${title}` }))
   return { cell, spec, content: within(spec).getByRole('textbox', { name: `任务内容 ${title}` }) }
 }
 
@@ -315,14 +317,42 @@ describe('RequirementsView Notebook', () => {
 
     const cells = [...container.querySelectorAll<HTMLElement>('[data-cell]')]
     expect(cells.map(cell => cell.dataset.cell)).toEqual(['clarification-record', 'document', 'task', 'task', 'validation'])
+    const roundHeading = container.querySelector('[data-round-id="ROUND-01"] header')!
+    expect(roundHeading.compareDocumentPosition(cells[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(cells[0]!).getByText('需求澄清')).toBeTruthy()
     expect(screen.getAllByRole('button', { name: '代码' })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: '文本' })).toHaveLength(1)
     expect(container.querySelector('[data-notebook-scroll]')).toBeTruthy()
     expect(container.querySelector('[data-composer-input]')).toBeNull()
-    expect(screen.getByRole('group', { name: 'Notebook 缩放' })).toBeTruthy()
-    expect(screen.getByText('TASK1')).toBeTruthy()
-    expect(screen.getByText('TASK2')).toBeTruthy()
+    expect(screen.getByRole('group', { name: '需求工作区缩放' })).toBeTruthy()
+    expect(screen.getByText('任务1')).toBeTruthy()
+    expect(screen.getByText('任务2')).toBeTruthy()
     expect(screen.queryByText('覆盖 1 条验收要求')).toBeNull()
+  })
+
+  it('opens the document preview from its top-right control without changing the recorded document', () => {
+    const { container } = render(<RequirementsView {...props()} />)
+    const cell = container.querySelector<HTMLElement>('[data-cell="document"]')!
+    const content = cell.querySelector<HTMLElement>('[class*="documentMarkdown"]')
+    const expand = within(cell).getByRole('button', { name: '展开全文' })
+    expect(expand.getAttribute('aria-expanded')).toBe('false')
+    expect(cell.hasAttribute('data-expanded')).toBe(false)
+    expect(content?.textContent).toContain('系统应当显示任务')
+
+    fireEvent.click(expand)
+    expect(cell.getAttribute('data-expanded')).toBe('true')
+    expect(within(cell).getByRole('button', { name: '收起全文' }).getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(within(cell).getByRole('button', { name: '收起全文' }))
+    expect(cell.hasAttribute('data-expanded')).toBe(false)
+    expect(within(cell).getByRole('button', { name: '展开全文' }).getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('localizes the document disclosure and clarification heading in English', () => {
+    const englishT = makeTranslate(en, commonEn)
+    const englishLocale = <Selected,>(selector: (current: LocaleSnapshot) => Selected): Selected => selector({ active: 'en', locales: [], revision: 0 })
+    const { container } = render(<RequirementsView {...props({ t: englishT, useLocale: englishLocale })} />)
+    expect(container.querySelector('[data-cell="clarification-record"]')?.textContent).toContain('Requirement clarification')
+    expect(screen.getByRole('button', { name: 'Expand document' })).toBeTruthy()
   })
 
   it('keeps the human translation editable inside the cell and the Agent instructions collapsed outside it', () => {
@@ -338,11 +368,11 @@ describe('RequirementsView Notebook', () => {
     const cell = screen.getAllByText('建立 Notebook').map(element => element.closest<HTMLElement>('[data-cell="task"]')).find(Boolean)!
     const spec = cell.parentElement!.querySelector<HTMLElement>('[data-task-agent-spec]')!
     expect(spec.closest('[data-cell="task"]')).toBeNull()
-    expect(within(spec).getByRole('button', { name: '展开 Agent 运行说明 建立 Notebook' }).getAttribute('aria-expanded')).toBe('false')
+    expect(within(spec).getByRole('button', { name: '展开智能体运行说明 建立 Notebook' }).getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(cell)
     expect(within(cell).getByRole('textbox', { name: '人类任务说明' })).toBeTruthy()
     expect(within(cell).queryByRole('textbox', { name: '任务内容 建立 Notebook' })).toBeNull()
-    fireEvent.click(within(spec).getByRole('button', { name: '展开 Agent 运行说明 建立 Notebook' }))
+    fireEvent.click(within(spec).getByRole('button', { name: '展开智能体运行说明 建立 Notebook' }))
     expect(within(spec).getByRole('textbox', { name: '任务内容 建立 Notebook' })).toBeTruthy()
   })
 
@@ -376,7 +406,7 @@ describe('RequirementsView Notebook', () => {
     }) })
 
     const spec = cell.parentElement!.querySelector<HTMLElement>('[data-task-agent-spec]')!
-    fireEvent.click(within(spec).getByRole('button', { name: '展开 Agent 运行说明 建立 Notebook' }))
+    fireEvent.click(within(spec).getByRole('button', { name: '展开智能体运行说明 建立 Notebook' }))
     expect(within(spec).queryByRole('textbox', { name: '任务内容 建立 Notebook' })).toBeNull()
     expect(within(spec).getByText('渲染需求、Task 和验证单元格。')).toBeTruthy()
   })
@@ -410,9 +440,11 @@ describe('RequirementsView Notebook', () => {
     await waitFor(() => { expect(within(cell).getByRole('button', { name: '运行任务 建立 Notebook' })).toBeTruthy() })
 
     fireEvent.click(within(cell).getByRole('button', { name: '更多单元格操作' }))
+    expect(screen.getByRole('menuitem', { name: '请求智能体解释或优化此任务' })).toBeTruthy()
+    expect(within(cell).queryByRole('button', { name: '请求智能体解释或优化此任务' })).toBeNull()
     fireEvent.click(screen.getByRole('menuitem', { name: '查看详情与证据' }))
-    expect(screen.getByRole('complementary', { name: 'Notebook 详情' })).toBeTruthy()
-    expect(within(screen.getByRole('complementary', { name: 'Notebook 详情' })).getByText('TASK-01')).toBeTruthy()
+    expect(screen.getByRole('complementary', { name: '需求工作区详情' })).toBeTruthy()
+    expect(within(screen.getByRole('complementary', { name: '需求工作区详情' })).getByText('TASK-01')).toBeTruthy()
   })
 
   it('offers stop on an executing task and sends its exact identity', async () => {
@@ -561,7 +593,7 @@ describe('RequirementsView Notebook', () => {
     const input = screen.getByRole('textbox', { name: 'Markdown 备注内容' })
     expect(document.activeElement).toBe(input)
     const cell = input.closest('article')!
-    expect(within(cell).getByText('MD')).toBeTruthy()
+    expect(within(cell).getByText('文本')).toBeTruthy()
     expect(within(cell).queryByRole('button', { name: '保存' })).toBeNull()
     expect(within(cell).queryByRole('button', { name: /运行/ })).toBeNull()
     fireEvent.change(input, { target: { value: source } })
@@ -601,7 +633,7 @@ describe('RequirementsView Notebook', () => {
     const cell = group.querySelector<HTMLElement>('[data-cell="task"]')!
     expect(content).toBe(document.activeElement)
     expect(within(cell).getByRole('textbox', { name: '人类任务说明' })).toBeTruthy()
-    expect(within(cell).getByText('TASK2')).toBeTruthy()
+    expect(within(cell).getByText('任务2')).toBeTruthy()
     expect(within(cell).queryByRole('button', { name: '保存' })).toBeNull()
     expect(within(cell).queryByRole('button', { name: '取消' })).toBeNull()
     expect(within(cell).getByRole('button', { name: '运行任务 新任务' }).hasAttribute('disabled')).toBe(true)
@@ -697,7 +729,7 @@ describe('RequirementsView Notebook', () => {
     const toolbar = screen.getByRole('toolbar', { name: '需求视图工具栏' })
     const notebook = container.querySelector('[data-notebook-scroll]')
     expect(toolbar.getAttribute('data-sticky-toolbar')).toBe('true')
-    expect(toolbar.parentElement).toBe(notebook?.parentElement?.parentElement)
+    expect(toolbar.parentElement?.parentElement).toBe(notebook?.parentElement?.parentElement)
     expect(screen.queryByRole('group', { name: '需求内容语言' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '全部运行' }))
     await waitFor(() => { expect(runAll).toHaveBeenCalledWith({ roundId }) })
@@ -706,8 +738,8 @@ describe('RequirementsView Notebook', () => {
     expect(screen.getByRole('menuitem', { name: '全部收起' })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: '全部展开' })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: '重新审核' })).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: '使用中文内容' })).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: '使用英文内容' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: '使用中文内容' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '使用英文内容' })).toBeNull()
     fireEvent.click(screen.getByRole('menuitem', { name: '全部收起' }))
     expect(screen.queryByText('需求文档')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '命令' }))
@@ -715,16 +747,26 @@ describe('RequirementsView Notebook', () => {
     expect(screen.getAllByText('需求文档').length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: '命令' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '使用英文内容' }))
-    expect(screen.getByText('Waiting for task completion.')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '命令' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '重新审核' }))
     await waitFor(() => { expect(requestReview).toHaveBeenCalledOnce() })
 
-    fireEvent.click(screen.getByRole('button', { name: '缩小 Notebook' }))
+    fireEvent.click(screen.getByRole('button', { name: '缩小需求工作区' }))
     expect(screen.getByText('95%')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '放大 Notebook' }))
+    fireEvent.click(screen.getByRole('button', { name: '放大需求工作区' }))
     expect(screen.getByText('100%')).toBeTruthy()
+  })
+
+  it('renders view navigation beside the insertion toolbar and preserves its selection callback', () => {
+    const select = vi.fn()
+    render(<RequirementsView {...props({ navigation: {
+      tabs: [{ id: 'chat', label: '聊天' }, { id: 'requirements', label: '需求' }],
+      activeId: 'requirements', select,
+    } })} />)
+    const tabs = screen.getByRole('tablist', { name: '会话视图' })
+    expect(tabs.parentElement).toBe(screen.getByRole('toolbar', { name: '需求视图工具栏' }).parentElement)
+    expect(screen.getByRole('tab', { name: '需求' }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(screen.getByRole('tab', { name: '聊天' }))
+    expect(select).toHaveBeenCalledWith('chat')
   })
 
   it('keeps Final Test last while supporting edit, withdraw, and Agent assistance actions', async () => {
@@ -757,7 +799,8 @@ describe('RequirementsView Notebook', () => {
     await waitFor(() => { expect(screen.queryByRole('button', { name: '保存' })).toBeNull() })
     cell = selectTask()
     expect(within(cell).queryByRole('button', { name: '添加批注' })).toBeNull()
-    fireEvent.click(within(cell).getByRole('button', { name: '请求 Agent 解释或优化此任务' }))
+    fireEvent.click(within(cell).getByRole('button', { name: '更多单元格操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '请求智能体解释或优化此任务' }))
     expect(addNote).toHaveBeenLastCalledWith(expect.objectContaining({ roundId, kind: 'comment', dispatch: true }))
     await waitFor(() => { expect(openView).toHaveBeenCalledWith('chat', 'TASK-01') })
 
@@ -854,7 +897,7 @@ describe('RequirementsView Notebook', () => {
     cell = selectTask()
     fireEvent.click(within(cell).getByRole('button', { name: '更多单元格操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '查看审核历史' }))
-    expect(screen.getByText('Agent 第 2 轮审核')).toBeTruthy()
+    expect(screen.getByText('智能体第 2 轮审核')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '关闭详情' }))
 
     expect(screen.queryByRole('button', { name: '打开或关闭需求知识图谱' })).toBeNull()

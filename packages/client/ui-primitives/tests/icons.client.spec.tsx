@@ -55,16 +55,16 @@ describe('ic_ds_ icon set', () => {
 })
 
 describe('IntentFlowLogo', () => {
-  it('renders three intent streams and the result node in a square icon', () => {
+  it('renders the RECO three-node mark in a square icon', () => {
     const { container } = render(<primitives.IntentFlowLogo />)
     const svg = container.querySelector('svg')!
     expect(svg.getAttribute('width')).toBe('24')
     expect(svg.getAttribute('height')).toBe('24')
-    expect(svg.getAttribute('viewBox')).toBe('0 0 32 32')
+    expect(svg.getAttribute('viewBox')).toBe('0 0 24 24')
     expect(container.querySelectorAll('circle')).toHaveLength(3)
-    expect(container.querySelectorAll('path')).toHaveLength(4)
+    expect(container.querySelectorAll('path')).toHaveLength(1)
     expect(container.innerHTML).toContain('currentColor')
-    expect(container.innerHTML).toContain('#695AF5')
+    expect(container.innerHTML).toContain('--dsw-alias-state-business-primary')
   })
 })
 

@@ -13,6 +13,7 @@
     - button "Agent presets":
       - img
       - text: Agent presets
+    - button "Side card"
   - button "Open configuration file"
   - button "Close":
     - img
@@ -39,7 +40,7 @@
   - button "System" [pressed]:
     - img
     - text: System
-  - text: Font size Only affects conversation content 14
+  - text: Font size Affects conversation and Requirements workspace body text and headings 14
   - button "Increase font size":
     - img
   - button "Decrease font size":

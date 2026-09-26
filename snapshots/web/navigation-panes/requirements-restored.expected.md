@@ -1,7 +1,10 @@
+- tablist "Conversation views":
+  - tab "Chat"
+  - tab "Trace"
+  - tab "Requirements" [selected]
 - toolbar "Requirements view toolbar":
   - button "Command":
     - img
-    - text: Command
   - button "Code"
   - button "Text"
   - button "Run all":
@@ -12,13 +15,16 @@
     - img
   - strong: "Round 1:"
   - text: 构建并验证导航页面 Tasks ready
-  - group: Clarification record
+  - group: Requirement clarification
   - article:
     - text: "[2]"
     - button "Generate tasks from the requirement document" [disabled]:
       - img
     - text: REQ
     - strong: Requirement document
+    - button "Expand document":
+      - text: Expand document
+      - img
     - heading "需求文档" [level=1]
     - heading "简介" [level=2]
     - paragraph: 构建并验证导航页面，同时保留现有行为。
@@ -31,6 +37,7 @@
     - list:
       - listitem: 当页面打开时，系统应当显示导航内容。
       - listitem: 当视口缩小至移动端时，系统应当保持导航可用。
+  - heading "Development tasks" [level=2]
   - article:
     - text: "[✓]"
     - button "Run task Build navigation HTML" [disabled]:

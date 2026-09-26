@@ -27,10 +27,11 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
           >
             <svg
               aria-hidden="true"
-              data-content="60dca503"
+              data-content="fd297229"
               fill="none"
               height="24"
-              viewBox="0 0 32 32"
+              style="color: var(--dsw-alias-state-business-primary);"
+              viewBox="0 0 24 24"
               width="24"
             />
           </div>
@@ -122,10 +123,11 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
             >
               <svg
                 aria-hidden="true"
-                data-content="60dca503"
+                data-content="fd297229"
                 fill="none"
                 height="24"
-                viewBox="0 0 32 32"
+                style="color: var(--dsw-alias-state-business-primary);"
+                viewBox="0 0 24 24"
                 width="24"
               />
             </div>
@@ -140,7 +142,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
               <span
                 class="fallbackBrandName"
               >
-                IntentFlow
+                RECO
               </span>
             </div>
           </span>
@@ -243,10 +245,11 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
             >
               <svg
                 aria-hidden="true"
-                data-content="60dca503"
+                data-content="fd297229"
                 fill="none"
                 height="24"
-                viewBox="0 0 32 32"
+                style="color: var(--dsw-alias-state-business-primary);"
+                viewBox="0 0 24 24"
                 width="24"
               />
             </div>
@@ -261,7 +264,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
               <span
                 class="fallbackBrandName"
               >
-                IntentFlow
+                RECO
               </span>
             </div>
           </span>

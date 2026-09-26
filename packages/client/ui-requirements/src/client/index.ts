@@ -26,6 +26,7 @@ import type {
 import { EMPTY_REQUIREMENTS_SNAPSHOT, notebookSnapshot, registerRequirementsAssembly } from './assembly.ts'
 import type { RequirementsSnapshot } from './contract.ts'
 import { en, NS, zh, type RequirementsKey } from './locales.ts'
+import { registerLocalizedFilesTab } from './localized-files-tab.ts'
 import { registerRequirementGraphSidebar } from './RequirementGraphSidebar.tsx'
 import { RequirementsView, type RequirementsViewInjected } from './RequirementsView.tsx'
 import type { TraceNavigation } from './knowledge-graph.ts'
@@ -113,8 +114,14 @@ export function apply(ctx: Context): void {
   }
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-requirements: dictionaries')
-  registerRequirementsAssembly(ctx)
   const t = ctx.locale.bind(NS)
+  ctx.effect(() => registerLocalizedFilesTab(
+    ctx.betterSidebar,
+    () => t('sidebar.filesTab'),
+    listener => ctx.locale.subscribe(listener),
+    [zh['sidebar.filesTab'], en['sidebar.filesTab']],
+  ), 'ui-requirements: localized editor-home tab')
+  registerRequirementsAssembly(ctx)
   ctx.effect(() => {
     const dispose = registerRequirementGraphSidebar({
       sidebar: ctx.betterSidebar,
@@ -146,7 +153,7 @@ export function apply(ctx: Context): void {
     locale: NS,
     label: () => t('view.requirements'),
     inject: (sessionId: SessionId): RequirementsViewInjected => ({
-      hooks: { requirements: sourceFor(sessionId) },
+      hooks: { requirements: sourceFor(sessionId), locale: ctx.locale },
       openDeliveryFile: file => openSidebarFile(sessionId, file),
       openDeliveryUrl: (rawUrl) => {
         if (typeof document === 'undefined'
@@ -169,7 +176,6 @@ export function apply(ctx: Context): void {
           if (graphRevealers.get(sessionId) === listener) graphRevealers.delete(sessionId)
         }
       },
-      initialLanguage: ctx.locale.getLocale().active === 'zh' ? 'zh' : 'en',
       startRound: async (request: RequirementRoundStartRequest) => {
         const result = await ctx.remote.sessionRequirements.startRound(sessionId, request)
         return result.ok

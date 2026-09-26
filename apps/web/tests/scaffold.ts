@@ -92,8 +92,8 @@ export const WELCOME_NOTICE_ACK_FIELD = 'welcomeNoticeVersion'
 export const WELCOME_NOTICE_VERSION = '2026-09-07.1'
 export const WELCOME_NOTICE_COPY = {
   zh: {
-    title: '欢迎使用 IntentFlow',
-    body: 'IntentFlow 将澄清后的需求转化为可执行任务和可运行的软件。目前产品仍在持续完善，你的反馈会帮助我们把它做得更好。\n\n选择一个工作区，配置模型提供方，然后描述你想要构建的内容。',
+    title: '欢迎使用 RECO',
+    body: 'RECO 将澄清后的需求转化为可执行任务和可运行的软件。目前产品仍在持续完善，你的反馈会帮助我们把它做得更好。\n\n选择一个工作区，配置模型提供方，然后描述你想要构建的内容。',
     continueLabel: '继续',
   },
 } as const

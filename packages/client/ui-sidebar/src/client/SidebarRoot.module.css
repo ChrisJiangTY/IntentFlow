@@ -154,7 +154,8 @@
 }
 
 .fallbackBrandName {
-  font-size: 17px;
+  font-size: 24px;
+  font-weight: 700;
   letter-spacing: 0px;
   white-space: nowrap;
 }

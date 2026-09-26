@@ -6,7 +6,8 @@
     - img
   - tablist:
     - tab "Chat" [selected]
-    - tab "Trajectory"
+    - tab "Trace"
+    - tab "Requirements"
 - text: Research notes what changed? Referenced session · Research notes {{clock}}
 - button "Copy":
   - img

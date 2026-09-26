@@ -205,6 +205,12 @@ export interface InputZone {
 
 /** Conversation View entries obtain their data from registered standard hooks. */
 export interface ConvViewOwnerProps {
+  /** Navigation displayed inline by the Requirements workspace beside its actions. */
+  navigation?: {
+    readonly tabs: readonly ViewTab[]
+    readonly activeId: string
+    readonly select: (view: string) => void
+  }
   /** Focus request addressed to the selected View. */
   viewRequest: import('./views.ts').ConversationViewRequest | null
   /** Select a View and address one opaque focus identity to it. */

@@ -46,6 +46,41 @@
   max-height: none;
 }
 
+:global(body:has([data-inline-navigation])) .card {
+  border-color: var(--dsw-alias-border-l3);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+:global(body:has([data-inline-navigation])) .header {
+  padding: 16px 16px 0 18px;
+}
+
+:global(body:has([data-inline-navigation])) .title {
+  font: var(--dsw-font-l-20);
+  font-weight: 600;
+}
+
+:global(body:has([data-inline-navigation])) .option {
+  border-radius: 6px;
+}
+
+:global(body:has([data-inline-navigation])) .optionSelected {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 8%, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-state-business-primary);
+}
+
+:global(body:has([data-inline-navigation])) .number {
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+}
+
+:global(body:has([data-inline-navigation])) .optionSelected .number {
+  color: var(--dsw-alias-state-business-primary);
+}
+
 /* The header strip is the whole card when collapsed: the title row needs
    bottom padding once the body that normally carries it is hidden. */
 .cardMinimized .header {

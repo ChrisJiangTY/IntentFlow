@@ -239,7 +239,7 @@ it('opens the graph by default for the current Session and keeps it in the visib
   fireEvent.click(screen.getByRole('button', { name: '展开 第一会话' }))
   const node = screen.getByRole('button', { name: /需求 1：第一会话需求/u })
   fireEvent.click(node)
-  fireEvent.click(screen.getByRole('button', { name: '定位 Notebook' }))
+  fireEvent.click(screen.getByRole('button', { name: '定位需求工作区' }))
   expect(onSelect).toHaveBeenCalledWith(firstSessionId, expect.objectContaining({ requirementTitle: '第一会话需求' }))
   dispose()
 })

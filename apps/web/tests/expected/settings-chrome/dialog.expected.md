@@ -13,6 +13,7 @@
     - button "Agent 预设":
       - img
       - text: Agent 预设
+    - button "侧边卡片"
   - button "打开配置文件"
   - button "关闭":
     - img
@@ -39,7 +40,7 @@
   - button "跟随系统" [pressed]:
     - img
     - text: 跟随系统
-  - text: 字号大小 仅影响会话内容的字号 14
+  - text: 字号大小 影响会话与需求工作区正文及其标题 14
   - button "增大字号":
     - img
   - button "减小字号":

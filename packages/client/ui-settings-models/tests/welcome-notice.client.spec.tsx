@@ -99,8 +99,8 @@ function mount(
 describe('WelcomeNotice', () => {
   it('uses the exact owner copy in both GUI locales', () => {
     expect(WELCOME_NOTICE_COPY.en).toEqual({
-      title: 'Welcome to IntentFlow',
-      body: 'IntentFlow turns clarified requirements into executable tasks and working software. It is under active development, and your feedback helps shape the product.\n\nChoose a workspace, configure a model provider, and describe what you want to build.',
+      title: 'Welcome to RECO',
+      body: 'RECO turns clarified requirements into executable tasks and working software. It is under active development, and your feedback helps shape the product.\n\nChoose a workspace, configure a model provider, and describe what you want to build.',
       continueLabel: 'Continue',
     })
     expect(en.welcomeBody).toBe(WELCOME_NOTICE_COPY.en.body)

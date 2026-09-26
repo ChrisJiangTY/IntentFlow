@@ -80,7 +80,7 @@ export interface ThemeDefinition {
 export interface ThemeSnapshot {
   /** The persisted preference (may be `system`). */
   preference: ThemePreference
-  /** Conversation content font size in px (integer within FONT_SIZE_MIN..FONT_SIZE_MAX). */
+  /** Conversation and Requirements workspace body font size in px; headings scale with it (integer within FONT_SIZE_MIN..FONT_SIZE_MAX). */
   fontSize: number
   /**
    * The resolved active theme (`system` resolved via prefers-color-scheme)
@@ -239,9 +239,9 @@ export class ThemeRuntime {
   }
 
   /**
-   * Change the conversation content font size — the only font-size write
-   * entry. Accepted values are written through the settings scope and emit
-   * `theme/change`.
+   * Change the shared base size for conversation and Requirements workspace text — the only
+   * font-size write entry. Headings scale with that base. Accepted values use the settings
+   * scope and emit `theme/change`.
    * @param px - integer px within FONT_SIZE_MIN..FONT_SIZE_MAX; out-of-range or fractional values throw.
    */
   setFontSize(px: number): void {

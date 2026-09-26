@@ -63,11 +63,11 @@ it('boots the built plugin graph and renders a fixture session end to end', asyn
   const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
   if (clientBuildValue('DSH_CLIENT_BUILD_PROFILE') === 'official') {
     expect(document.querySelector('svg[viewBox="26 0 156 24"]')).not.toBeNull()
-    expect(screen.queryByText('IntentFlow Local Build')).toBeNull()
+    expect(screen.queryByText('RECO Local Build')).toBeNull()
   } else {
     expect(document.querySelector('svg[viewBox="0 0 32 32"]')).not.toBeNull()
-    screen.getByText('IntentFlow')
-    expect(screen.queryByText('IntentFlow Local Build')).toBeNull()
+    screen.getByText('RECO')
+    expect(screen.queryByText('RECO Local Build')).toBeNull()
   }
   // The compact layout dropped group session counts; the fixture workspace
   // group row renders immediately with its sessions beneath it.

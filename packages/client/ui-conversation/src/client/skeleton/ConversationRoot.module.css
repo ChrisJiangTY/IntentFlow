@@ -62,6 +62,15 @@
   display: none;
 }
 
+.header[data-inline-navigation] {
+  padding-block: 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.header[data-inline-navigation]::after {
+  display: none;
+}
+
 .titleRow {
   display: flex;
   align-items: center;

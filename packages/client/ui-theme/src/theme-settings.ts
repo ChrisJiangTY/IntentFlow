@@ -11,7 +11,7 @@ export const THEME_SETTINGS_NAMESPACE = 'ui-theme'
 /** Field carrying the selected built-in theme preference. */
 export const THEME_PREFERENCE_FIELD = 'preference'
 
-/** Field carrying the conversation content font size. */
+/** Field carrying the conversation and Requirements workspace body size that also scales headings. */
 export const FONT_SIZE_FIELD = 'fontSize'
 
 /** Theme preference persisted by the product Appearance row. */
@@ -33,7 +33,9 @@ export const DEFAULT_FONT_SIZE = 14
 export interface ThemeSettings {
   /** Selected built-in preference. */
   preference: ThemePreference
-  /** Conversation content font size in px (integer within {@link FONT_SIZE_MIN}..{@link FONT_SIZE_MAX}). */
+  /** Conversation and Requirements workspace body font size in px; headings scale with it.
+   * An integer within {@link FONT_SIZE_MIN}..{@link FONT_SIZE_MAX}.
+   */
   fontSize: number
 }
 

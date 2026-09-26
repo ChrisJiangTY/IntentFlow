@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "IntentFlow",
-  "short_name": "IntentFlow",
+  "name": "RECO",
+  "short_name": "RECO",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",
@@ -13,7 +13,7 @@
       "purpose": "any"
     },
     {
-      "src": "/intentflow-icon.png",
+      "src": "/reco-icon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"

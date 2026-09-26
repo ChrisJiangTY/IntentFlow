@@ -197,7 +197,7 @@ export type TrajectoryTranslate =
 
 /** English dictionary, checked complete against the Chinese source of truth. */
 export const en: Record<TrajectoryKey, string> = {
-  'view.trajectory': 'Trajectory',
+  'view.trajectory': 'Trace',
   'toolbar.aria': 'Trajectory toolbar',
   'toolbar.duration': 'Duration',
   'toolbar.useActualDuration': 'Use actual duration',

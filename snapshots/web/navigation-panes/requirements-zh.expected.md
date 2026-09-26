@@ -1,24 +1,30 @@
-- toolbar "Requirements view toolbar":
-  - button "Command":
+- tablist "会话视图":
+  - tab "对话"
+  - tab "轨迹"
+  - tab "需求" [selected]
+- toolbar "需求视图工具栏":
+  - button "命令":
     - img
-    - text: Command
-  - button "Code"
-  - button "Text"
-  - button "Run all":
+  - button "代码"
+  - button "文本"
+  - button "全部运行":
     - img
-    - text: Run all
+    - text: 全部运行
 - main:
-  - button "Collapse round":
+  - button "收起轮次":
     - img
-  - strong: "Round 1:"
-  - text: 构建并验证导航页面 Completed
-  - group: Clarification record
+  - strong: 第 1 轮：
+  - text: 构建并验证导航页面 已完成
+  - group: 需求澄清
   - article:
     - text: "[2]"
-    - button "Generate tasks from the requirement document" [disabled]:
+    - button "根据需求文档生成任务" [disabled]:
       - img
-    - text: REQ
-    - strong: Requirement document
+    - text: 需求
+    - strong: 需求文档
+    - button "展开全文":
+      - text: 展开全文
+      - img
     - heading "需求文档" [level=1]
     - heading "简介" [level=2]
     - paragraph: 构建并验证导航页面，同时保留现有行为。
@@ -31,108 +37,107 @@
     - list:
       - listitem: 当页面打开时，系统应当显示导航内容。
       - listitem: 当视口缩小至移动端时，系统应当保持导航可用。
+  - heading "开发任务" [level=2]
   - article:
     - text: "[✓]"
-    - button "Run task Build navigation HTML" [disabled]:
+    - button "运行任务 Build navigation HTML" [disabled]:
       - img
-    - text: TASK1
+    - text: 任务1
     - strong: Build navigation HTML
-    - textbox "Human task description":
-      - /placeholder: Translate this Agent task in one or two sentences…
+    - textbox "人类任务说明":
+      - /placeholder: 用一两句话说明这个智能体任务…
       - text: Users can navigate the page with a clear, complete layout.
-    - toolbar "Notebook cell toolbar":
-      - button "Select previous task" [disabled]:
+    - toolbar "需求单元格工具栏":
+      - button "选择上一个任务" [disabled]:
         - img
-      - button "Select next task" [disabled]:
+      - button "选择下一个任务" [disabled]:
         - img
-      - button "More cell actions":
+      - button "更多单元格操作":
         - img
-    - button "Ask the Agent to explain or optimize this task":
+  - region "智能体运行说明 Build navigation HTML":
+    - button "展开智能体运行说明 Build navigation HTML":
       - img
-  - region "Agent execution instructions Build navigation HTML":
-    - button "Expand Agent execution instructions Build navigation HTML":
+      - text: 智能体运行说明
+  - region "任务输出 Build navigation HTML":
+    - button "收起任务输出 Build navigation HTML" [expanded]:
       - img
-      - text: Agent execution instructions
-  - region "Task output Build navigation HTML":
-    - button "Collapse task output Build navigation HTML" [expanded]:
-      - img
-    - heading "Deliverables" [level=3]
-    - paragraph: No structured deliverables are available.
+    - heading "交付结果" [level=3]
+    - paragraph: 暂无已整理的交付结果。
   - article:
     - text: "[!]"
-    - button "Run task Check mobile navigation":
+    - button "运行任务 Check mobile navigation":
       - img
-    - text: TASK2
+    - text: 任务2
     - strong: Check mobile navigation
-    - textbox "Human task description":
-      - /placeholder: Translate this Agent task in one or two sentences…
+    - textbox "人类任务说明":
+      - /placeholder: 用一两句话说明这个智能体任务…
       - text: Mobile navigation remains usable at the target breakpoint.
-  - region "Agent execution instructions Check mobile navigation":
-    - button "Expand Agent execution instructions Check mobile navigation":
+  - region "智能体运行说明 Check mobile navigation":
+    - button "展开智能体运行说明 Check mobile navigation":
       - img
-      - text: Agent execution instructions
-  - region "Task output Check mobile navigation":
-    - button "Collapse task output Check mobile navigation" [expanded]:
+      - text: 智能体运行说明
+  - region "任务输出 Check mobile navigation":
+    - button "收起任务输出 Check mobile navigation" [expanded]:
       - img
-    - heading "Deliverables" [level=3]
+    - heading "交付结果" [level=3]
     - paragraph: No mobile layout delivered.
   - article:
     - text: "[ ]"
-    - button "Run task Final Test" [disabled]:
+    - button "运行任务 Final Test" [disabled]:
       - img
-    - text: TASK3
+    - text: 任务3
     - strong: Final Test
-    - textbox "Human task description":
-      - /placeholder: Translate this Agent task in one or two sentences…
+    - textbox "人类任务说明":
+      - /placeholder: 用一两句话说明这个智能体任务…
       - text: The complete navigation experience meets every acceptance criterion.
-  - region "Agent execution instructions Final Test":
-    - button "Expand Agent execution instructions Final Test":
+  - region "智能体运行说明 Final Test":
+    - button "展开智能体运行说明 Final Test":
       - img
-      - text: Agent execution instructions
+      - text: 智能体运行说明
   - article:
-    - text: MD
-    - strong: Markdown note
-    - button "Edit note":
+    - text: 文本
+    - strong: Markdown 备注
+    - button "编辑备注":
       - img
-      - text: Edit note
+      - text: 编辑备注
     - paragraph: Keep the existing DSH conversation controls visible.
   - article:
     - text: "[2]"
     - img
     - text: ✓
-    - strong: Final validation
-    - text: Completed
+    - strong: 最终验证
+    - text: 已完成
     - paragraph: HTML 已生成；移动端检查仍有一个普通执行失败，但没有历史需求回归。
-  - group "Notebook zoom":
-    - button "Zoom out Notebook": −
+  - group "需求工作区缩放":
+    - button "缩小需求工作区": −
     - text: 100%
-    - button "Zoom in Notebook": ＋
-- complementary "Notebook details":
-  - strong: Cell details
-  - button "Close details": ×
-  - paragraph: "Round 1: 构建并验证导航页面"
+    - button "放大需求工作区": ＋
+- complementary "需求工作区详情":
+  - strong: 单元格详情
+  - button "关闭详情": ×
+  - paragraph: 第 1 轮： 构建并验证导航页面
   - heading "Build navigation HTML" [level=3]
   - paragraph: Users can navigate the page with a clear, complete layout.
-  - term: Status
-  - definition: Completed
-  - term: Task ID
+  - term: 状态
+  - definition: 已完成
+  - term: 任务编号
   - definition: TASK-WEB-01
-  - term: Agent turn
+  - term: 智能体轮次
   - definition: "2"
   - text: Implemented index.html and preserved the current navigation behavior.
-  - heading "Review evidence" [level=3]
+  - heading "审核证据" [level=3]
   - strong: R1 · 导航结果必须清晰可读
   - paragraph: 录制回复包含所需标题、恰好两个列表项和指定代码块。
-  - term: Audit status
-  - definition: verified
-  - heading "Sources" [level=4]
+  - term: 审核状态
+  - definition: 已验证
+  - heading "来源" [level=4]
   - list:
-    - listitem: "#204 · user · 用户明确指定了最终回复的结构。"
-  - heading "Related files" [level=4]
+    - listitem: "#204 · 用户 · 用户明确指定了最终回复的结构。"
+  - heading "关联文件" [level=4]
   - list:
     - listitem:
       - code: nav-a.md
-      - text: · touches · 第一项导航内容来自该文件。
+      - text: · 涉及 · 第一项导航内容来自该文件。
     - listitem:
       - code: nav-b.md
-      - text: · touches · 第二项导航内容来自该文件。
+      - text: · 涉及 · 第二项导航内容来自该文件。

@@ -1221,14 +1221,14 @@ describe('manual web performance: complex workspace and history', () => {
       })
       const opened = await measure(cdp, async () => {
         await contentSearch.value.click()
-        await page.getByRole('tab', { name: 'Trajectory', exact: true }).waitFor({ timeout: 30_000 })
+        await page.getByRole('tab', { name: 'Trace', exact: true }).waitFor({ timeout: 30_000 })
         return conversationTurns(page)
       })
       expect(opened.value).toBe(DEFAULT_HISTORY_TURNS)
 
       const trajectoryRows = page.getByRole('row')
       const coldTrajectory = await measure(cdp, async () => {
-        await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+        await page.getByRole('tab', { name: 'Trace', exact: true }).click()
         return stableCount(trajectoryRows, count => count === EXPECTED_TRAJECTORY_ROWS)
       })
       expect(coldTrajectory.value).toBe(EXPECTED_TRAJECTORY_ROWS)
@@ -1260,7 +1260,7 @@ describe('manual web performance: complex workspace and history', () => {
       }
 
       const warmTrajectory = await measure(cdp, async () => {
-        await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+        await page.getByRole('tab', { name: 'Trace', exact: true }).click()
         return stableCount(trajectoryRows, count => count === EXPECTED_TRAJECTORY_ROWS)
       })
       expect(warmTrajectory.value).toBe(EXPECTED_TRAJECTORY_ROWS)

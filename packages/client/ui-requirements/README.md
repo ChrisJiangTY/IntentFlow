@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-client-ui-requirements` registers the Requirements tab beside Chat and Trajectory. It presents each raw request as a summarized product round with collapsed clarification history, an editable Chinese requirement document, executable Task blocks, checkpoint reviews, and final validation. Its `dsh-better-sidebar` tab traces the current Session's requirements through Tasks to recorded file modifications.
+`dsh-client-ui-requirements` registers the Requirements tab beside Chat and Trajectory. It presents each raw request as a product round with a prominent summary, collapsed requirement clarification, a compact expandable Chinese requirement document, executable Task blocks, checkpoint reviews, and final validation. Its `dsh-better-sidebar` tab traces the current Session's requirements through Tasks to recorded file modifications.
 
 ## Table of Contents
 
@@ -25,13 +25,17 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
+The RECO workspace places Chat, Trace, and Requirements beside `+ Code`, `+ Text`, and Run all in one navigation row. These actions operate on the current Session's requirement document and Tasks; their cards, labels, and status come from recorded Session data rather than example text in the [desktop design](https://www.figma.com/design/JastOBEf9QnfNAqGqyaSIR/Untitled?node-id=67-96). The 33 px Session header and 40 px navigation row align both dividers with the right-sidebar tabs; the bottom and right panel toggles sit at the workspace's upper-right corner without reserving tab width. The tabs retain their own file, graph, and task views. Change the interface language in Settings at the lower left; the workspace follows the shared locale, while user-authored text, Agent output, filenames, and code retain their recorded content.
+
+Settings → General also controls conversation and Requirements Notebook reading text from 12 to 17 px, with 14 px as the default. Round, clarification, document, and Task headings remain only one to three pixels above the chosen body size. Compact labels and the requirement graph retain their own sizing.
+
 Click an inline-code `.html` or `.htm` delivery filename to preview the page in the right sidebar. Relative paths resolve against the current Session's working directory; absolute paths retain their location. The viewer reports missing files, and the Notebook reports an unavailable viewer or working directory.
 
-Submit a new requirement through the DSH bottom composer while the Requirements tab is active. The composer routes the raw text to `sessionRequirements.startRound`. The round header later displays the Agent-generated summary as read-only text. The original input and every clarification question and answer remain available inside the collapsed clarification record.
+Submit a new requirement through the DSH bottom composer while the Requirements tab is active. The composer routes the raw text to `sessionRequirements.startRound`. The round heading displays the Agent-generated, read-only summary in the largest type. Directly below it, the default-collapsed Requirement clarification section holds the original input and every clarification question and answer; the requirement document follows that section.
 
 Each time the Requirements view opens, the Notebook scrolls to the latest cell. A round the user collapsed stays closed when switching views, so the user must expand it manually.
 
-When ambiguity is resolved, the Notebook renders the complete requirement document as Markdown. Edit opens the source in place with explicit Save and Cancel controls. Saving creates a new document revision; an invalid revision displays its validation issues and disables Generate Tasks. Tasks generated from older document revisions remain visible and read-only. The document cannot change while generation is running or after Task execution begins.
+When ambiguity is resolved, the Notebook renders the requirement document as a compact Markdown preview. The document card's upper-right Expand document button reveals the complete text, which scrolls with the Notebook; Collapse document restores the preview. Edit opens the source in place with explicit Save and Cancel controls. Saving creates a new document revision; an invalid revision displays its validation issues and disables Generate Tasks. Tasks generated from older document revisions remain visible and read-only. The document cannot change while generation is running or after Task execution begins.
 
 Generate Tasks is the document block's execution action. It asks the main Agent to inspect the repository and first produce ordered top-level technical Task blocks from the exact document revision, then translate each finished Agent Task into a concise human task description. Each Task includes verification for its scope, and their acceptance references cover the document together. The Requirements view contains no Plan card and no Plan approval action.
 
@@ -65,7 +69,7 @@ The Notebook projection consumes append-only `requirement/round`, `requirement/c
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The package contributes target-specific Event Definitions, an append-only snapshot builder, a Session selector hook, a `conversation.view` registration, and a composer route supplied to `ui-conversation`. The native DSH composer remains the only entry point for a new product round. Notebook mutations call generated `sessionRequirements` Remotes, so document revisions, Task order, edits, withdrawals, notes, executions, and Run All state are replayable Session facts.
+The package contributes target-specific Event Definitions, an append-only snapshot builder, a Session selector hook, a `conversation.view` registration, and a composer route supplied to `ui-conversation`. The conversation shell passes its registered view tabs and selection action to the Requirements view for the shared navigation row. The native DSH composer remains the only entry point for a new product round. Notebook mutations call generated `sessionRequirements` Remotes, so document revisions, Task order, edits, withdrawals, notes, executions, and Run All state are replayable Session facts.
 
 The Notebook reads the host's complete `requirementNotebook` projection through the Session projection subscription. Chat pagination, refreshes, and stream reconnection cannot remove saved cells. Each document revision retains its task list, and each execution attempt retains its delivery output, including while a revised task runs again. Current tasks remain editable under the normal locks; older document tasks are read-only. The package registers one graph descriptor through the injected `betterSidebar` service. When a Session becomes active, the adapter performs a type-only open with that Session scope; it prepares the graph without expanding the sidebar and does not repeat the open for same-Session state changes. Session changes replace the graph source and reset tab-local interaction state. The apply layer joins current-document Tasks and their execution attempts without reading other Session logs, keeps snippet-bearing graphs in memory, and writes only a revision token to tab metadata when the current graph changes. Product copy belongs to the typed `requirements` locale namespace.
 
@@ -106,6 +110,6 @@ Host-owned prompts follow normal provider caching rules. Local selection, foldin
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-See the [round validation Agent Note](../../../.agents/notes/implemented/simplification/2026-09-24-validate-round-without-final-test.md), the [progressive graph Agent Note](../../../.agents/notes/implemented/feature/2026-09-17-progressive-requirement-graph.md), the [switchable graph layouts Agent Note](../../../.agents/notes/implemented/feature/2026-09-18-switchable-requirement-graph-layouts.md), and the [Workspace requirement knowledge graph Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.md).
+See the [RECO workspace presentation Agent Note](../../../.agents/notes/implemented/feature/2026-09-24-reco-requirements-workspace.md), the [round validation Agent Note](../../../.agents/notes/implemented/simplification/2026-09-24-validate-round-without-final-test.md), the [progressive graph Agent Note](../../../.agents/notes/implemented/feature/2026-09-17-progressive-requirement-graph.md), the [switchable graph layouts Agent Note](../../../.agents/notes/implemented/feature/2026-09-18-switchable-requirement-graph-layouts.md), and the [Workspace requirement knowledge graph Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.md).
 
 </details>

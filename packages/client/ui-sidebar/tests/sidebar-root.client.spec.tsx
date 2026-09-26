@@ -110,8 +110,8 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    expect(screen.getByText('IntentFlow')).toBeTruthy()
-    expect(screen.queryByText('IntentFlow Local Build')).toBeNull()
+    expect(screen.getByText('RECO')).toBeTruthy()
+    expect(screen.queryByText('RECO Local Build')).toBeNull()
     expect(screen.queryByText('1.2.3-rc.4-0123456-dirty')).toBeNull()
     expect(container.querySelector('svg')).not.toBeNull()
   })

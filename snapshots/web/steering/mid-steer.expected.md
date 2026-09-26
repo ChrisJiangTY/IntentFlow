@@ -8,7 +8,8 @@
     - img
   - tablist:
     - tab "Chat" [selected]
-    - tab "Trajectory"
+    - tab "Trace"
+    - tab "Requirements"
 - button "System prompt":
   - img
   - img

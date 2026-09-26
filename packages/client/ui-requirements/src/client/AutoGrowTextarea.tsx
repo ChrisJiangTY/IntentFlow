@@ -5,11 +5,12 @@ import { useLayoutEffect, useRef, type TextareaHTMLAttributes } from 'react'
 interface AutoGrowTextareaProps extends Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'onChange'> {
   readonly value: string
   readonly onValueChange: (value: string) => void
+  readonly minimumHeight?: number
 }
 
-function resizeTextarea(element: HTMLTextAreaElement): void {
+function resizeTextarea(element: HTMLTextAreaElement, minimumHeight: number): void {
   element.style.height = '0px'
-  element.style.height = `${Math.max(30, element.scrollHeight)}px`
+  element.style.height = `${Math.max(minimumHeight, element.scrollHeight)}px`
 }
 
 /**
@@ -17,11 +18,11 @@ function resizeTextarea(element: HTMLTextAreaElement): void {
  * @param props - Controlled source text, change handler, and textarea attributes.
  * @returns the auto-sized textarea.
  */
-export function AutoGrowTextarea({ value, onValueChange, ...props }: AutoGrowTextareaProps) {
+export function AutoGrowTextarea({ value, onValueChange, minimumHeight = 30, ...props }: AutoGrowTextareaProps) {
   const ref = useRef<HTMLTextAreaElement>(null)
   useLayoutEffect(() => {
-    if (ref.current !== null) resizeTextarea(ref.current)
-  }, [value])
+    if (ref.current !== null) resizeTextarea(ref.current, minimumHeight)
+  }, [minimumHeight, value])
   useLayoutEffect(() => {
     if (props.autoFocus) ref.current?.focus()
   }, [props.autoFocus])
@@ -32,7 +33,7 @@ export function AutoGrowTextarea({ value, onValueChange, ...props }: AutoGrowTex
       rows={1}
       value={value}
       onChange={(event) => {
-        resizeTextarea(event.currentTarget)
+        resizeTextarea(event.currentTarget, minimumHeight)
         onValueChange(event.currentTarget.value)
       }}
     />

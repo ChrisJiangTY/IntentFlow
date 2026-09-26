@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-client-ui-requirements` 在“对话”和“轨迹”旁注册“需求”标签页。它把每条原始需求显示为带简短摘要的产品轮次，其中包含折叠的澄清记录、可编辑中文需求文档、可执行 Task 块、检查点审核和最终验证。它的 `dsh-better-sidebar` 标签页把当前 Session 的用户需求、Task 与已记录的文件修改串联起来。
+`dsh-client-ui-requirements` 在“对话”和“轨迹”旁注册“需求”标签页。它把每条原始需求显示为以摘要为主标题的产品轮次，其中包含默认折叠的需求澄清、可展开的紧凑中文需求文档、可执行 Task 块、检查点审核和最终验证。它的 `dsh-better-sidebar` 标签页把当前 Session 的用户需求、Task 与已记录的文件修改串联起来。
 
 ## 目录
 
@@ -25,13 +25,17 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+RECO 工作区把“对话”“轨迹”“需求”与“+ 代码”“+ 文本”“全部运行”放在同一导航行。这些操作针对当前 Session 的需求文档和 Task；卡片、标题与状态取自已记录的 Session 数据，不使用[桌面设计稿](https://www.figma.com/design/JastOBEf9QnfNAqGqyaSIR/Untitled?node-id=67-96)里的示例文字。33 px 的 Session 标题栏与 40 px 的导航行使两条分隔线和右侧栏标签行对齐；底部及右侧面板按钮位于工作区右上角，不占用标签行宽度。标签行原有的文件、图谱和任务视图继续可用。界面语言在左下角“设置”中切换；工作区跟随共享语言设置，用户输入、Agent 输出、文件名和代码仍保留记录的原文。
+
+“设置 → 通用”也可将会话及需求 Notebook 的阅读字号调至 12–17 px，默认 14 px。轮次、需求澄清、文档和 Task 标题仅比所选正文字号大 1–3 px；紧凑标签与需求图谱保留各自的字号。
+
 点击交付结果中以行内代码显示的 `.html` 或 `.htm` 文件名，可在右侧栏预览网页。相对路径按当前 Session 的工作目录解析，绝对路径保留原位置。文件缺失时查看器显示错误，查看器或工作目录不可用时 Notebook 显示提示。
 
-在“需求”标签页激活时，通过 DSH 底部输入框提交新需求。输入框把原始文本路由到 `sessionRequirements.startRound`。轮次标题随后显示 Agent 生成的只读摘要。原始输入以及每个澄清问题和回答保留在默认折叠的澄清记录中。
+在“需求”标签页激活时，通过 DSH 底部输入框提交新需求。输入框把原始文本路由到 `sessionRequirements.startRound`。轮次标题以本组最大字号显示 Agent 生成的只读摘要。其下默认折叠的“需求澄清”保留原始输入以及每个澄清问题和回答；需求文档排列在澄清区之后。
 
 每次进入“需求”视图时，Notebook 都会滚动到最新单元格。用户收起的轮次在切换视图后仍保持收起，需要用户手动展开。
 
-歧义解决后，Notebook 使用 Markdown 渲染完整需求文档。“编辑”会在原位置打开源文本，并提供明确的“保存”和“取消”控件。保存会创建新的文档修订；无效修订显示验证问题并禁用“生成任务”。来自更早文档修订的 Task 保持可见且只读。任务生成期间以及 Task 执行开始后，文档不能修改。
+歧义解决后，Notebook 默认以紧凑预览显示 Markdown 需求文档。文档卡片右上角的“展开全文”按钮显示全文，全文随 Notebook 外层滚动；“收起全文”恢复预览。“编辑”会在原位置打开源文本，并提供明确的“保存”和“取消”控件。保存会创建新的文档修订；无效修订显示验证问题并禁用“生成任务”。来自更早文档修订的 Task 保持可见且只读。任务生成期间以及 Task 执行开始后，文档不能修改。
 
 “生成任务”是需求文档块的执行操作。它要求主 Agent 检查仓库，先从确切文档修订生成有序的顶层技术 Task，再把每个已经确定的 Agent Task 翻译成简洁的人类任务说明。每个 Task 包含自身范围内的验证，所有 Task 的验收标准引用共同覆盖整份文档。“需求”视图不包含 Plan 卡片或 Plan 审批操作。
 
@@ -65,7 +69,7 @@ Notebook 投影消费仅追加的 `requirement/round`、`requirement/clarificati
 <details>
 <summary>实现细节——点击展开</summary>
 
-本包贡献 target 专属 Event Definition、仅追加快照 builder、Session selector hook、`conversation.view` 注册和提供给 `ui-conversation` 的输入框路由。原生 DSH 输入框仍是发起新产品轮次的唯一入口。Notebook 变更调用生成的 `sessionRequirements` Remote，因此文档修订、Task 顺序、编辑、撤回、note、执行和“全部运行”状态都能作为 Session 事实重放。
+本包贡献 target 专属 Event Definition、仅追加快照 builder、Session selector hook、`conversation.view` 注册和提供给 `ui-conversation` 的输入框路由。对话外壳把已注册的视图标签与切换操作传给需求视图，用于共用导航行。原生 DSH 输入框仍是发起新产品轮次的唯一入口。Notebook 变更调用生成的 `sessionRequirements` Remote，因此文档修订、Task 顺序、编辑、撤回、note、执行和“全部运行”状态都能作为 Session 事实重放。
 
 Notebook 通过 Session 投影订阅读取宿主完整的 `requirementNotebook` 投影。聊天分页、刷新和流重连不会移除已保存的单元格。每个文档修订保留对应任务列表，每次执行保留交付结果，修改后的任务重新执行时也会保留此前结果。当前任务遵守正常编辑锁定规则；旧文档任务保持只读。本包通过注入的 `betterSidebar` 服务注册一个图谱描述符。Session 变为活动状态时，适配器使用该 Session scope 执行仅指定类型的打开；它会准备图谱而不展开右侧栏，也不会因同一 Session 的状态变化重复打开。Session 变化会替换图谱数据源并重置标签页本地交互状态。apply 层关联当前文档的 Task 与执行记录而不读取其他 Session 日志，把含代码片段的图谱保留在内存中，并仅在当前图谱变化时把修订标记写入标签页元数据。产品文案属于类型化的 `requirements` locale namespace。
 
@@ -106,6 +110,6 @@ Notebook 通过 Session 投影订阅读取宿主完整的 `requirementNotebook` 
 <details>
 <summary>维护者的工作上下文——点击展开</summary>
 
-参阅[本轮验证 Agent Note](../../../.agents/notes/implemented/simplification/2026-09-24-validate-round-without-final-test.zh.md)、[渐进式图谱 Agent Note](../../../.agents/notes/implemented/feature/2026-09-17-progressive-requirement-graph.zh.md)、[可切换图谱布局 Agent Note](../../../.agents/notes/implemented/feature/2026-09-18-switchable-requirement-graph-layouts.zh.md)和[Workspace 需求知识图谱 Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.zh.md)。
+参阅[RECO 工作区呈现 Agent Note](../../../.agents/notes/implemented/feature/2026-09-24-reco-requirements-workspace.zh.md)、[本轮验证 Agent Note](../../../.agents/notes/implemented/simplification/2026-09-24-validate-round-without-final-test.zh.md)、[渐进式图谱 Agent Note](../../../.agents/notes/implemented/feature/2026-09-17-progressive-requirement-graph.zh.md)、[可切换图谱布局 Agent Note](../../../.agents/notes/implemented/feature/2026-09-18-switchable-requirement-graph-layouts.zh.md)和[Workspace 需求知识图谱 Agent Note](../../../.agents/notes/implemented/feature/2026-09-08-workspace-requirement-knowledge-graph.zh.md)。
 
 </details>

@@ -10,6 +10,7 @@ import {
 } from 'react'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import type { LocaleSnapshot } from '@deepseek-ai/dsh-client-locale/client'
 import {
   IconChecklistOutline14,
   IconChevronDownOutline14,
@@ -18,7 +19,6 @@ import {
   IconEllipsisOutline16,
   IconPlayOutline16,
   IconRefreshOutline14,
-  IconSearchOutline16,
   IconSparkle16,
   IconTrashOutline16,
   MarkdownText,
@@ -72,7 +72,10 @@ export type RequirementActionOutcome<T> =
 /** Session-bound actions supplied by the browser plugin. */
 export interface RequirementsViewInjected {
   /** Requirement Notebook snapshot source bound to the selected Session. */
-  readonly hooks: { readonly requirements: ObservableSnapshot<RequirementsSnapshot> }
+  readonly hooks: {
+    readonly requirements: ObservableSnapshot<RequirementsSnapshot>
+    readonly locale: ObservableSnapshot<LocaleSnapshot>
+  }
   /** Start a raw requirement round and let the Agent clarify or submit its document. */
   startRound: (request: RequirementRoundStartRequest) => Promise<RequirementActionOutcome<RequirementRoundStartResult>>
   /** Persist one optimistic requirement-document edit. */
@@ -107,8 +110,6 @@ export interface RequirementsViewInjected {
   openDeliveryFile: (path: string) => boolean
   /** Bind sidebar graph navigation to this mounted Notebook. */
   bindGraphReveal: (listener: (node: TraceNavigation) => void) => () => void
-  /** Initial content language derived from the active product locale. */
-  readonly initialLanguage: RequirementContentLanguage
 }
 
 interface SelectedCell {
@@ -223,6 +224,7 @@ function taskStatusKey(status: RequirementTaskListNode['data']['tasks'][number][
 export function RequirementsView({
   sessionId,
   useRequirements,
+  useLocale,
   editDocument,
   generateTasks,
   runTask,
@@ -240,12 +242,12 @@ export function RequirementsView({
   openDeliveryFile,
   bindGraphReveal,
   openView,
-  initialLanguage,
+  navigation,
   t,
 }: ConvViewProps & InjectFace<RequirementsViewInjected> & PropsLocale<typeof NS>) {
   const snapshot = useRequirements(value => value)
   const rootRef = useRef<HTMLDivElement>(null)
-  const [language, setLanguage] = useState<RequirementContentLanguage>(initialLanguage)
+  const language: RequirementContentLanguage = useLocale(value => value.active) === 'zh' ? 'zh' : 'en'
   const sessionKey = String(sessionId)
   const [collapsedState, setCollapsedState] = useState(() => ({
     sessionKey,
@@ -263,6 +265,7 @@ export function RequirementsView({
   const initialScrollDone = useRef(false)
   const [collapsedOutputs, setCollapsedOutputs] = useState<Set<string>>(new Set())
   const [expandedTaskSpecs, setExpandedTaskSpecs] = useState<Set<string>>(new Set())
+  const [expandedDocuments, setExpandedDocuments] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<SelectedCell | undefined>()
   const [documentDraft, setDocumentDraft] = useState<DocumentDraft | undefined>()
   const taskDrafts = useRef(new Map<RequirementTaskId, TaskDraft>())
@@ -620,6 +623,7 @@ export function RequirementsView({
             <span className={css.cellMenu} role="menu">
               <button type="button" role="menuitem" onClick={() => { openInspector('details', { roundId, taskId }) }}>{t('more.details')}</button>
               <button type="button" role="menuitem" onClick={() => { openInspector('history', { roundId, taskId }) }}>{t('more.history')}</button>
+              {task !== undefined && <button type="button" role="menuitem" onClick={() => { setMoreOpen(undefined); void askAgentAboutTask(roundId, taskId, task.statement) }}><IconSparkle16 size={14} />{t('cell.assist')}</button>}
               <button type="button" role="menuitem" onClick={() => { setMoreOpen(undefined); void review() }}><IconRefreshOutline14 size={12} />{t('toolbar.review')}</button>
               {task?.status === 'pending' && task.kind !== 'final-test' && !listBusy && <button className={css.destructiveMenuItem} type="button" role="menuitem" onClick={() => {
                 setMoreOpen(undefined)
@@ -713,6 +717,7 @@ export function RequirementsView({
               <AutoGrowTextarea
                 aria-label={t('cell.taskSummary')}
                 className={css.taskSummaryInput}
+                minimumHeight={22}
                 placeholder={t('cell.taskSummaryPlaceholder')}
                 readOnly={!summaryEditable}
                 onFocus={() => { selectTask(roundId, task) }}
@@ -737,7 +742,6 @@ export function RequirementsView({
           <span className={css.statusRail} aria-hidden />
           {historical && <span>{t('cell.previousTasks')}</span>}
           {isSelected && !historical && renderCellToolbar(roundId, task.id)}
-          {isSelected && <button className={css.assistButton} type="button" aria-label={t('cell.assist')} onClick={(event) => { event.stopPropagation(); void askAgentAboutTask(roundId, task.id, task.statement) }}><IconSparkle16 size={15} /></button>}
         </article>
         <section className={css.taskAgentSpec} aria-label={t('cell.taskExecutionSpecRegion', { task: label })} data-task-agent-spec data-expanded={specExpanded || undefined}>
           <button
@@ -825,6 +829,8 @@ export function RequirementsView({
     const isCollapsed = collapsed.has(String(roundId))
     const roundRegression = (validation?.data.regressions.length ?? 0) > 0
     const activeDocumentDraft = documentDraft?.roundId === roundId ? documentDraft : undefined
+    const documentExpansionKey = document === undefined ? undefined : `${sessionKey}:${roundId}:${document.data.revision}`
+    const documentExpanded = documentExpansionKey !== undefined && expandedDocuments.has(documentExpansionKey)
     const documentLocked = snapshot.taskExecutions.some(node => node.data.roundId === roundId)
     const roundStatusKey = `round.status.${round.data.status}` as RequirementsKey
     const validationStatusKey = validation === undefined ? undefined : `validation.${validation.data.status}` as RequirementsKey
@@ -855,7 +861,7 @@ export function RequirementsView({
               ))}
             </details>
             {document !== undefined && (
-              <article className={`${css.cell} ${!document.data.valid ? css.taskFailure : ''}`} data-cell="document" data-status={document.data.valid ? 'completed' : 'failed'}>
+              <article className={`${css.cell} ${!document.data.valid ? css.taskFailure : ''}`} data-cell="document" data-status={document.data.valid ? 'completed' : 'failed'} data-expanded={documentExpanded || undefined}>
                 <span className={css.executionMark} data-status={document.data.valid ? 'completed' : 'failed'}>{document.data.valid ? `[${document.data.turn}]` : '[!]'}</span>
                 <div className={css.cellGutter}>
                   <button
@@ -871,7 +877,26 @@ export function RequirementsView({
                 </div>
                 <div className={css.cellBody}>
                   <div className={css.cellTitle}><span>{t('cell.documentType')}</span><strong>{t('cell.requirementDocument')}</strong>
-                    {!documentLocked && activeDocumentDraft === undefined && <button className={css.inlineAction} type="button" onClick={() => { setDocumentDraft({ roundId, revision: document.data.revision, source: document.data.markdown }) }}>{t('cell.edit')}</button>}
+                    <div className={css.documentActions}>
+                      {!documentLocked && activeDocumentDraft === undefined && <button className={css.inlineAction} type="button" onClick={() => { setDocumentDraft({ roundId, revision: document.data.revision, source: document.data.markdown }) }}>{t('cell.edit')}</button>}
+                      {activeDocumentDraft === undefined && <button
+                        className={css.documentExpand}
+                        type="button"
+                        aria-expanded={documentExpanded}
+                        aria-label={t(documentExpanded ? 'cell.collapseDocument' : 'cell.expandDocument')}
+                        onClick={() => { setExpandedDocuments((current) => {
+                          const next = new Set(current)
+                          if (documentExpansionKey !== undefined) {
+                            if (next.has(documentExpansionKey)) next.delete(documentExpansionKey)
+                            else next.add(documentExpansionKey)
+                          }
+                          return next
+                        }) }}
+                      >
+                        {t(documentExpanded ? 'cell.collapseDocument' : 'cell.expandDocument')}
+                        {documentExpanded ? <IconChevronUpOutline14 size={14} /> : <IconChevronDownOutline14 size={14} />}
+                      </button>}
+                    </div>
                   </div>
                   {activeDocumentDraft === undefined
                     ? <div className={css.documentMarkdown}><MarkdownText text={document.data.markdown} labels={markdownLabels} /></div>
@@ -889,6 +914,7 @@ export function RequirementsView({
                 <span className={css.statusRail} aria-hidden />
               </article>
             )}
+            {(previousTasks.length > 0 || (taskList?.data.tasks.length ?? 0) > 0) && <h2 className={css.taskSectionHeading}>{t('cell.developmentTasks')}</h2>}
             {previousTasks.map(task => renderTask(round, task, true))}
             {taskList?.data.tasks.map(task => renderTask(round, task))}
             {roundNotes.map(note => note.data.kind === 'text' && !note.data.dispatched ? (
@@ -939,29 +965,31 @@ export function RequirementsView({
 
   return (
     <div className={css.root} data-conversation-composer-overlay="" ref={rootRef}>
-      <div className={css.toolbar} role="toolbar" aria-label={t('toolbar.aria')} data-sticky-toolbar="true">
-        <div className={css.commandMenu}>
-          <button className={css.commandButton} type="button" aria-expanded={commandOpen} onClick={() => { setCommandOpen(value => !value) }}><IconSearchOutline16 size={12} />{t('toolbar.command')}</button>
-          {commandOpen && <div className={css.commandPopover} role="menu">
-            <button type="button" role="menuitem" disabled={reviewing} onClick={() => { setCommandOpen(false); void review() }}><IconRefreshOutline14 size={12} />{t('toolbar.review')}</button>
-            <button type="button" role="menuitem" onClick={() => { setCollapsed(new Set(orderedRounds.map(round => String(round.data.roundId)))); setCommandOpen(false) }}>{t('toolbar.collapseAll')}</button>
-            <button type="button" role="menuitem" onClick={() => { setCollapsed(new Set()); setCommandOpen(false) }}>{t('toolbar.expandAll')}</button>
-            <button type="button" role="menuitem" onClick={() => { setLanguage('zh'); setCommandOpen(false) }}>{t('command.useZh')}</button>
-            <button type="button" role="menuitem" onClick={() => { setLanguage('en'); setCommandOpen(false) }}>{t('command.useEn')}</button>
-          </div>}
+      <div className={css.navigationRow}>
+        {navigation !== undefined && <div className={css.viewTabs} role="tablist" aria-label={t('navigation.aria')}>
+          {navigation.tabs.map(tab => <button key={tab.id} type="button" role="tab" aria-selected={tab.id === navigation.activeId} onClick={() => { navigation.select(tab.id) }}>{tab.label}</button>)}
+        </div>}
+        <div className={css.toolbar} role="toolbar" aria-label={t('toolbar.aria')} data-sticky-toolbar="true">
+          <div className={css.commandMenu}>
+            <button className={css.commandButton} type="button" aria-label={t('toolbar.command')} title={t('toolbar.command')} aria-expanded={commandOpen} onClick={() => { setCommandOpen(value => !value) }}><IconEllipsisOutline16 size={16} /></button>
+            {commandOpen && <div className={css.commandPopover} role="menu">
+              <button type="button" role="menuitem" disabled={reviewing} onClick={() => { setCommandOpen(false); void review() }}><IconRefreshOutline14 size={12} />{t('toolbar.review')}</button>
+              <button type="button" role="menuitem" onClick={() => { setCollapsed(new Set(orderedRounds.map(round => String(round.data.roundId)))); setCommandOpen(false) }}>{t('toolbar.collapseAll')}</button>
+              <button type="button" role="menuitem" onClick={() => { setCollapsed(new Set()); setCommandOpen(false) }}>{t('toolbar.expandAll')}</button>
+            </div>}
+          </div>
+          <button className={css.toolbarButton} type="button" disabled={latestRound === undefined || currentLatestTaskList === undefined || activeRunAll !== undefined || running !== undefined} onClick={() => {
+            if (latestRound === undefined) return
+            void insertTask(latestRound.data.roundId)
+          }}><span aria-hidden>+</span>{t('toolbar.code')}</button>
+          <button className={css.toolbarButton} type="button" disabled={latestRound === undefined || running !== undefined} onClick={() => {
+            if (latestRound === undefined) return
+            void insertMarkdownNote(latestRound.data.roundId)
+          }}><span aria-hidden>+</span>{t('toolbar.text')}</button>
+          {activeRunAll !== undefined
+            ? <button className={css.runAllButton} type="button" disabled={activeRunAll.data.status === 'stopping' || running !== undefined} onClick={() => { void stopEverything(activeRunAll.data.roundId) }}>{t(activeRunAll.data.status === 'stopping' ? 'toolbar.stopping' : 'toolbar.stopRunAll')}</button>
+            : <button className={css.runAllButton} type="button" disabled={latestRound === undefined || currentLatestTaskList === undefined || running !== undefined} onClick={() => { if (latestRound !== undefined) void runEverything(latestRound.data.roundId) }}><span className={css.runAllIcon}><IconPlayOutline16 size={12} /></span>{t('toolbar.runAll')}</button>}
         </div>
-        <button className={css.toolbarButton} type="button" disabled={latestRound === undefined || currentLatestTaskList === undefined || activeRunAll !== undefined || running !== undefined} onClick={() => {
-          if (latestRound === undefined) return
-          void insertTask(latestRound.data.roundId)
-        }}><span aria-hidden>＋</span>{t('toolbar.code')}</button>
-        <button className={css.toolbarButton} type="button" disabled={latestRound === undefined || running !== undefined} onClick={() => {
-          if (latestRound === undefined) return
-          void insertMarkdownNote(latestRound.data.roundId)
-        }}><span aria-hidden>＋</span>{t('toolbar.text')}</button>
-        <span className={css.toolbarDivider} />
-        {activeRunAll !== undefined
-          ? <button className={css.runAllButton} type="button" disabled={activeRunAll.data.status === 'stopping' || running !== undefined} onClick={() => { void stopEverything(activeRunAll.data.roundId) }}>{t(activeRunAll.data.status === 'stopping' ? 'toolbar.stopping' : 'toolbar.stopRunAll')}</button>
-          : <button className={css.runAllButton} type="button" disabled={latestRound === undefined || currentLatestTaskList === undefined || running !== undefined} onClick={() => { if (latestRound !== undefined) void runEverything(latestRound.data.roundId) }}><IconPlayOutline16 size={13} />{t('toolbar.runAll')}</button>}
       </div>
       {actionError !== undefined && <div className={css.actionError}>{t('toolbar.actionFailed')} · {actionError}</div>}
       <div className={css.workspaceBody}>
@@ -1017,9 +1045,9 @@ export function RequirementsView({
                     <div className={css.evidenceCard} key={requirement.id}>
                       <strong>{requirement.id} · {text(requirement.title)}</strong>
                       <p>{text(requirement.audit.summary)}</p>
-                      <dl><dt>{t('details.audit')}</dt><dd>{requirement.audit.status}</dd></dl>
-                      {requirement.sources.length > 0 && <><h4>{t('details.sources')}</h4><ul>{requirement.sources.map(source => <li key={`${requirement.id}:${source.seq}`}>#{source.seq} · {source.kind} · {text(source.summary)}</li>)}</ul></>}
-                      {requirement.code.length > 0 && <><h4>{t('details.files')}</h4><ul>{requirement.code.map(link => <li key={`${requirement.id}:${link.path}:${link.startLine ?? ''}`}><code>{link.path}</code> · {link.relation} · {text(link.evidence)}</li>)}</ul></>}
+                      <dl><dt>{t('details.audit')}</dt><dd>{t(`details.auditStatus.${requirement.audit.status}`)}</dd></dl>
+                      {requirement.sources.length > 0 && <><h4>{t('details.sources')}</h4><ul>{requirement.sources.map(source => <li key={`${requirement.id}:${source.seq}`}>#{source.seq} · {t(`details.sourceKind.${source.kind}`)} · {text(source.summary)}</li>)}</ul></>}
+                      {requirement.code.length > 0 && <><h4>{t('details.files')}</h4><ul>{requirement.code.map(link => <li key={`${requirement.id}:${link.path}:${link.startLine ?? ''}`}><code>{link.path}</code> · {t(`details.codeRelation.${link.relation}`)} · {text(link.evidence)}</li>)}</ul></>}
                       {requirement.audit.gaps.length > 0 && <><h4>{t('details.gaps')}</h4><ul>{requirement.audit.gaps.map((gap, index) => <li key={`${requirement.id}:gap:${index}`}>{text(gap)}</li>)}</ul></>}
                     </div>
                   ))}

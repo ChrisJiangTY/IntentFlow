@@ -10,7 +10,8 @@
     - img
   - tablist:
     - tab "Chat" [selected]
-    - tab "Trajectory"
+    - tab "Trace"
+    - tab "Requirements"
 - text: Give one concrete event sourcing example. {{clock}}
 - button "Copy":
   - img

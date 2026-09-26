@@ -1,5 +1,5 @@
-- dialog "欢迎使用 IntentFlow":
-  - heading "欢迎使用 IntentFlow" [level=2]
-  - paragraph: IntentFlow 将澄清后的需求转化为可执行任务和可运行的软件。目前产品仍在持续完善，你的反馈会帮助我们把它做得更好。
+- dialog "欢迎使用 RECO":
+  - heading "欢迎使用 RECO" [level=2]
+  - paragraph: RECO 将澄清后的需求转化为可执行任务和可运行的软件。目前产品仍在持续完善，你的反馈会帮助我们把它做得更好。
   - paragraph: 选择一个工作区，配置模型提供方，然后描述你想要构建的内容。
   - button "继续"

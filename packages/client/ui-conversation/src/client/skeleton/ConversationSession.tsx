@@ -82,6 +82,7 @@ export function ConversationSessionHeader({
   return (
     <header
       className={clsx(css.header, hideChrome && css.headerHidden)}
+      data-inline-navigation={active?.id === 'requirements' || undefined}
       aria-hidden={hideChrome || undefined}
     >
       {!hideChrome && (
@@ -145,7 +146,7 @@ export function ConversationSessionHeader({
               {renderSlot('conversation.session.header.utilities', {})}
             </div>
           </div>
-          {tabs.length > 1 && (
+          {tabs.length > 1 && active?.id !== 'requirements' && (
             <div className={css.tabs} role="tablist">
               {tabs.map(viewTab => (
                 <button
@@ -202,6 +203,7 @@ export function ConversationSession({
   return (
     <div className={css.viewArea}>
       {active !== undefined && renderSlot('conversation.view', {
+        ...(active.id === 'requirements' ? { navigation: { tabs, activeId: active.id, select: actions.setView } } : {}),
         viewRequest,
         openView: actions.openView,
         completeViewRequest: actions.completeViewRequest,

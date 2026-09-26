@@ -1,6 +1,6 @@
 /**
  * Font-size preference row registered into the General section item slot:
- * title + body-text-only description + stepper pill (centered value; hover
+ * title + scope description + stepper pill (centered value; hover
  * reveals the up/down arrow column anchored to the pill's right edge) + a px
  * unit label after the pill. Registered by this package — the theme feature
  * owns the content font-size setting the same way it owns the appearance
