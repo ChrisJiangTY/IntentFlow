@@ -50,6 +50,7 @@ import type {
 } from '@deepseek-ai/dsh-session-requirements/client'
 import type { NS } from './locales.ts'
 import type {
+  RequirementDocumentNode,
   RequirementNoteNode,
   RequirementRoundNode,
   RequirementTaskExecutionNode,
@@ -178,6 +179,15 @@ function latestBy<T>(nodes: readonly T[], keyOf: (node: T) => string): Map<strin
   return result
 }
 
+function activeTaskList(
+  round: RequirementRoundNode | undefined,
+  document: RequirementDocumentNode | undefined,
+  list: RequirementTaskListNode | undefined,
+): RequirementTaskListNode | undefined {
+  if (round?.data.kind === 'task') return list?.data.documentRevision === 0 ? list : undefined
+  return document !== undefined && list?.data.documentRevision === document.data.revision ? list : undefined
+}
+
 function statusMark(
   task: RequirementTaskListNode['data']['tasks'][number],
   execution: RequirementTaskExecutionNode | undefined,
@@ -217,7 +227,7 @@ function taskStatusKey(status: RequirementTaskListNode['data']['tasks'][number][
 
 /**
  * Render the Figma-aligned requirements Notebook inside the resident DSH shell.
- * The default conversation composer remains owned by ui-conversation below the view.
+ * The Session composer is rendered in the right Chat panel.
  * @param props - Conversation hooks, Notebook actions, and localized copy.
  * @returns the complete requirements Notebook view.
  */
@@ -305,9 +315,10 @@ export function RequirementsView({
     return grouped
   }, [snapshot.clarifications])
   const taskLists = useMemo(() => latestBy(snapshot.taskLists, node => String(node.data.roundId)), [snapshot.taskLists])
-  const validations = useMemo(() => latestBy(snapshot.validations.filter(node =>
-    node.anchorSeq >= (taskLists.get(String(node.data.roundId))?.anchorSeq ?? -1)),
-  node => String(node.data.roundId)), [snapshot.validations, taskLists])
+  const latestValidations = useMemo(() => latestBy(snapshot.validations, node => String(node.data.roundId)), [snapshot.validations])
+  const validations = useMemo(() => new Map([...latestValidations].filter(([roundId, node]) =>
+    node.anchorSeq >= Math.max(documents.get(roundId)?.anchorSeq ?? -1, taskLists.get(roundId)?.anchorSeq ?? -1))),
+  [latestValidations, documents, taskLists])
   const notes = useMemo(() => {
     const grouped = new Map<string, RequirementNoteNode[]>()
     for (const node of latestBy(snapshot.notes, note => `${note.data.roundId}:${note.data.noteId}`).values()) {
@@ -325,12 +336,10 @@ export function RequirementsView({
   const orderedRounds = [...rounds.values()].sort((left, right) => left.data.round - right.data.round)
   const latestRound = orderedRounds.at(-1)
   const latestRoundDocument = latestRound === undefined ? undefined : documents.get(String(latestRound.data.roundId))
-  const latestRoundTaskList = latestRoundDocument === undefined
-    ? undefined
-    : taskLists.get(String(latestRound?.data.roundId))
-  const currentLatestTaskList = latestRoundTaskList?.data.documentRevision === latestRoundDocument?.data.revision
-    ? latestRoundTaskList
-    : undefined
+  const currentLatestTaskList = activeTaskList(
+    latestRound, latestRoundDocument,
+    latestRound === undefined ? undefined : taskLists.get(String(latestRound.data.roundId)),
+  )
   const latestRunAll = latestRound === undefined ? undefined : runAlls.get(String(latestRound.data.roundId))
   const activeRunAll = latestRunAll !== undefined
     && (latestRunAll.data.status === 'running' || latestRunAll.data.status === 'stopping')
@@ -339,10 +348,7 @@ export function RequirementsView({
   const selectedRound = selected === undefined ? undefined : rounds.get(String(selected.roundId))
   const selectedDocument = selected === undefined ? undefined : documents.get(String(selected.roundId))
   const projectedSelectedTaskList = selected === undefined ? undefined : taskLists.get(String(selected.roundId))
-  const selectedTaskList = selectedDocument !== undefined
-    && projectedSelectedTaskList?.data.documentRevision === selectedDocument.data.revision
-    ? projectedSelectedTaskList
-    : undefined
+  const selectedTaskList = activeTaskList(selectedRound, selectedDocument, projectedSelectedTaskList)
   const selectedTask = selected?.taskId === undefined || selectedTaskList === undefined
     ? undefined
     : selectedTaskList.data.tasks.find(task => task.id === selected.taskId)
@@ -357,6 +363,12 @@ export function RequirementsView({
     code: { copyLabel: t('copy'), copiedLabel: t('copied') },
     footnotes: t('markdown.footnotes'),
   }), [t])
+  const roundLabel = (round: RequirementRoundNode): string => t(round.data.kind === 'task'
+    ? 'round.taskLabel' : 'round.label', { round: round.data.round })
+  const roundSummary = (round: RequirementRoundNode, document: RequirementDocumentNode | undefined,
+    list: RequirementTaskListNode | undefined): string => round.data.kind === 'task'
+    ? list?.data.tasks[0]?.title || round.data.input
+    : document?.data.summary ?? t('round.summary.pending')
 
   useLayoutEffect(() => {
     if (initialScrollDone.current || latestRound === undefined) return
@@ -682,6 +694,11 @@ export function RequirementsView({
           data-task-id={String(task.id)}
           data-selected={isSelected || undefined}
           data-status={taskRegression ? 'regression' : task.status}
+          onBlur={(event) => {
+            if (event.currentTarget.contains(event.relatedTarget)) return
+            const current = taskDrafts.current.get(task.id)
+            if (current !== undefined) void persistTask(current)
+          }}
           onClick={(event) => {
             selectTask(roundId, task)
             if (summaryEditable && !(event.target instanceof HTMLTextAreaElement)) {
@@ -712,7 +729,22 @@ export function RequirementsView({
             <div className={css.taskReadView}>
               <div className={css.taskHeadingRow}>
                 <span>{t('cell.taskIndex', { task: task.order + 1 })}</span>
-                <strong>{label}</strong>
+                {isSelected && taskEditable
+                  ? <AutoGrowTextarea
+                    aria-label={t('cell.taskTitle')}
+                    className={css.taskTitleInput}
+                    placeholder={t('cell.newTask')}
+                    value={source.split('\n')[0] ?? ''}
+                    onValueChange={(title) => {
+                      const current = taskDrafts.current.get(task.id) ?? {
+                        roundId, taskId: task.id, source, summary, savedSource: source, savedSummary: summary, savedSeq: 0,
+                      }
+                      current.source = taskSource(title.replaceAll('\n', ' '), taskParts(current.source).statement)
+                      taskDrafts.current.set(task.id, current)
+                      renderDrafts(value => value + 1)
+                    }}
+                  />
+                  : <strong>{taskParts(source).title || t('cell.newTask')}</strong>}
               </div>
               <AutoGrowTextarea
                 aria-label={t('cell.taskSummary')}
@@ -721,10 +753,6 @@ export function RequirementsView({
                 placeholder={t('cell.taskSummaryPlaceholder')}
                 readOnly={!summaryEditable}
                 onFocus={() => { selectTask(roundId, task) }}
-                onBlur={() => {
-                  const current = taskDrafts.current.get(task.id)
-                  if (current !== undefined) void persistTask(current)
-                }}
                 value={summary}
                 onValueChange={(nextSummary) => {
                   const current = taskDrafts.current.get(task.id) ?? {
@@ -815,9 +843,8 @@ export function RequirementsView({
     const roundId = round.data.roundId
     const document = documents.get(String(roundId))
     const projectedTaskList = taskLists.get(String(roundId))
-    const taskList = document !== undefined && projectedTaskList?.data.documentRevision === document.data.revision
-      ? projectedTaskList
-      : undefined
+    const taskList = activeTaskList(round, document, projectedTaskList)
+    const taskRound = round.data.kind === 'task'
     const currentTaskIds = new Set(taskList?.data.tasks.map(task => task.id))
     const previousTaskLists = [...latestBy(snapshot.taskLists.filter(node => node.data.roundId === roundId),
       node => String(node.data.documentRevision)).values()]
@@ -825,6 +852,7 @@ export function RequirementsView({
       .filter(task => !currentTaskIds.has(task.id))
     const clarification = clarifications.get(String(roundId)) ?? []
     const validation = validations.get(String(roundId))
+    const historicalValidation = validation === undefined ? latestValidations.get(String(roundId)) : undefined
     const roundNotes = (notes.get(String(roundId)) ?? []).filter(note => note.data.kind === 'text')
     const isCollapsed = collapsed.has(String(roundId))
     const roundRegression = (validation?.data.regressions.length ?? 0) > 0
@@ -840,13 +868,13 @@ export function RequirementsView({
           <button className={css.roundToggle} type="button" aria-label={t(isCollapsed ? 'round.expand' : 'round.collapse')} onClick={() => { toggleRound(String(roundId)) }}>
             {isCollapsed ? <IconChevronDownOutline14 size={14} /> : <IconChevronUpOutline14 size={14} />}
           </button>
-          <strong>{t('round.label', { round: round.data.round })}</strong>
-          <span>{document?.data.summary ?? t('round.summary.pending')}</span>
+          <strong>{roundLabel(round)}</strong>
+          <span>{roundSummary(round, document, taskList)}</span>
           <span className={`${css.roundStatus} ${roundRegression ? css.regressionText : ''}`}>{t(roundStatusKey)}</span>
         </header>
         {!isCollapsed && (
           <div className={css.cells}>
-            <details className={css.clarificationRecord} data-cell="clarification-record">
+            {!taskRound && <details className={css.clarificationRecord} data-cell="clarification-record">
               <summary>{t('cell.clarificationRecord')}</summary>
               <div><strong>{t('cell.rawRequirement')}</strong><p>{round.data.input}</p></div>
               {clarification.map(node => (
@@ -859,7 +887,7 @@ export function RequirementsView({
                   })}
                 </section>
               ))}
-            </details>
+            </details>}
             {document !== undefined && (
               <article className={`${css.cell} ${!document.data.valid ? css.taskFailure : ''}`} data-cell="document" data-status={document.data.valid ? 'completed' : 'failed'} data-expanded={documentExpanded || undefined}>
                 <span className={css.executionMark} data-status={document.data.valid ? 'completed' : 'failed'}>{document.data.valid ? `[${document.data.turn}]` : '[!]'}</span>
@@ -914,7 +942,7 @@ export function RequirementsView({
                 <span className={css.statusRail} aria-hidden />
               </article>
             )}
-            {(previousTasks.length > 0 || (taskList?.data.tasks.length ?? 0) > 0) && <h2 className={css.taskSectionHeading}>{t('cell.developmentTasks')}</h2>}
+            {(previousTasks.length > 0 || (taskList?.data.tasks.length ?? 0) > 0) && <h2 className={css.taskSectionHeading}>{t(taskRound ? 'cell.standaloneTasks' : 'cell.developmentTasks')}</h2>}
             {previousTasks.map(task => renderTask(round, task, true))}
             {taskList?.data.tasks.map(task => renderTask(round, task))}
             {roundNotes.map(note => note.data.kind === 'text' && !note.data.dispatched ? (
@@ -937,6 +965,17 @@ export function RequirementsView({
                 <div><strong>{t('cell.text')}</strong><p>{note.data.content}</p></div>
               </article>
             ))}
+            {historicalValidation !== undefined && (
+              <article className={`${css.validationCell} ${css.historicalValidation}`} data-cell="historical-validation" data-status="stale">
+                <span className={css.executionMark}>[×]</span>
+                <div className={css.validationIcon}><IconChecklistOutline14 size={14} /></div>
+                <div className={css.cellBody}>
+                  <div className={css.cellTitle}><strong>{t('cell.previousValidation')}</strong></div>
+                  <p>{text(historicalValidation.data.summary)}</p>
+                </div>
+                <span className={css.statusRail} aria-hidden />
+              </article>
+            )}
             {validation !== undefined && (
               <article
                 className={`${css.validationCell} ${validation.data.regressions.length > 0 ? css.regression : ''} ${validation.data.status === 'failed' ? css.taskFailure : ''}`}
@@ -964,7 +1003,7 @@ export function RequirementsView({
     : 'details.title'
 
   return (
-    <div className={css.root} data-conversation-composer-overlay="" ref={rootRef}>
+    <div className={css.root} ref={rootRef}>
       <div className={css.navigationRow}>
         {navigation !== undefined && <div className={css.viewTabs} role="tablist" aria-label={t('navigation.aria')}>
           {navigation.tabs.map(tab => <button key={tab.id} type="button" role="tab" aria-selected={tab.id === navigation.activeId} onClick={() => { navigation.select(tab.id) }}>{tab.label}</button>)}
@@ -1018,7 +1057,9 @@ export function RequirementsView({
         <aside className={css.details} aria-label={t('details.aria')}>
           <div className={css.detailsHeader}><strong>{t(inspectorTitle)}</strong><button type="button" aria-label={t('details.close')} onClick={() => { setInspector(undefined) }}>×</button></div>
           <div className={css.detailsBody}>
-            <p className={css.detailsRound}>{t('round.label', { round: inspectionRound.data.round })} {documents.get(String(inspectionRound.data.roundId))?.data.summary ?? t('round.summary.pending')}</p>
+            <p className={css.detailsRound}>{roundLabel(inspectionRound)} {roundSummary(inspectionRound,
+              documents.get(String(inspectionRound.data.roundId)),
+              taskLists.get(String(inspectionRound.data.roundId)))}</p>
             {inspector === 'details' && (
               <>
                 {selectedTask !== undefined ? (

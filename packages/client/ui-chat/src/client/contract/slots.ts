@@ -120,8 +120,8 @@ export interface ChatViewInjected {
   loadOlder: () => void
   loadImage: MessageImageLoader
   chatScroll: {
-    save: (position: ChatScrollPosition | null) => void
-    read: () => ChatScrollPosition | null
+    save: (position: ChatScrollPosition | null, surface?: 'main' | 'right') => void
+    read: (surface?: 'main' | 'right') => ChatScrollPosition | null
   }
   forkAt: (seq: number) => void
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined

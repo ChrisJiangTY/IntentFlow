@@ -31,8 +31,8 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { AgentPresetDocument, AgentPresetErrorDetailsMap, AgentPresetRoster } from './types.ts'
 import type {} from '@deepseek-ai/dsh-session-projection'
-// Type-only: resolves the registry notification emitted after scope reparenting.
-import type {} from '@deepseek-ai/dsh-tools'
+import { RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
+import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 import { settingsNamespace, type SettingsScope, type default as SettingsService } from '@deepseek-ai/dsh-settings'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { discoverPresets, SHIPPED_PRESET_ROOT, USER_PRESET_DIR } from './discovery.ts'
@@ -164,6 +164,7 @@ export class AgentPresets extends TypertRemoteService {
     })).default([]),
     includeShippedRoot: z.boolean().default(true),
     includeUserRoot: z.boolean().default(true),
+    toolAllowLists: z.dict(z.array(z.string())).default({}),
   }) as z<Config>
 
   /**
@@ -389,10 +390,39 @@ export class AgentPresets extends TypertRemoteService {
    */
   private readonly bindings = new WeakMap<ScopeKey, ScopeParentBinding>()
 
+  /** Agent-owned masks, replaced when a blank session changes preset. */
+  private readonly toolFilters = new WeakMap<ScopeKey, () => void>()
+
+  /** Check the named inherited tools before changing an Agent's parent scope. */
+  private checkToolFilter(presetId: string, standing: { readonly key: ScopeKey }): ToolRestriction | undefined {
+    const allow = this.config.toolAllowLists?.[presetId]
+    if (allow === undefined) return undefined
+    if (allow.includes(RUN_CODE_NAME)) {
+      throw new PresetMountError(presetId, `tool allow list cannot name reserved transport "${RUN_CODE_NAME}"`)
+    }
+    const tools = this.ctx.get('tools')
+    if (tools === undefined) throw new PresetMountError(presetId, 'tool allow list requires the tools service')
+    const known = new Set(tools.schemas(standing.key).map(tool => tool.name))
+    const missing = allow.filter(name => !known.has(name))
+    if (missing.length > 0) {
+      throw new PresetMountError(presetId, `tool allow list names unknown inherited tools: ${missing.join(', ')}`)
+    }
+    return { allow }
+  }
+
+  /** Replace the Agent scope's inherited-tool mask after its preset link changes. */
+  private applyToolFilter(agentCtx: Context, key: ScopeKey, filter: ToolRestriction | undefined): void {
+    const next = filter === undefined ? undefined : agentCtx.tools.restrict(filter)
+    this.toolFilters.get(key)?.()
+    if (next === undefined) this.toolFilters.delete(key)
+    else this.toolFilters.set(key, next)
+  }
+
   /**
    * Compose one agent from a preset: ensure the preset's standing mount, then
    * parent the agent's scope key to it so the mount's registrations and
-   * listeners cover this agent.
+   * listeners cover this agent. A configured allow list filters host and
+   * preset tools in the Agent's own scope.
    *
    * Call from the agent factory's `setup(agentCtx)`; a rejection there rolls
    * the agent creation back, so a broken preset never yields a half-composed
@@ -409,11 +439,13 @@ export class AgentPresets extends TypertRemoteService {
     }
     const preset = await this.resolveMountable(id)
     const standing = await this.ensureStanding(preset)
+    const filter = this.checkToolFilter(preset.id, standing)
     // The one bind of this agent's ancestry. The binding is the only re-link
     // authority, held privately so nothing outside this roster can move a
     // composed agent to another preset; a later recompose layer re-links
     // through it under the caller-owned blank-session contract.
     this.bindings.set(agentKey, bindScopeParent(agentKey, standing.key))
+    this.applyToolFilter(agentCtx, agentKey, filter)
     return preset
   }
 
@@ -429,11 +461,10 @@ export class AgentPresets extends TypertRemoteService {
    * parent's history was produced under (and a preset deleted since would fail
    * the child outright while its parent keeps running).
    *
-   * Synchronous, and with no composition failure mode of its own — it reads no
-   * roster, mounts nothing, and touches no file — which is what lets a child
-   * creation window use it: the two in-process subagent drivers compose their
-   * children inside a synchronous `setup`. It still rejects a caller error, as
-   * the `@throws` below record.
+   * Synchronous: it reads no roster, mounts nothing, and touches no file, so
+   * child creation can call it inside `setup`. A configured inherited-tool
+   * allow list applies to the child and rejects unknown tool names before
+   * binding its scope.
    *
    * A parent that joined no preset — a rosterless deployment — yields no join
    * and no error: there, the model-facing rows sit in the host composition and
@@ -441,7 +472,7 @@ export class AgentPresets extends TypertRemoteService {
    * @param agentCtx - the joining agent's scope context.
    * @param parentCtx - the scope context of the agent whose composition to join.
    * @returns the preset id joined, or undefined when the parent joined none.
-   * @throws when `agentCtx` carries no scope, or has already joined a preset.
+   * @throws when `agentCtx` carries no scope, has already joined a preset, or the selected tool allow list is invalid.
    */
   composeFrom(agentCtx: Context, parentCtx: Context): string | undefined {
     const agentKey = scopeOf(agentCtx)
@@ -450,7 +481,9 @@ export class AgentPresets extends TypertRemoteService {
     }
     const standing = standingMountFor(parentCtx)
     if (standing === undefined) return undefined
+    const filter = this.checkToolFilter(standing.presetId, standing)
     this.bindings.set(agentKey, bindScopeParent(agentKey, standing.key))
+    this.applyToolFilter(agentCtx, agentKey, filter)
     return standing.presetId
   }
 
@@ -644,7 +677,8 @@ export class AgentPresets extends TypertRemoteService {
    * that never composed one has nothing to re-link: the switch is then the
    * agent's first bind, exactly a mount. A committed re-link emits
    * `tools/change` because changing the parent scope changes the Agent's
-   * resolved tool set without adding or removing registry entries.
+   * resolved tool set without adding or removing registry entries. The Agent's
+   * inherited-tool allow list changes with the preset.
    * @param agentCtx - the agent's scope context.
    * @param id - the preset to compose the agent from instead.
    * @returns the preset now installed.
@@ -657,12 +691,14 @@ export class AgentPresets extends TypertRemoteService {
     }
     const preset = await this.resolveMountable(id)
     const standing = await this.ensureStanding(preset)
+    const filter = this.checkToolFilter(preset.id, standing)
     const binding = this.bindings.get(agentKey)
     if (binding === undefined) {
       this.bindings.set(agentKey, bindScopeParent(agentKey, standing.key))
     } else {
       binding.rebind(standing.key)
     }
+    this.applyToolFilter(agentCtx, agentKey, filter)
     // Reparenting changes every scope-layered tool view without adding or
     // removing a registration. Publish the registry's normal invalidation so
     // Agent-owned overlays can reconcile with the new ancestry.

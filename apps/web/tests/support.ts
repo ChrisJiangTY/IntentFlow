@@ -55,7 +55,7 @@ export async function newEnglishPage(
  * @param page - page containing the Chat view.
  */
 export async function expandTurnProcesses(page: Page): Promise<void> {
-  const controls = page.locator('[data-turn-process]')
+  const controls = page.locator('[data-conversation-scroll] [data-turn-process]')
   await controls.first().waitFor({ state: 'visible', timeout: 10_000 })
   const count = await controls.count()
   for (let index = 0; index < count; index++) {
@@ -66,15 +66,44 @@ export async function expandTurnProcesses(page: Page): Promise<void> {
 
 /**
  * Expand the Turn-process group containing one possibly hidden descendant.
- * @param page - page containing the Chat view.
+ * @param _page - page containing the Chat view; kept for shared caller signatures.
  * @param target - descendant whose owning Turn process should open.
  */
-export async function expandOwningTurnProcess(page: Page, target: Locator): Promise<void> {
+export async function expandOwningTurnProcess(_page: Page, target: Locator): Promise<void> {
   const turn = await target.evaluate(element => element.closest<HTMLElement>('[data-chat-turn]')?.dataset.chatTurn)
   if (turn === undefined || await target.isVisible()) return
-  const control = page.locator(`[data-turn-process="${turn}"]`)
+  // Both transcript surfaces mirror the same turns. Expand the process in
+  // the target's own surface so the other surface does not make this ambiguous.
+  const surface = target.locator('xpath=ancestor::*[@data-conversation-scroll or @data-right-chat-panel][1]')
+  const control = surface.locator(`[data-turn-process="${turn}"]`)
   await control.waitFor({ state: 'visible', timeout: 10_000 })
   if (await control.getAttribute('aria-expanded') !== 'true') await control.click()
+}
+
+/**
+ * Open the Session's right Chat surface through the product's toolbar control.
+ * The main transcript remains on the left; the sole live composer is mounted
+ * in this right surface once a Session exists.
+ * @param page - page containing the Session workspace.
+ */
+export async function openRightChat(page: Page): Promise<void> {
+  const panel = page.locator('[data-right-chat-panel]')
+  if (await panel.isVisible()) return
+  await page.getByRole('button', { name: /^(Open Chat|打开对话)$/ }).click()
+  await panel.waitFor({ state: 'visible', timeout: 10_000 })
+}
+
+/**
+ * Select normal conversation delivery after the intent dialog opens for a
+ * plain prompt. Slash commands continue through their command route without
+ * this choice.
+ * @param page - page containing the right Chat composer.
+ */
+export async function chooseNormalChatIntent(page: Page): Promise<void> {
+  const dialog = page.getByRole('dialog', { name: /^(What should this message do\?|这条消息要做什么？)$/ })
+  await dialog.waitFor({ state: 'visible', timeout: 10_000 })
+  await dialog.locator('[data-intent-choice="chat"]').click()
+  await dialog.waitFor({ state: 'hidden', timeout: 10_000 })
 }
 
 /** Fail loud on a stale checkout instead of testing yesterday's bundle. */
@@ -127,9 +156,9 @@ export async function connectFreshWorkspace(page: Page, root: string, name = 'wo
   await pathInput.fill(join(root, name))
   await pathInput.press('Enter')
   await dialog.getByRole('button', { name: 'Open', exact: true }).click()
-  // The pick connected the workspace: the blank session's live composer
-  // replaces the locked placeholder and enables.
-  await page.locator('[data-composer-input][contenteditable="true"][data-placeholder="Describe what you want to build... / commands, @ files or sessions"]')
+  // The pick connected the workspace; Chat owns the live composer on the right.
+  await openRightChat(page)
+  await page.locator('[data-right-chat-panel] [data-composer-input][contenteditable="true"][data-placeholder="Describe what you want to build... / commands, @ files or sessions"]')
     .waitFor({ timeout: 15_000 })
 }
 
@@ -152,7 +181,8 @@ export async function connectFreshWorkspaceZh(page: Page, root: string, name = '
   await pathInput.fill(join(root, name))
   await pathInput.press('Enter')
   await dialog.getByRole('button', { name: '打开', exact: true }).click()
-  await page.locator('[data-composer-input][contenteditable="true"][data-placeholder="描述你想要构建的内容… / 调用指令 @ 文件或对话"]')
+  await openRightChat(page)
+  await page.locator('[data-right-chat-panel] [data-composer-input][contenteditable="true"][data-placeholder="描述你想要构建的内容… / 调用指令 @ 文件或对话"]')
     .waitFor({ timeout: 15_000 })
 }
 

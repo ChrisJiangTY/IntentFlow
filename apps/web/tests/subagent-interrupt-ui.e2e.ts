@@ -24,7 +24,7 @@ import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, openRightChat, saveFailureShot } from './support.ts'
 
 const BASE_FIXTURE = fileURLToPath(new URL('../../../snapshots/web/live-interactions/session.jsonl', import.meta.url))
 
@@ -157,6 +157,7 @@ describe.skipIf(MODE === 'record')('web e2e: composer interrupt for a running co
     const parentInput = page.locator('[data-composer-input][contenteditable="true"]').first()
     await parentInput.fill('Ask a research subagent to explain event sourcing.')
     await parentInput.press('Enter')
+    await chooseNormalChatIntent(page)
     expect(await parentSettled).toBe(parent.id)
 
     // Reload onto the restart baseline (the proven route to a freshly
@@ -165,6 +166,7 @@ describe.skipIf(MODE === 'record')('web e2e: composer interrupt for a running co
     await page.reload({ waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     await page.getByRole('button', { name: /1 subagent/ }).waitFor({ timeout: 15_000 })
+    await openRightChat(page)
     acknowledgeReloadConnectionLoss(tripwire, warningStart)
     expect(scaffold.ctx.agents.get(childId)?.status).toBe('running')
   }, 120_000)
@@ -203,7 +205,7 @@ describe.skipIf(MODE === 'record')('web e2e: composer interrupt for a running co
         name: 'Parent session offline; sending is unavailable but you can still stop the run',
       })
       await input.waitFor({ timeout: 15_000 })
-      await page.getByText(INITIAL, { exact: true }).waitFor({ timeout: 15_000 })
+      await page.locator('[data-conversation-scroll]').getByText(INITIAL, { exact: true }).waitFor({ timeout: 15_000 })
       expect(await input.isDisabled()).toBe(true)
       const stop = page.getByRole('button', { name: 'Stop generating' })
       expect(await stop.count()).toBe(1)
@@ -268,6 +270,7 @@ describe.skipIf(MODE === 'record')('web e2e: composer interrupt for a running co
       new URL(response.url()).pathname === '/api/subagents/prompt')
     await input.fill(FOLLOWUP)
     await page.getByRole('button', { name: 'Send message' }).click()
+    await chooseNormalChatIntent(page)
     expect(((await (await promptResponse).json()) as { result: { ok: boolean } }).result)
       .toMatchObject({ ok: true })
 
@@ -296,9 +299,11 @@ describe.skipIf(MODE === 'record')('web e2e: composer interrupt for a running co
     // Only the waking send resumes the parked queue, FIFO, to settlement.
     await input.fill(WAKING)
     await input.press('Enter')
-    await expect.poll(() => page.getByText(REARMED_ANSWER, { exact: true }).count(), { timeout: 30_000 }).toBe(1)
-    await expect.poll(() => page.getByText(PARKED_ANSWER, { exact: true }).count(), { timeout: 30_000 }).toBe(1)
-    await expect.poll(() => page.getByText(WAKING_ANSWER, { exact: true }).count(), { timeout: 30_000 }).toBe(1)
+    await chooseNormalChatIntent(page)
+    const childTranscript = page.locator('[data-conversation-scroll]')
+    await expect.poll(() => childTranscript.getByText(REARMED_ANSWER, { exact: true }).count(), { timeout: 30_000 }).toBe(1)
+    await expect.poll(() => childTranscript.getByText(PARKED_ANSWER, { exact: true }).count(), { timeout: 30_000 }).toBe(1)
+    await expect.poll(() => childTranscript.getByText(WAKING_ANSWER, { exact: true }).count(), { timeout: 30_000 }).toBe(1)
     await expect.poll(() => scaffold.ctx.agents.get(childId), { timeout: 60_000 }).toBeUndefined()
 
     const loaded = await scaffold.ctx.sessionPersistence.load(childId)

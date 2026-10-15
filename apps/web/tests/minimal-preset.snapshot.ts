@@ -70,6 +70,9 @@ describe('minimal agent preset', () => {
   })
 
   it('sends the exact RL prompt and schemas, then executes the persistent shell and editor', async () => {
+    expect(scaffold.ctx.agentPresets.config.toolAllowLists).toEqual({
+      minimal: ['bash', 'str_replace_editor'],
+    })
     const requestHeader = agentHandle.agent.session.requestHeader()
     if (requestHeader === undefined) throw new Error('the minimal agent issued no model request')
     expect(agentHandle.agent.session.events.some(event => event.type === 'user/message'

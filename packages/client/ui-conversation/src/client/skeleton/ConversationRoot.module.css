@@ -44,6 +44,14 @@
   border-bottom: 1px solid transparent;
 }
 
+/* Slots wrap the Header in a sibling element. Raise that wrapper as well so
+   the transcript width strips cannot intercept its tabs after a reload. */
+.root > :global([data-slot='conversation.session.header']) {
+  position: relative;
+  z-index: 9;
+  flex: none;
+}
+
 .header::after {
   content: '';
   position: absolute;
@@ -311,6 +319,63 @@
      elected overlay are siblings — and custom properties inherit down to
      whichever entry is mounted. */
   --dsh-composer-text-max-height: 336px;
+}
+
+/* The main Session Chat shares Better Sidebar's right-hand width and drag
+   strip. Its first 8px stay clear so the sidebar's existing resize handle
+   continues to receive pointer input. The top 34px stay clear for the two
+   persistent panel controls. */
+.rightChatPanel {
+  position: fixed;
+  top: calc(34px + env(safe-area-inset-top));
+  right: 0;
+  bottom: 0;
+  z-index: 26;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: var(--dsh-right-chat-panel-width);
+  min-width: 0;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-layer-1);
+  --dsh-right-chat-panel-width: min(calc(var(--dsh-sidebar-width, var(--dsh-right-chat-width)) - 8px), calc(100vw - 8px));
+  --dsh-composer-side-clearance: 12px;
+  --dsh-composer-dock-inset: 8px;
+  --dsh-composer-card-max-width: calc(var(--dsh-right-chat-panel-width) - 2 * var(--dsh-composer-side-clearance));
+  --dsh-chat-content-width: calc(100% - 16px);
+}
+
+:global(body[data-dsh-title-bar-compat]) .rightChatPanel {
+  top: calc(var(--dsh-title-bar-strip, 40px) + 34px + env(safe-area-inset-top));
+}
+
+.rightChatTranscript {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.rightViewArea {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.rightChatComposer {
+  flex: none;
+  min-width: 0;
+  padding-top: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+@media (max-width: 767px) {
+  .rightChatPanel {
+    --dsh-right-chat-panel-width: calc(100vw - 8px);
+  }
 }
 
 /* Active phase: header is ordinary column chrome above the scrollport (not

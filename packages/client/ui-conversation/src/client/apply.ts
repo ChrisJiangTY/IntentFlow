@@ -19,6 +19,7 @@ import type { InputNotice } from './contract/input.ts'
 import { createConversationStore } from './stores.ts'
 import { ConversationController, UnsupportedImageMediaTypeError } from './service.ts'
 import type { IConversation } from './service.ts'
+import { RightChatController } from './right-chat.ts'
 import { ComposerBlockRegistry } from './input/blocks.ts'
 import type { ComposerBlock } from './contract/composer-blocks.ts'
 import { InputHub } from './input/hub.ts'
@@ -71,6 +72,20 @@ interface WorkspaceNavigation {
   ): Promise<SessionId>
 }
 
+interface RightPanelSnapshot {
+  readonly state?: { readonly width: number }
+}
+
+interface RightPanelGeometry {
+  getSnapshot(): RightPanelSnapshot
+  subscribeState(listener: () => void): () => void
+}
+
+interface RequirementsIntentRoute {
+  appendRequirement(sessionId: SessionId, draft: string): Promise<boolean>
+  startTaskRound(sessionId: SessionId, draft: string): Promise<boolean>
+}
+
 /** Resolve the session-scoped Conversation action face, failing loud. */
 function scopedConversation(sessions: ISessions, id: SessionId): IConversation {
   const scoped = sessions.scope(id)
@@ -98,6 +113,17 @@ export function apply(ctx: Context): void {
   const slots = ctx.slots
   const workspaceNavigation = ctx.get('uiWorkspace') as unknown as WorkspaceNavigation
   const uiConversation = new UiConversation(ctx, sessions)
+  const rightChat = new RightChatController()
+  ctx.effect(() => {
+    const dispose = ctx.reflect.provide('rightChat', rightChat)
+    return () => { void dispose() }
+  }, 'ui-conversation: right Chat visibility')
+  const sidebar = (): RightPanelGeometry | undefined =>
+    (ctx as unknown as { get(name: string): unknown }).get('betterSidebar') as RightPanelGeometry | undefined
+  const rightPanelWidth = {
+    getSnapshot: (): number => sidebar()?.getSnapshot().state?.width ?? 440,
+    subscribe: (listener: () => void): (() => void) => sidebar()?.subscribeState(listener) ?? (() => {}),
+  }
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-conversation: dictionaries')
   const t = ctx.locale.bind(NS)
@@ -189,13 +215,16 @@ export function apply(ctx: Context): void {
     inject: (sessionId: SessionId | undefined): ConversationInjected => ({
       hooks: {
         composerBlock: sessionId === undefined ? ABSENT_BLOCK : composerBlocks.storeFor(sessionId),
+        rightChat,
+        rightPanelWidth,
       },
       ...(sessionId === undefined ? {} : {
-        submitActiveView: async (id: SessionId, draft: string): Promise<boolean> => {
-          const composer = ctx.get('requirementsComposer') as {
-            submit: (sessionId: SessionId, draft: string) => Promise<boolean>
-          } | undefined
-          return composer?.submit(id, draft) ?? false
+        submitIntent: async (id: SessionId, draft: string, intent: 'requirement' | 'task'): Promise<boolean> => {
+          const route = ctx.get('requirementsComposer') as RequirementsIntentRoute | undefined
+          if (route === undefined) throw new Error(t('intent.unavailable'))
+          return intent === 'requirement'
+            ? route.appendRequirement(id, draft)
+            : route.startTaskRound(id, draft)
         },
       }),
       selectWorkspace: async (workspaceId) => {

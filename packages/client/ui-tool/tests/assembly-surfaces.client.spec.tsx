@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /** Tool assembly acceptance through the real ui-conversation host. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { ISession } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -110,6 +110,7 @@ describe('todo_write assembly (product registrations, no outlet twins)', () => {
     // The dock strip reads the host-computed 'todos' projection.
     runtime.sessions.behavior(SID).projections.set('todos', TODOS)
     const view = runtime.renderRoot()
+    act(() => { runtime.ctx.rightChat.toggle() })
 
     // Keyed toolview registration took the row (summary derived from args).
     const row = view.container.querySelector('[data-tool="todo_write"]')
@@ -118,7 +119,7 @@ describe('todo_write assembly (product registrations, no outlet twins)', () => {
 
     // The plan strip sits in the input dock, fed by the projection
     // (default-collapsed: the header summary shows; rows appear on expand).
-    const panel = view.container.querySelector('[data-testid="todo-panel"]')
+    const panel = document.querySelector('[data-right-chat-panel] [data-testid="todo-panel"]')
     expect(panel).not.toBeNull()
     expect(panel!.textContent).toContain('1 已完成\u2002·\u20021 进行中\u2002·\u20021 待处理')
     fireEvent.click(panel!.querySelector('button')!)
@@ -130,7 +131,7 @@ describe('todo_write assembly (product registrations, no outlet twins)', () => {
     await runtime.flush()
     runtime.sessions.behavior(SID).projections.set('todos', null)
     await waitFor(() => {
-      expect(view.container.querySelector('[data-testid="todo-panel"]')).toBeNull()
+      expect(document.querySelector('[data-right-chat-panel] [data-testid="todo-panel"]')).toBeNull()
     })
     expect(view.container.querySelector('[data-tool="todo_write"]')).not.toBeNull()
     await runtime.dispose()

@@ -79,7 +79,7 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-chat: dictionaries')
   const t = ctx.locale.bind(NS)
   const chatStore = createChatStore()
-  const chatScrollPositions = new Map<SessionId, ChatScrollPosition>()
+  const chatScrollPositions = new Map<SessionId, Partial<Record<'main' | 'right', ChatScrollPosition>>>()
   const transcriptView = new TranscriptViewPolicy(
     ctx.settingsScope.bind<ChatSettings>({ namespace: CHAT_SETTINGS_NAMESPACE }),
   )
@@ -130,11 +130,16 @@ export function apply(ctx: Context): void {
             { peek: (attachment: ImageAttachmentRef) => ctx.uiConversation.peekImageUrl(sessionId, attachment) },
           ),
           chatScroll: {
-            save: (position) => {
-              if (position === null) chatScrollPositions.delete(sessionId)
-              else chatScrollPositions.set(sessionId, position)
+            save: (position, surface = 'main') => {
+              const current = chatScrollPositions.get(sessionId) ?? {}
+              if (position === null) {
+                if (surface === 'main') delete current.main
+                else delete current.right
+              } else current[surface] = position
+              if (current.main === undefined && current.right === undefined) chatScrollPositions.delete(sessionId)
+              else chatScrollPositions.set(sessionId, current)
             },
-            read: () => chatScrollPositions.get(sessionId) ?? null,
+            read: (surface = 'main') => chatScrollPositions.get(sessionId)?.[surface] ?? null,
           },
           forkAt: (seq) => {
             ctx.sessions.fork({ sessionId, atSeq: seq, increaseTitle: true })

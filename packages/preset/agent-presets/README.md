@@ -52,10 +52,13 @@ The plugin needs a `default` preset id and scans `roots` for presets:
 | `roots` | `[]` | Scanned directories in precedence order; each supplies `path` (a leading `~` expands) and `trust` (defaults to `user`) |
 | `includeShippedRoot` | `true` | Prepend the package's bundled presets as a `system` root before every configured root |
 | `includeUserRoot` | `true` | Append `<dshHome>/.agent-presets` as a `user` root, after every configured root |
+| `toolAllowLists` | `{}` | For each named preset, allow only these inherited tool names; omit a preset to keep all inherited tools |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-agent-presets) is the exhaustive source for every accepted field and its JSDoc.
 
 The shipped root is prepended before every configured root, so the built-in set remains available and wins duplicate ids even when a patch replaces the roster configuration. `includeShippedRoot: false` drops that built-in set for deployments that supply all presets themselves. `includeUserRoot: false` drops the derived writable root; tests that pin an exact roster disable both derived roots.
+
+`toolAllowLists` limits tools inherited from the host and the preset's standing composition for the selected Agent and its children. The Web profile allows `bash` and `str_replace_editor` for `minimal`, so host requirement tools stay outside that preset. An unknown tool name or absent tools service rejects Agent composition before it changes the Agent's preset link; an empty list permits no inherited tools. A blank session that switches presets takes the new preset's list, or restores unrestricted inheritance when the new preset has no list.
 
 ### Choosing the default preset
 

@@ -435,7 +435,8 @@ async resolve(id?: string): Promise<AgentPreset>
 /**
  * Compose one agent from a preset: ensure the preset's standing mount, then
  * parent the agent's scope key to it so the mount's registrations and
- * listeners cover this agent.
+ * listeners cover this agent. A configured allow list filters host and
+ * preset tools in the Agent's own scope.
  *
  * Call from the agent factory's `setup(agentCtx)`; a rejection there rolls
  * the agent creation back, so a broken preset never yields a half-composed
@@ -459,11 +460,10 @@ async mount(agentCtx: Context, id?: string): Promise<AgentPreset>
  * parent's history was produced under (and a preset deleted since would fail
  * the child outright while its parent keeps running).
  *
- * Synchronous, and with no composition failure mode of its own — it reads no
- * roster, mounts nothing, and touches no file — which is what lets a child
- * creation window use it: the two in-process subagent drivers compose their
- * children inside a synchronous `setup`. It still rejects a caller error, as
- * the `@throws` below record.
+ * Synchronous: it reads no roster, mounts nothing, and touches no file, so
+ * child creation can call it inside `setup`. A configured inherited-tool
+ * allow list applies to the child and rejects unknown tool names before
+ * binding its scope.
  *
  * A parent that joined no preset — a rosterless deployment — yields no join
  * and no error: there, the model-facing rows sit in the host composition and
@@ -471,7 +471,7 @@ async mount(agentCtx: Context, id?: string): Promise<AgentPreset>
  * @param agentCtx - the joining agent's scope context.
  * @param parentCtx - the scope context of the agent whose composition to join.
  * @returns the preset id joined, or undefined when the parent joined none.
- * @throws when `agentCtx` carries no scope, or has already joined a preset.
+ * @throws when `agentCtx` carries no scope, has already joined a preset, or the selected tool allow list is invalid.
  */
 composeFrom(agentCtx: Context, parentCtx: Context): string | undefined
 
@@ -582,7 +582,8 @@ serviceFor<K extends string & keyof Context>(agent: { ctx: Context }, name: K): 
  * that never composed one has nothing to re-link: the switch is then the
  * agent's first bind, exactly a mount. A committed re-link emits
  * `tools/change` because changing the parent scope changes the Agent's
- * resolved tool set without adding or removing registry entries.
+ * resolved tool set without adding or removing registry entries. The Agent's
+ * inherited-tool allow list changes with the preset.
  * @param agentCtx - the agent's scope context.
  * @param id - the preset to compose the agent from instead.
  * @returns the preset now installed.

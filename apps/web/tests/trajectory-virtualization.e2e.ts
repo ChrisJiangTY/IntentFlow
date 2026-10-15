@@ -20,7 +20,7 @@ import {
   webSnapshotMode,
   type WebScaffold,
 } from './scaffold.ts'
-import { newEnglishPage, saveFailureShot } from './support.ts'
+import { chooseNormalChatIntent, newEnglishPage, openRightChat, saveFailureShot } from './support.ts'
 
 const MODE = webSnapshotMode()
 const LOAD_MORE_EXPECTED = fileURLToPath(new URL(
@@ -322,11 +322,13 @@ describe('web e2e: Trajectory virtualization over tail-paged history', () => {
         host.scrollTo = trackedScrollTo as typeof host.scrollTo
       })
       const settled = scaffold.whenTurnSettled()
+      await openRightChat(page)
       const input = page.locator('[data-composer-input]').first()
       await input.fill('Stream one deterministic response while Trajectory remains visible.')
       await input.press('Enter')
+      await chooseNormalChatIntent(page)
       await settled
-      await page.getByText('stream fragment 01', { exact: false }).waitFor({ timeout: 30_000 })
+      await page.locator('[data-conversation-scroll]').getByText('stream fragment 01', { exact: false }).waitFor({ timeout: 30_000 })
       await nextPaint(page)
       const streamingScrollCalls = await trajectoryScroll.evaluate(() => {
         return (window as Window & { __trajectoryScrollCalls?: number })

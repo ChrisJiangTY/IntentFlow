@@ -20,7 +20,7 @@ import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/turn-tail-actions', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.jsonl')
@@ -45,6 +45,7 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
   let tripwire: ReturnType<typeof watchConsole>
   let sessionEvents: SessionEvent[]
   let sidecarDir: string | undefined
+  const left = () => page.locator('[data-conversation-scroll]')
 
   afterEach(async () => {
     // close() carries the fixture-consumption tripwire, so its failure is the
@@ -99,6 +100,7 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     const settled = scaffold!.whenTurnSettled(timeoutMs)
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     return { settled }
   }
 
@@ -134,16 +136,16 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     // The marker IS the synchronization: the second call is provably parked,
     // so the first step's message and tool result are already durable.
     await expect.poll(() => existsSync(marker), { timeout: 20_000 }).toBe(true)
-    expect(await page.locator('[data-turn-process]').count()).toBe(0)
+    expect(await left().locator('[data-turn-process]').count()).toBe(0)
     await expect.poll(
-      () => page.getByRole('status').filter({ hasText: 'Deep diving...' }).isVisible(),
+      () => left().getByRole('status').filter({ hasText: 'Deep diving...' }).isVisible(),
       { timeout: 10_000 },
     ).toBe(true)
     // Only the user bubble owns a footer (clock + copy; user bubbles carry no
     // branch action): the narration is not the answer yet.
-    const copyButtons = page.getByRole('button', { name: 'Copy' })
+    const copyButtons = left().getByRole('button', { name: 'Copy' })
     await expect.poll(() => copyButtons.count(), { timeout: 10_000 }).toBe(1)
-    expect(await page.getByRole('button', { name: 'Branch into a new conversation' }).count()).toBe(0)
+    expect(await left().getByRole('button', { name: 'Branch into a new conversation' }).count()).toBe(0)
     await copyButtons.first().focus()
     const running = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(RUNNING_EXPECTED, running, MODE)
@@ -154,9 +156,9 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     await page.getByRole('button', { name: 'Stop generating' }).click()
     await settled
     expect(sessionEvents.filter(e => e.type === 'turn/end').map(e => e.data.reason.kind)).toEqual(['aborted'])
-    await page.locator('[data-turn-process]').waitFor({ timeout: 10_000 })
+    await left().locator('[data-turn-process]').waitFor({ timeout: 10_000 })
     await expect.poll(() => copyButtons.count(), { timeout: 10_000 }).toBe(2)
-    await expect.poll(() => page.locator('[data-streaming="true"]').count(), { timeout: 10_000 }).toBe(0)
+    await expect.poll(() => left().locator('[data-streaming="true"]').count(), { timeout: 10_000 }).toBe(0)
     await copyButtons.last().focus()
     const settledAria = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(SETTLED_EXPECTED, settledAria, MODE)
@@ -170,18 +172,18 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     const { settled } = await sendPrompt(120_000)
     await settled
 
-    const disclosure = page.getByRole('button', { name: /Turn usage/ })
+    const disclosure = left().getByRole('button', { name: /Turn usage/ })
     await expect.poll(() => disclosure.count(), { timeout: 10_000 }).toBe(1)
     expect(await disclosure.getAttribute('aria-expanded')).toBe('false')
-    expect(await page.getByText('15.8K tok · Cache hit 49.7%', { exact: true }).count()).toBe(1)
+    expect(await left().getByText('15.8K tok · Cache hit 49.7%', { exact: true }).count()).toBe(1)
 
     await disclosure.click()
     expect(await disclosure.getAttribute('aria-expanded')).toBe('true')
-    expect(await page.getByText('deepseek-official/deepseek-v4-flash', { exact: true }).count()).toBe(1)
-    expect(await page.getByText('7,891 tok', { exact: true }).count()).toBe(1)
-    expect(await page.getByText('7,808 tok', { exact: true }).count()).toBe(1)
-    expect(await page.getByText('112 tok (42 tok reasoning)', { exact: true }).count()).toBe(1)
-    expect(await page.getByText('15,811 tok', { exact: true }).count()).toBe(1)
+    expect(await left().getByText('deepseek-official/deepseek-v4-flash', { exact: true }).count()).toBe(1)
+    expect(await left().getByText('7,891 tok', { exact: true }).count()).toBe(1)
+    expect(await left().getByText('7,808 tok', { exact: true }).count()).toBe(1)
+    expect(await left().getByText('112 tok (42 tok reasoning)', { exact: true }).count()).toBe(1)
+    expect(await left().getByText('15,811 tok', { exact: true }).count()).toBe(1)
 
     const expanded = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(USAGE_EXPANDED_EXPECTED, expanded, MODE)
@@ -194,14 +196,14 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-turn-tail-actions-completed'))
     const { settled } = await sendPrompt()
     await settled
-    await expect.poll(() => page.getByText('DONE', { exact: true }).count(), { timeout: 10_000 }).toBe(1)
-    const process = page.locator('[data-turn-process]')
+    await expect.poll(() => left().getByText('DONE', { exact: true }).count(), { timeout: 10_000 }).toBe(1)
+    const process = left().locator('[data-turn-process]')
     await expect.poll(() => process.count(), { timeout: 10_000 }).toBe(1)
     expect(await process.getAttribute('aria-expanded')).toBe('false')
     expect(await process.evaluate(element => getComputedStyle(element).borderBottomWidth)).toBe('1px')
     const processBottom = await process.evaluate(element =>
       element.closest<HTMLElement>('[data-chat-flow-kind="turn-process"]')?.getBoundingClientRect().bottom)
-    const answerTop = await page.getByText('DONE', { exact: true }).evaluate(element =>
+    const answerTop = await left().getByText('DONE', { exact: true }).evaluate(element =>
       element.closest<HTMLElement>('[data-chat-flow-kind="assistant-step"]')?.getBoundingClientRect().top)
     expect(answerTop).toBe((processBottom ?? 0) + 8)
     await process.focus()
@@ -216,8 +218,8 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-turn-process-setting'))
     const { settled } = await sendPrompt()
     await settled
-    const process = page.locator('[data-turn-process]')
-    const tool = page.getByRole('button', { name: 'Bash Print alpha to stdout' })
+    const process = left().locator('[data-turn-process]')
+    const tool = left().getByRole('button', { name: 'Bash Print alpha to stdout' })
     await process.waitFor({ timeout: 10_000 })
     expect(await process.getAttribute('aria-expanded')).toBe('false')
     expect(await tool.isVisible()).toBe(false)
@@ -249,13 +251,13 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     await launch(undefined, 200)
     onTestFailed(() => saveFailureShot(page, 'web-e2e-turn-tail-actions-focused'))
     const { settled } = await sendPrompt()
-    const tool = page.getByRole('button', { name: 'Bash Print alpha to stdout' })
+    const tool = left().getByRole('button', { name: 'Bash Print alpha to stdout' })
     await tool.waitFor({ timeout: 30_000 })
     await tool.focus()
     expect(await tool.evaluate(element => element.ownerDocument.activeElement === element)).toBe(true)
     await settled
-    await expect.poll(() => page.getByText('DONE', { exact: true }).count(), { timeout: 10_000 }).toBe(1)
-    const process = page.locator('[data-turn-process]')
+    await expect.poll(() => left().getByText('DONE', { exact: true }).count(), { timeout: 10_000 }).toBe(1)
+    const process = left().locator('[data-turn-process]')
     await expect.poll(() => process.count(), { timeout: 10_000 }).toBe(1)
     expect(await process.getAttribute('aria-expanded')).toBe('true')
     expect(await tool.evaluate(element => element.ownerDocument.activeElement === element)).toBe(true)

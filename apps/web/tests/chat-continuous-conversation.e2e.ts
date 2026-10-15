@@ -19,7 +19,8 @@ import {
   type WebScaffold,
 } from './scaffold.ts'
 import {
-  connectFreshWorkspace, conversationContextKey, expandOwningTurnProcess, newEnglishPage, saveFailureShot,
+  chooseNormalChatIntent, connectFreshWorkspace, conversationContextKey,
+  expandOwningTurnProcess, newEnglishPage, saveFailureShot,
 } from './support.ts'
 
 const MODE = webSnapshotMode()
@@ -219,6 +220,7 @@ describe('web e2e: continuous conversation grown through the composer', () => {
   it.skipIf(MODE === 'record')('keeps twelve generated turns and tool rows bound to one live session', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-chat-continuous-conversation'))
     const composer = page.locator('[data-composer-input][contenteditable="true"]').last()
+    const mainTranscript = page.locator('[data-conversation-scroll]')
     await composer.waitFor({ timeout: 15_000 })
     let sessionId: SessionId | undefined
 
@@ -231,6 +233,7 @@ describe('web e2e: continuous conversation grown through the composer', () => {
 
       const settled = scaffold.whenTurnSettled(60_000)
       await page.getByRole('button', { name: 'Send message', exact: true }).click()
+      await chooseNormalChatIntent(page)
       await page.getByText(spec.userMarker, { exact: false }).last().waitFor({ timeout: 15_000 })
       await expect.poll(() => sessionEvents.slice(eventStart).some(event => (
         event.type === 'user/message'
@@ -245,7 +248,7 @@ describe('web e2e: continuous conversation grown through the composer', () => {
         ),
       )
       if (echoedUser === undefined) throw new Error(`turn ${String(spec.index)} has no user echo event`)
-      const userRow = page.locator(`[data-chat-anchor-key="${messageKey(echoedUser)}"]`)
+      const userRow = mainTranscript.locator(`[data-chat-anchor-key="${messageKey(echoedUser)}"]`)
       await expect.poll(() => userRow.count(), { timeout: 10_000 }).toBe(1)
       expect(await userRow.getAttribute('data-chat-flow-kind')).toBe('user')
       expect(await userRow.textContent()).toContain(spec.userMarker)
@@ -289,7 +292,7 @@ describe('web e2e: continuous conversation grown through the composer', () => {
       expect(turnEnds[0]?.data).toEqual({ turn: spec.index, reason: { kind: 'completed' } })
       expect(chunks).toHaveLength(spec.deltas.length + (spec.callId === undefined ? 4 : 9))
 
-      const assistantRow = page.locator(`[data-chat-anchor-key="${assistantKey(finalAssistants[0]!)}"]`)
+      const assistantRow = mainTranscript.locator(`[data-chat-anchor-key="${assistantKey(finalAssistants[0]!)}"]`)
       await expect.poll(() => assistantRow.count(), { timeout: 10_000 }).toBe(1)
       expect(await assistantRow.getAttribute('data-chat-flow-kind')).toBe('assistant-step')
       expect(await assistantRow.textContent()).toContain(spec.doneMarker)
@@ -314,7 +317,7 @@ describe('web e2e: continuous conversation grown through the composer', () => {
       expect(results[0]?.data.message.content[0].isError).toBe(false)
       expect(toolResultText(results[0]!)).toBe(`${spec.toolResultMarker}\n`)
 
-      const toolRow = page.locator(`[data-chat-call-id="${spec.callId}"]`)
+      const toolRow = mainTranscript.locator(`[data-chat-call-id="${spec.callId}"]`)
       await expect.poll(() => toolRow.count(), { timeout: 10_000 }).toBe(1)
       expect(await toolRow.textContent()).toContain(spec.toolResultMarker)
       await expandOwningTurnProcess(page, toolRow)
@@ -335,8 +338,8 @@ describe('web e2e: continuous conversation grown through the composer', () => {
     ))).toHaveLength(TURN_COUNT)
     expect(sessionEvents.flatMap(event =>
       event.type === 'request/header' ? [event.data.reason] : [])).toEqual(['initial'])
-    expect(await page.getByRole('button', { name: 'System prompt' }).count()).toBe(1)
-    expect(await page.locator(
+    expect(await mainTranscript.getByRole('button', { name: 'System prompt' }).count()).toBe(1)
+    expect(await mainTranscript.locator(
       '[data-chat-flow-kind="system-prompt"][hidden="until-found"]',
     ).count()).toBe(0)
     expect(specs.at(-1)?.prompt.length).toBeGreaterThan(4_000)

@@ -4,7 +4,8 @@
 # tool guidance, and later assembly listeners cannot add prompt text. Runtime
 # context snapshots are suppressed for this preset, and the model composes only
 # the persistent shell (`bash` on POSIX, `pwsh` on win32) and
-# `str_replace_editor`. Context compaction is absent.
+# `str_replace_editor`. The Web profile masks inherited host tools through
+# `toolAllowLists.minimal`. Context compaction is absent.
 
 - id: persona
   name: '@deepseek-ai/dsh-persona'

@@ -205,6 +205,8 @@ export interface InputZone {
 
 /** Conversation View entries obtain their data from registered standard hooks. */
 export interface ConvViewOwnerProps {
+  /** Display instance for view-local scroll persistence. */
+  surface?: 'main' | 'right'
   /** Navigation displayed inline by the Requirements workspace beside its actions. */
   navigation?: {
     readonly tabs: readonly ViewTab[]
@@ -227,9 +229,13 @@ export interface ConversationInjected {
   /** Connect and open a blank Session in the selected Workspace. */
   selectWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /** Session-addressed composer block source, or the stable absent source. */
-  hooks: { composerBlock: ObservableSnapshot<ComposerBlock | undefined> }
-  /** Submit the resident composer to an optional domain-owned active-view route. */
-  submitActiveView?: (sessionId: SessionId, draft: string) => Promise<boolean>
+  hooks: {
+    composerBlock: ObservableSnapshot<ComposerBlock | undefined>
+    rightChat: ObservableSnapshot<boolean>
+    rightPanelWidth: ObservableSnapshot<number>
+  }
+  /** Route a classified prompt into Requirements without changing the Chat send path. */
+  submitIntent?: (sessionId: SessionId, draft: string, intent: 'requirement' | 'task') => Promise<boolean>
 }
 
 /** Business callbacks injected into the strict Session body. */
@@ -273,6 +279,8 @@ export interface ComposerBarOwnerProps {
   footer?: ReactNode
   /** Optional active-view submit route; returning false keeps the draft. */
   submitOverride?: (draft: string) => Promise<boolean> | boolean
+  /** Optional prompt classification route; the normal Chat choice uses the input machine. */
+  submitIntent?: (draft: string, intent: 'requirement' | 'task') => Promise<boolean>
 }
 
 /** Package-private operations injected into the resident composer bar. */
@@ -325,6 +333,8 @@ export interface ComposerChainProps {
 
 /** Parent-owned active-view bridge for the strict Session body. */
 export interface ConversationSessionOwnerProps {
+  /** The right instance always shows Chat; the main instance follows the selected View. */
+  surface?: 'main' | 'right'
   /** Notify the resident parent when the resolved view changes. */
   onActiveViewChange?: (view: string) => void
 }

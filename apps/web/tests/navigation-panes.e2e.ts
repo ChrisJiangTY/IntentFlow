@@ -20,7 +20,10 @@ import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { expandOwningTurnProcess, newEnglishPage, saveFailureShot } from './support.ts'
+import {
+  chooseNormalChatIntent, connectFreshWorkspace, expandOwningTurnProcess,
+  newEnglishPage, openRightChat, saveFailureShot,
+} from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/navigation-panes', import.meta.url))
 const SEED = join(SNAPSHOT_DIR, 'session.jsonl')
@@ -164,6 +167,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
 
   it.skipIf(MODE !== 'record')('records the two-turn seed live through the composer', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-navigation-record'))
+    await connectFreshWorkspace(page, scaffold.workspaceCwd)
     const input = page.locator('[data-composer-input]').first()
     await input.waitFor({ timeout: 10_000 })
     let sessionId: Awaited<ReturnType<WebScaffold['whenTurnSettled']>> | undefined
@@ -173,6 +177,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       await expect.poll(() => input.isEnabled(), { timeout: 15_000 }).toBe(true)
       await input.fill(prompt)
       await input.press('Enter')
+      await chooseNormalChatIntent(page)
       sessionId = await settled
     }
     await recordFixture(scaffold, sessionId!, SEED)
@@ -267,7 +272,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       hostPosition: 'relative',
       paneOverflowX: 'hidden',
       paneScrollableWidth: 0,
-      seatPosition: 'absolute',
+      seatPosition: null,
     })
     expect({
       pageErrors: tripwire.pageErrors,
@@ -701,7 +706,9 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     const clarificationBox = await clarification.boundingBox()
     const documentBox = await page.locator('[data-cell="document"]').boundingBox()
     const selectedTaskBox = await page.locator('[data-cell="task"][data-selected="true"]').boundingBox()
-    const taskSummaryBox = await page.locator('[data-cell="task"][data-selected="true"] textarea').boundingBox()
+    const selectedTask = page.locator('[data-cell="task"][data-selected="true"]')
+    const taskSummary = selectedTask.getByRole('textbox', { name: 'Human task description' })
+    const taskSummaryBox = await taskSummary.boundingBox()
     const ordinaryTaskBox = await page.locator(`[data-task-id="${failedTaskId}"]`).boundingBox()
     if (notebookAreaBox === null || navigationBox === null || roundHeaderBox === null || clarificationBox === null || documentBox === null
       || selectedTaskBox === null || taskSummaryBox === null || ordinaryTaskBox === null) {
@@ -726,11 +733,20 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     expect(Math.abs(documentBox.y - clarificationBox.y - clarificationBox.height - 20)).toBeLessThanOrEqual(3)
     expect(Math.abs(documentBox.width / notebookAreaBox.width - 790 / 900)).toBeLessThan(.01)
     expect(Math.abs(documentBox.height - 154)).toBeLessThanOrEqual(4)
-    expect(Math.abs(selectedTaskBox.height - 154)).toBeLessThanOrEqual(4)
-    expect(Math.abs(ordinaryTaskBox.height - 82)).toBeLessThanOrEqual(4)
-    expect(Math.abs(taskSummaryBox.x - selectedTaskBox.x - 138)).toBeLessThanOrEqual(3)
-    expect(Math.abs(taskSummaryBox.y - selectedTaskBox.y - 88)).toBeLessThanOrEqual(3)
-    expect(Math.abs(taskSummaryBox.width / selectedTaskBox.width - 592 / 790)).toBeLessThan(.02)
+    expect(selectedTaskBox.height).toBeLessThan(100)
+    expect(Math.abs(selectedTaskBox.height - ordinaryTaskBox.height)).toBeLessThanOrEqual(12)
+    const headingBox = await selectedTask.locator('[class*="taskHeadingRow"]').boundingBox()
+    if (headingBox === null) throw new Error('task header is unavailable')
+    expect(taskSummaryBox.x).toBeCloseTo(headingBox.x, 0)
+    expect(taskSummaryBox.width).toBeCloseTo(headingBox.width, 0)
+    expect(taskSummaryBox.y - headingBox.y - headingBox.height).toBeCloseTo(6, 0)
+    expect(await selectedTask.locator('[class*="taskHeadingRow"]').evaluate(node => getComputedStyle(node).borderBottomWidth)).toBe('1px')
+    await taskSummary.focus()
+    expect(await taskSummary.evaluate((node) => {
+      const style = getComputedStyle(node)
+      return { border: style.borderWidth, outline: style.outlineStyle, background: style.backgroundColor }
+    })).toEqual({ border: '0px', outline: 'none', background: 'rgba(0, 0, 0, 0)' })
+    await selectedTask.screenshot({ path: join(previewDirectory, 'task-card-slim.png') })
     const documentCard = page.locator('[data-cell="document"]')
     const expandDocument = documentCard.getByRole('button', { name: 'Expand document' })
     const expandButtonBox = await expandDocument.boundingBox()
@@ -760,7 +776,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     const desktopViewport = page.viewportSize()
     if (desktopViewport === null) throw new Error('requirements viewport is unavailable')
     await page.setViewportSize({ width: 560, height: desktopViewport.height })
-    await expect.poll(() => page.locator('[data-cell="task"][data-selected="true"] [class*="taskHeadingRow"] strong')
+    await expect.poll(() => page.locator('[data-cell="task"][data-selected="true"] [class*="taskHeadingRow"] :is(strong, textarea)')
       .evaluate(node => Number.parseFloat(getComputedStyle(node).fontSize))).toBe(18)
     await page.setViewportSize(desktopViewport)
     await fontDialog.getByText('16', { exact: true }).hover()
@@ -856,7 +872,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     expect(await taskGroup.getByRole('button', { name: 'Save', exact: true }).count()).toBe(0)
     expect(await taskGroup.getByRole('button', { name: 'Cancel', exact: true }).count()).toBe(0)
     expect(await editor.getByRole('button', { name: 'Run task New task' }).isDisabled()).toBe(true)
-    const content = 'Export navigation results\n  Export the current navigation results.\n  Use CSV.\n  Keep the header.\n  Validate the file.'
+    const content = 'Draft navigation export\n  Export the current navigation results.\n  Use CSV.\n  Keep the header.\n  Validate the file.'
     const humanSummary = 'Users can export the current navigation results as a clear CSV file.'
     const storedStatement = 'Export the current navigation results.\nUse CSV.\nKeep the header.\nValidate the file.\n\n_关联需求：1.1、1.2_'
     const translator = vi.spyOn(scaffold.ctx.subagents, 'start').mockImplementation(async (_provider, request) => {
@@ -873,10 +889,13 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await expect.poll(() => {
       const latest = session.events.findLast(event => event.type === 'requirement/task-list')
       return latest?.type === 'requirement/task-list'
-        ? latest.data.tasks.find(task => task.title === 'Export navigation results')?.statement
+        ? latest.data.tasks.find(task => task.title === 'Draft navigation export')?.statement
         : undefined
     }).toBe(storedStatement)
+    const beforeCardEdit = session.events.filter(event => event.type === 'requirement/task-list').length
+    await editor.getByRole('textbox', { name: 'Task title', exact: true }).fill('Export navigation results')
     await summaryInput.fill(humanSummary)
+    expect(session.events.filter(event => event.type === 'requirement/task-list').length).toBe(beforeCardEdit)
     await summaryInput.blur()
     await expect.poll(() => {
       const latest = session.events.findLast(event => event.type === 'requirement/task-list')
@@ -884,6 +903,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
         ? latest.data.tasks.find(task => task.title === 'Export navigation results')?.summary
         : undefined
     }).toBe(humanSummary)
+    expect(session.events.filter(event => event.type === 'requirement/task-list').length).toBe(beforeCardEdit + 1)
     translator.mockRestore()
     await expect.poll(async () => (await agentSpec.boundingBox())?.height ?? 0).toBeGreaterThan(compactSpecBox.height)
     const draft = (await captureStableAria(page, '[class*="viewArea"]', scaffold.workspaceCwd))
@@ -1073,6 +1093,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     await ensureSeedOpen(observer)
 
     try {
+      await openRightChat(page)
       const input = page.locator('[data-composer-input]').first()
       const slashDownloadPromise = page.waitForEvent('download', { timeout: 30_000 })
       await input.fill('/export')

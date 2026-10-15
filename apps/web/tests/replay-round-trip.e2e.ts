@@ -79,18 +79,22 @@ describe('web e2e: fresh round trip through the real assembly', () => {
     // Arm the host-side settled barrier BEFORE the send click.
     const settled = scaffold.whenTurnSettled()
     await input.fill(PROMPT)
-    const echoSnapshot = await input.evaluate(async (element, prompt) => {
-      element.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'Enter', code: 'Enter', bubbles: true, cancelable: true,
-      }))
+    await input.press('Enter')
+    const choice = page.getByRole('dialog', { name: 'What should this message do?' })
+      .locator('[data-intent-choice="chat"]')
+    await choice.waitFor({ state: 'visible', timeout: 10_000 })
+    const echoSnapshot = await choice.evaluate(async (element, prompt) => {
+      if (!(element instanceof HTMLButtonElement)) throw new Error('normal Chat choice is not a button')
+      element.click()
       // sendSession registered its paint yield first. This frame observes the
       // committed echo while admission remains queued on the following task.
       await new Promise<void>((resolve) => { requestAnimationFrame(() => { resolve() }) })
       const echo = document.querySelector<HTMLElement>('[data-submission-echo]')
+      const composer = document.querySelector<HTMLElement>('[data-right-chat-panel] [data-composer-input]')
       return [
         `echo: ${echo?.textContent?.includes(prompt) === true ? prompt : '(missing)'}`,
-        `composer: ${JSON.stringify(element.textContent ?? '')}`,
-        `contenteditable: ${element.getAttribute('contenteditable')}`,
+        `composer: ${JSON.stringify(composer?.textContent ?? '')}`,
+        `contenteditable: ${composer?.getAttribute('contenteditable')}`,
       ].join('\n')
     }, PROMPT)
     await compareOrRefreshGolden(ECHO_EXPECTED, echoSnapshot, MODE)
@@ -162,7 +166,7 @@ describe('web e2e: fresh round trip through the real assembly', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-round-trip-aria'))
     // Anchor assertions survive a semantics-preserving component rewrite even
     // while the whole-region golden churns.
-    await expect(page.getByRole('textbox').first().isVisible()).resolves.toBe(true)
+    await expect(page.locator('[data-right-chat-panel] [data-composer-input]').isVisible()).resolves.toBe(true)
     expect(await page.getByText('WEB_E2E_OK', { exact: false }).count()).toBeGreaterThanOrEqual(1)
     await page.getByRole('button', {
       name: 'Select model, current DeepSeek-V4-Flash',
@@ -180,8 +184,9 @@ describe('web e2e: fresh round trip through the real assembly', () => {
   it.skipIf(MODE === 'record')('renders the system prompt disclosure inside the expanded Turn process', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-round-trip-system-prompt'))
     await expandTurnProcesses(page)
-    const disclosure = page.getByRole('button', { name: 'System prompt', exact: true })
-    const body = page.locator('[data-system-prompt-body]')
+    const mainTranscript = page.locator('[data-conversation-scroll]')
+    const disclosure = mainTranscript.getByRole('button', { name: 'System prompt', exact: true })
+    const body = mainTranscript.locator('[data-system-prompt-body]')
     await expect.poll(() => disclosure.count(), { timeout: 10_000 }).toBe(1)
     await expect.poll(() => disclosure.getAttribute('aria-expanded')).toBe('false')
     expect(await body.count()).toBe(0)
@@ -204,7 +209,7 @@ describe('web e2e: fresh round trip through the real assembly', () => {
     // follow-stream-fed state). Runs after the golden capture so the committed
     // aria surface stays the untouched settled state.
     await expandTurnProcesses(page)
-    const think = page.getByRole('button', { name: /^Think/ }).first()
+    const think = page.locator('[data-conversation-scroll]').getByRole('button', { name: /^Think/ }).first()
     expect(await think.getAttribute('aria-expanded')).toBe('false')
     await think.click()
     await expect.poll(() => think.getAttribute('aria-expanded'), { timeout: 5_000 }).toBe('true')

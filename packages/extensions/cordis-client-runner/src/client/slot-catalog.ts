@@ -417,7 +417,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     doc: 'Resident composer body, including the no-Session inert state.',
     registerOptions: [],
     ownerProps: [
-      '/** Owner share of the resident composer bar. */\nexport interface ComposerBarOwnerProps {\n  /** Hero uses centered placement; composer uses the active bottom placement. */\n  variant: \'hero\' | \'composer\'\n  /** A feature-owned reason that makes message input inert while leaving model selection live. */\n  blocked?: { readonly reason: string }\n  /** Lock all message actions while preserving the resident composer surface. */\n  disabled?: boolean\n  /** Whether the shared Workspace picker is expanded. */\n  workspacePickerOpen?: boolean\n  /** Open the Workspace picker from the inert composer surface. */\n  onRequestWorkspace?: () => void\n  placeholder?: string\n  /** Optional content rendered above the composer surface. */\n  accessory?: ReactNode\n  /** Floating overlay content rendered inside the composer card. */\n  overlay?: ReactNode\n  /** Left-side input controls. */\n  leftItems?: ReactNode\n  /** Right-side input controls. */\n  rightItems?: ReactNode\n  /** Ambient content below the card. */\n  footer?: ReactNode\n  /** Optional active-view submit route; returning false keeps the draft. */\n  submitOverride?: (draft: string) => Promise<boolean> | boolean\n}',
+      '/** Owner share of the resident composer bar. */\nexport interface ComposerBarOwnerProps {\n  /** Hero uses centered placement; composer uses the active bottom placement. */\n  variant: \'hero\' | \'composer\'\n  /** A feature-owned reason that makes message input inert while leaving model selection live. */\n  blocked?: { readonly reason: string }\n  /** Lock all message actions while preserving the resident composer surface. */\n  disabled?: boolean\n  /** Whether the shared Workspace picker is expanded. */\n  workspacePickerOpen?: boolean\n  /** Open the Workspace picker from the inert composer surface. */\n  onRequestWorkspace?: () => void\n  placeholder?: string\n  /** Optional content rendered above the composer surface. */\n  accessory?: ReactNode\n  /** Floating overlay content rendered inside the composer card. */\n  overlay?: ReactNode\n  /** Left-side input controls. */\n  leftItems?: ReactNode\n  /** Right-side input controls. */\n  rightItems?: ReactNode\n  /** Ambient content below the card. */\n  footer?: ReactNode\n  /** Optional active-view submit route; returning false keeps the draft. */\n  submitOverride?: (draft: string) => Promise<boolean> | boolean\n  /** Optional prompt classification r /* …truncated — full shape in source */',
     ],
     ownerPropsReferences: [
       'Workspace',
@@ -1037,7 +1037,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     doc: 'Strict per-Session Conversation body.',
     registerOptions: [],
     ownerProps: [
-      '/** Parent-owned active-view bridge for the strict Session body. */\nexport interface ConversationSessionOwnerProps {\n  /** Notify the resident parent when the resolved view changes. */\n  onActiveViewChange?: (view: string) => void\n}',
+      '/** Parent-owned active-view bridge for the strict Session body. */\nexport interface ConversationSessionOwnerProps {\n  /** The right instance always shows Chat; the main instance follows the selected View. */\n  surface?: \'main\' | \'right\'\n  /** Notify the resident parent when the resolved view changes. */\n  onActiveViewChange?: (view: string) => void\n}',
     ],
     ownerPropsReferences: [],
     standardProps: [
@@ -1316,7 +1316,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       },
     ],
     ownerProps: [
-      '/** Conversation View entries obtain their data from registered standard hooks. */\nexport interface ConvViewOwnerProps {\n  /** Navigation displayed inline by the Requirements workspace beside its actions. */\n  navigation?: {\n    readonly tabs: readonly ViewTab[]\n    readonly activeId: string\n    readonly select: (view: string) => void\n  }\n  /** Focus request addressed to the selected View. */\n  viewRequest: import(\'./views.ts\').ConversationViewRequest | null\n  /** Select a View and address one opaque focus identity to it. */\n  openView: (view: string, focus: string) => void\n  /** Acknowledge the current one-shot focus request. */\n  completeViewRequest: () => void\n}',
+      '/** Conversation View entries obtain their data from registered standard hooks. */\nexport interface ConvViewOwnerProps {\n  /** Display instance for view-local scroll persistence. */\n  surface?: \'main\' | \'right\'\n  /** Navigation displayed inline by the Requirements workspace beside its actions. */\n  navigation?: {\n    readonly tabs: readonly ViewTab[]\n    readonly activeId: string\n    readonly select: (view: string) => void\n  }\n  /** Focus request addressed to the selected View. */\n  viewRequest: import(\'./views.ts\').ConversationViewRequest | null\n  /** Select a View and address one opaque focus identity to it. */\n  openView: (view: string, focus: string) => void\n  /** Acknowledge the current one-shot focus request. */\n  completeViewRequest: () => void\n}',
     ],
     ownerPropsReferences: [
       'ConversationViewRequest',

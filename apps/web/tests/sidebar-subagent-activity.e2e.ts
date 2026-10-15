@@ -19,7 +19,7 @@ import {
   webSnapshotMode,
   type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { connectFreshWorkspace, newEnglishPage, openRightChat, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/sidebar-subagent-activity', import.meta.url))
 const RUNNING_OWNER_EXPECTED = join(SNAPSHOT_DIR, 'owner-running.expected.md')
@@ -150,6 +150,30 @@ describe('web e2e: sidebar subagent activity', () => {
     await runningTrigger.waitFor({ timeout: 10_000 })
     expect(await runningTrigger.locator('[data-state="ongoing"]').count()).toBe(1)
     await assertFixtureInventory(SNAPSHOT_DIR, ['owner-running.expected.md'])
+    expect(tripwire.pageErrors).toEqual([])
+    expect(tripwire.warnings).toEqual([])
+  })
+
+  it('restores a Side Chat thread and its draft after the main Session Chat covers the sidebar', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-sidebar-sidechat-restore'))
+    await page.getByRole('button', { name: 'Close Chat' }).click()
+    await page.locator('[data-right-chat-panel]').waitFor({ state: 'detached', timeout: 10_000 })
+    const expand = page.getByRole('button', { name: 'Expand sidebar', exact: true })
+    if (await expand.count() > 0) await expand.click()
+    await page.getByRole('button', { name: 'New tab', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Side Chat (beta)', exact: true }).click()
+    const sideDraft = page.getByPlaceholder('Ask the first question — context inherited…')
+    await sideDraft.waitFor({ state: 'visible', timeout: 15_000 })
+    await sideDraft.fill('side thread draft remains')
+
+    await openRightChat(page)
+    await page.locator('[data-right-chat-panel] [data-composer-input]').waitFor({ state: 'visible' })
+    await sideDraft.waitFor({ state: 'hidden', timeout: 10_000 })
+
+    await page.getByRole('button', { name: 'Close Chat' }).click()
+    await page.locator('[data-right-chat-panel]').waitFor({ state: 'detached', timeout: 10_000 })
+    await sideDraft.waitFor({ state: 'visible', timeout: 10_000 })
+    expect(await sideDraft.inputValue()).toBe('side thread draft remains')
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   })

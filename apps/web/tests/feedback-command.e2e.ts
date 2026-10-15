@@ -19,7 +19,7 @@ import {
   compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/feedback-command', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.jsonl')
@@ -72,6 +72,7 @@ describe('web e2e: /feedback command acknowledgement', () => {
     const settled = scaffold.whenTurnSettled()
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     const sessionId = await settled
     if (MODE === 'record') {
       await recordFixture(scaffold, sessionId, FIXTURE)
@@ -83,14 +84,15 @@ describe('web e2e: /feedback command acknowledgement', () => {
     // The drive test settled the recorded turn: the transcript is active (a
     // command row does not render while a fresh session is still blank) and
     // the replayed reply is on screen.
-    await page.getByText('LIGHTHOUSE', { exact: true }).waitFor({ timeout: 15_000 })
+    await page.locator('[data-conversation-scroll]').getByText('LIGHTHOUSE', { exact: true }).waitFor({ timeout: 15_000 })
     const input = page.locator('[data-composer-input]').first()
     await input.fill('/feedback the diff view is unreadable')
     await input.press('Enter')
     // The command plane settles without a model turn: the ack row names the
     // recorded session and the mounted FULL backend's disclosure.
-    await page.getByText(/Feedback recorded for session/).waitFor({ timeout: 10_000 })
-    expect(await page.getByText(/Session sharing is enabled/).count()).toBe(1)
+    const transcript = page.locator('[data-conversation-scroll]')
+    await transcript.getByText(/Feedback recorded for session/).waitFor({ timeout: 10_000 })
+    expect(await transcript.getByText(/Session sharing is enabled/).count()).toBe(1)
     const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(ACK_EXPECTED, snapshot, MODE)
     const expanded = await captureExpandedTurnProcessAria(

@@ -114,8 +114,11 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
   useLayoutEffect(() => {
     if (selectionTouched.current) return
     const latestDocument = graph.documents.at(-1)
-    if (latestDocument !== undefined) setSelected(latestDocument.key)
-  }, [graph.documents])
+    const latestStandalone = graph.tasks.filter(task => !graph.documents.some(document => document.roundId === task.roundId)).at(-1)
+    if (latestStandalone !== undefined && (latestDocument === undefined || latestStandalone.round > latestDocument.round)) {
+      setSelected(latestStandalone.key)
+    } else if (latestDocument !== undefined) setSelected(latestDocument.key)
+  }, [graph.documents, graph.tasks])
 
   useLayoutEffect(() => {
     const element = viewport.current
@@ -171,8 +174,21 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
     const ids = node.kind === 'code'
       ? new Set(graph.tasks.filter(task => node.changes.some(change => change.taskKey === task.key)).map(task => task.roundId))
       : new Set([node.roundId])
-    return graph.documents.filter(document => ids.has(document.roundId)).map(document => t('round.label', { round: document.round })).join(' · ')
+    return [...ids].map((roundId) => {
+      const document = graph.documents.find(item => item.roundId === roundId)
+      if (document !== undefined) return t('round.label', { round: document.round })
+      const task = graph.tasks.find(item => item.roundId === roundId)
+      return task === undefined ? String(roundId) : t('round.taskLabel', { round: task.round })
+    }).join(' · ')
   }
+  const standaloneTasks = graph.tasks.filter(task => !graph.documents.some(document => document.roundId === task.roundId))
+  const roundOptions = [
+    ...graph.documents.map(document => ({ id: document.roundId, round: document.round,
+      label: `${t('round.label', { round: document.round })} ${document.title}` })),
+    ...[...new Map(standaloneTasks.map(task => [String(task.roundId), task] as const)).values()]
+      .map(task => ({ id: task.roundId, round: task.round,
+        label: `${t('round.taskLabel', { round: task.round })} ${task.task.title}` })),
+  ].sort((left, right) => left.round - right.round)
   const ariaLabel = (node: TraceNode): string => node.kind === 'document' ? t('graph.documentAria', { round: node.round, title: node.title })
     : node.kind === 'requirement' ? t('graph.nodeAria', { round: node.round, requirement: node.requirementId, title: node.title, status: t(statusOf(node, graph) ?? 'graph.status.pending') })
       : node.kind === 'task' ? t('graph.taskAria', { title: node.task.title }) : t('graph.fileAria', { path: node.path })
@@ -189,7 +205,7 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
       {query !== '' && <button type="button" onClick={() => { setQuery(''); chooseNode(undefined) }}>{t('graph.clearSearch')}</button>}
       <select aria-label={t('graph.filterRound')} value={roundFilter} onChange={(event) => { setRoundFilter(event.target.value); chooseNode(undefined) }}>
         <option value="">{t('graph.allRounds')}</option>
-        {graph.documents.map(document => <option key={document.key} value={document.roundId}>{t('round.label', { round: document.round })} {document.title}</option>)}
+        {roundOptions.map(round => <option key={round.id} value={round.id}>{round.label}</option>)}
       </select>
       <button type="button" className={css.expandAll} disabled={traceNodes(filtered).length === 0} onClick={() => {
         const keys = traceNodes(filtered).map(node => node.key)
@@ -308,7 +324,7 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
             : Math.min(60, Math.max(15, value + (event.key === 'ArrowUp' ? 5 : -5))))
         }} />
       <div className={css.detailSlot} style={{ flexBasis: `${detailPercent}%` }}>
-        {graph.documents.length === 0 && <div className={css.empty}><strong>{t('graph.emptyTitle')}</strong><p>{t('graph.emptyDetail')}</p></div>}
+        {graph.documents.length === 0 && graph.tasks.length === 0 && <div className={css.empty}><strong>{t('graph.emptyTitle')}</strong><p>{t('graph.emptyDetail')}</p></div>}
         {selectedNode !== undefined && <section className={css.detail} aria-label={t('graph.details')}>
           <nav className={css.detailActions}>
             <button type="button" disabled={notebookTarget === undefined} onClick={() => { if (notebookTarget !== undefined) onSelect(notebookTarget) }}>{t('graph.locateNotebook')}</button>
@@ -324,7 +340,10 @@ export function RequirementGraphPanel({ graph, onSelect, onOpenFile, t }: Requir
             {selectedNode.kind === 'task' && <>
               <p>{t(statusOf(selectedNode, graph) ?? 'graph.status.pending')} · {selectedNode.task.summary}</p>
               <div className={css.documentContent}>{selectedNode.task.statement}</div>
-              {!graph.edges.some(edge => edge.target === selectedNode.key) && <p>{t('graph.unassigned')}</p>}
+              {!graph.edges.some(edge => edge.target === selectedNode.key) && (
+                <p>{t(graph.documents.some(document => document.roundId === selectedNode.roundId)
+                  ? 'graph.unassigned' : 'graph.standaloneTask')}</p>
+              )}
               {outgoing(selectedNode.key).length === 0 && <p>{t('graph.noChanges')}</p>}
             </>}
             {file !== undefined && <>

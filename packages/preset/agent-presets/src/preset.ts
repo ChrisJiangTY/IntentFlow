@@ -69,6 +69,8 @@ export interface Config {
    * configured root. False mounts a roster without the derived writable root.
    */
   includeUserRoot: boolean
+  /** Per-preset inherited-tool allow lists. Empty hides all inherited tools; absent means unrestricted. */
+  toolAllowLists?: Readonly<Record<string, readonly string[]>>
 }
 
 /**

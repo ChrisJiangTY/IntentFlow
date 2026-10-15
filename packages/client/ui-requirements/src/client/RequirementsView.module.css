@@ -227,7 +227,7 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 4px 28px calc(var(--dsh-composer-height, 152px) + 24px) 30px;
+  padding: 4px 28px 64px 30px;
   background: var(--dsw-alias-bg-base);
 }
 
@@ -327,8 +327,14 @@
   box-shadow: 0 0 0 1px var(--dsw-alias-state-business-primary);
 }
 
-.cell[data-cell='task']:not(.selected) {
-  padding-block: 13px;
+.cell[data-cell='task'] {
+  padding-block: 8px;
+  border-radius: 6px;
+}
+
+.cell[data-cell='task'].selected {
+  min-height: 52px;
+  box-shadow: none;
 }
 
 .executionMark {
@@ -464,6 +470,8 @@
   display: flex;
   align-items: baseline;
   gap: 20px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
 }
 
 .taskHeadingRow > span {
@@ -473,29 +481,43 @@
   font-weight: 600;
 }
 
-.taskHeadingRow > strong {
+.taskHeadingRow > strong,
+.taskTitleInput {
   min-width: 0;
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
   font: var(--dsw-font-l-20);
-  font-size: var(--requirements-section-size);
-  line-height: calc(var(--requirements-section-size) + 8px);
-  font-weight: 650;
+  font-size: calc(var(--requirements-body-size) + 2px);
+  line-height: calc(var(--requirements-body-line) + 2px);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
+.taskTitleInput {
+  flex: 1;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  resize: none;
+  caret-color: var(--dsw-alias-state-business-primary);
+}
+
 .taskSummaryInput {
   box-sizing: border-box;
   display: block;
-  width: calc(100% - 79px);
+  width: 100%;
   min-height: 22px;
-  margin: 4px 0 0 79px;
+  margin: 6px 0 0;
   padding: 0;
   overflow: hidden;
   border: 0;
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--dsw-alias-label-secondary);
   outline: none;
   background: transparent;
@@ -506,17 +528,13 @@
 }
 
 .selected .taskSummaryInput:not([readonly]) {
-  min-height: 40px;
-  margin-top: 49px;
-  padding: 8px 10px;
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 8%, var(--dsw-alias-bg-base));
   color: var(--dsw-alias-label-primary);
   caret-color: var(--dsw-alias-state-business-primary);
 }
 
-.taskSummaryInput:focus-visible {
-  outline: 1px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
+.cell[data-cell='task']:focus-within {
+  border-color: var(--dsw-alias-state-business-primary);
+  box-shadow: none;
 }
 
 .taskSource {
@@ -877,6 +895,16 @@
   cursor: pointer;
 }
 
+.historicalValidation {
+  border-style: dashed;
+  color: var(--dsw-alias-label-secondary);
+  cursor: default;
+}
+
+.historicalValidation .validationIcon {
+  color: var(--dsw-alias-label-caption);
+}
+
 .validationStatus {
   margin-left: auto;
   color: var(--dsw-alias-label-caption) !important;
@@ -1088,7 +1116,7 @@
 .notebookFooter {
   position: absolute;
   right: 28px;
-  bottom: calc(var(--dsh-composer-height, 152px) + 8px);
+  bottom: 8px;
   z-index: 2;
   display: flex;
   justify-content: center;

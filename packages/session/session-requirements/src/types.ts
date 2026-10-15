@@ -62,11 +62,22 @@ export interface RequirementRoundStartRequest {
   readonly language: RequirementAuthoringLanguage
 }
 
+/** Browser request that adds a raw requirement to the latest requirement round. */
+export type RequirementRoundAppendRequest = RequirementRoundStartRequest
+
+/** Browser request that creates one pending task without a requirement document. */
+export type RequirementTaskRoundStartRequest = RequirementRoundStartRequest
+
 /** Identity returned after one structured requirement round is queued. */
 export interface RequirementRoundStartResult {
   readonly roundId: RequirementRoundId
   readonly round: number
   readonly eventSeq: number
+}
+
+/** Identity returned after one standalone task round and its pending task are stored. */
+export interface RequirementTaskRoundStartResult extends RequirementRoundStartResult {
+  readonly taskId: RequirementTaskId
 }
 
 /** Browser request that replaces the editable requirement document draft. */
@@ -210,6 +221,8 @@ export type RequirementRoundStatus =
 /** Durable product round identity and current orchestration status. */
 export interface RequirementRoundEvent {
   readonly version: 1
+  /** Task rounds have no requirement document; absent means a requirement round. */
+  readonly kind?: 'task'
   /** Monotonic replacement number for this round's whole value. */
   readonly revision: number
   readonly roundId: RequirementRoundId
@@ -360,6 +373,7 @@ export interface RequirementTaskListEvent {
   readonly version: 1
   readonly revision: number
   readonly roundId: RequirementRoundId
+  /** Zero only for a standalone task round, which has no requirement document. */
   readonly documentRevision: number
   readonly tasks: readonly RequirementTask[]
 }

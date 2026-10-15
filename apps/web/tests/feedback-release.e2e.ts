@@ -20,7 +20,7 @@ import {
   compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/feedback-release', import.meta.url))
 // The release path needs only a settled ordinary turn, so this lane replays
@@ -91,6 +91,7 @@ describe('web e2e: feedback-gated release under the shipped default mode', () =>
     const settled = scaffold.whenTurnSettled()
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     const sessionId = await settled
     if (MODE === 'record') {
       // Re-records the SHARED feedback-command session this lane replays.
@@ -100,14 +101,15 @@ describe('web e2e: feedback-gated release under the shipped default mode', () =>
 
   it.skipIf(MODE === 'record')('releases the session records through the feedback and pins the disclosure', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-feedback-release'))
-    await page.getByText('LIGHTHOUSE', { exact: true }).waitFor({ timeout: 15_000 })
+    await page.locator('[data-conversation-scroll]').getByText('LIGHTHOUSE', { exact: true }).waitFor({ timeout: 15_000 })
     expect(uploads).toEqual([])
     const input = page.locator('[data-composer-input]').first()
     await input.fill('/feedback the diff view is unreadable')
     await input.press('Enter')
 
-    await page.getByText(/Feedback recorded for session/).waitFor({ timeout: 10_000 })
-    expect(await page.getByText(/recording feedback uploads the session records not yet shared/).count()).toBe(1)
+    const transcript = page.locator('[data-conversation-scroll]')
+    await transcript.getByText(/Feedback recorded for session/).waitFor({ timeout: 10_000 })
+    expect(await transcript.getByText(/recording feedback uploads the session records not yet shared/).count()).toBe(1)
 
     // FEEDBACK_ONLY releases through the committed feedback event: exactly
     // one request reaches the collector, carrying the whole unshared range.

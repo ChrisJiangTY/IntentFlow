@@ -1,6 +1,7 @@
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import { describe, expect, it } from 'vitest'
 import { sessionRequirementGraph, focusedTraceKeys } from '../src/client/knowledge-graph.ts'
+import { filterTraceRound, visibleTraceKeys } from '../src/client/trace-exploration.ts'
 
 import { EMPTY_REQUIREMENTS_SNAPSHOT } from '../src/client/assembly.ts'
 import type { RequirementsSnapshot } from '../src/client/contract.ts'
@@ -120,5 +121,32 @@ describe('Session requirement graph', () => {
       ...notebook.taskLists[0]!, data: { ...notebook.taskLists[0]!.data, documentRevision: 9 },
     }] }
     expect(sessionRequirementGraph(withChanges, changedDocument, currentSessionId).files).toEqual([])
+  })
+
+  it('shows a task-only round and its recorded changes without a document node', () => {
+    const source = sessions()
+    const summary = source.byId[currentSessionId]!
+    const taskRoundId = 'ROUND-03' as never
+    const withChanges = { ...source, byId: { ...source.byId, [currentSessionId]: {
+      ...summary, projectionValues: { ...summary.projectionValues, requirementChanges: { changes: [
+        { path: 'standalone.ts', oldText: null, newText: 'task', seq: 20, turn: 8 },
+      ] } },
+    } } }
+    const notebook = { ...EMPTY_REQUIREMENTS_SNAPSHOT,
+      rounds: [{ data: { roundId: taskRoundId, round: 3, kind: 'task' } }],
+      taskLists: [{ data: { roundId: taskRoundId, documentRevision: 0, tasks: [{
+        id: 'T-STANDALONE', order: 0, kind: 'implementation', title: '独立任务', summary: '',
+        statement: '完成独立任务', requirementRefs: [], status: 'completed',
+      }] } }],
+      taskExecutions: [{ data: { roundId: taskRoundId, taskId: 'T-STANDALONE', turn: 8 } }],
+    } as unknown as RequirementsSnapshot
+    const graph = sessionRequirementGraph(withChanges, notebook, currentSessionId)
+    expect(graph.documents).toHaveLength(2)
+    expect(graph.documents.some(node => node.roundId === taskRoundId)).toBe(false)
+    expect(graph.tasks.find(node => node.roundId === taskRoundId)?.round).toBe(3)
+    expect(graph.edges).toContainEqual({ source: 'task:ROUND-03:T-STANDALONE', target: 'file:standalone.ts' })
+    expect(visibleTraceKeys(graph, new Set()).has('task:ROUND-03:T-STANDALONE')).toBe(true)
+    expect(filterTraceRound(graph, taskRoundId).documents).toEqual([])
+    expect(filterTraceRound(graph, taskRoundId).tasks).toHaveLength(1)
   })
 })

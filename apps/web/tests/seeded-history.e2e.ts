@@ -27,7 +27,7 @@ import {
   launchWebScaffold, parseSeedFixture, realizeSeedFixture, recordFixture, renderSeedFixture, seedSession, watchConsole,
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { expandOwningTurnProcess, newEnglishPage, saveFailureShot } from './support.ts'
+import { expandOwningTurnProcess, newEnglishPage, openRightChat, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/seeded-history', import.meta.url))
 const SEED = fileURLToPath(new URL('../../../snapshots/web/seeded-history/session.jsonl', import.meta.url))
@@ -338,8 +338,10 @@ describe('web e2e: seeded history renders through cold resume', () => {
     // This scenario issues zero model calls — the scaffold's route-only
     // adapter serves the catalog and refuses to stream — so history restores
     // the routed id and the seat resolves it against an advertised row.
+    await openRightChat(page)
     await page.getByRole('button', { name: /^Select model, current/ })
       .waitFor({ timeout: 10_000 })
+    await page.getByRole('button', { name: 'Close Chat' }).click()
     const snapshot = (await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd))
       .split(SEED_ID).join('{{seededId}}')
     await compareOrRefreshGolden(UI_EXPECTED, snapshot, MODE)
@@ -477,6 +479,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
 
   it.skipIf(MODE === 'record')('an Access-chip switch lands one command row: bare name, non-repeating settlement text', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-seeded-command-row'))
+    await openRightChat(page)
     // The Access chip submits `/permission <preset>` — a host command with no
     // model call, so the settled row renders keylessly over this cold history.
     // The row copy is the assertion: `permission · preset read-only`,
@@ -488,10 +491,11 @@ describe('web e2e: seeded history renders through cold resume', () => {
     await page.getByRole('button', { name: 'Access mode, current: Read Only' }).waitFor({ timeout: 10_000 })
     // Scoped to the row itself, so unrelated page text that happens to read
     // `permission` (a future resident slash menu) cannot satisfy or break it.
-    const row = page.locator('[data-variant="others"]').filter({ hasText: 'preset read-only' })
+    const row = page.locator('[data-conversation-scroll] [data-variant="others"]').filter({ hasText: 'preset read-only' })
     await expect.poll(() => row.count(), { timeout: 10_000 }).toBe(1)
     expect(await row.getByText('permission', { exact: true }).count()).toBe(1)
     expect(await row.getByText('/permission read-only', { exact: true }).count()).toBe(0)
+    await page.getByRole('button', { name: 'Close Chat' }).click()
     const snapshot = (await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd))
       .split(SEED_ID).join('{{seededId}}')
     await compareOrRefreshGolden(COMMAND_ROW_EXPECTED, snapshot, MODE)
@@ -502,10 +506,11 @@ describe('web e2e: seeded history renders through cold resume', () => {
     const previousDshHome = process.env.DSH_HOME
     process.env.DSH_HOME = scaffold.harnessHome
     try {
+      await openRightChat(page)
       const input = page.locator('[data-composer-input]').first()
       await input.fill('/feedback the diff view is unreadable')
       await input.press('Enter')
-      const row = page.locator('[data-variant="others"]').filter({
+      const row = page.locator('[data-conversation-scroll] [data-variant="others"]').filter({
         hasText: `Feedback recorded for session ${SEED_ID}`,
       })
       await row.waitFor({ timeout: 10_000 })
@@ -525,6 +530,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
       const userId = userLine?.match(/^Anonymous user: ([0-9a-f-]+)/i)?.[1]
       if (userId === undefined) throw new Error('feedback command omitted the user id')
 
+      await page.getByRole('button', { name: 'Close Chat' }).click()
       const snapshot = (await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd))
         .split(SEED_ID).join('{{seededId}}')
         .split(userId).join('{{userId}}')
@@ -543,7 +549,8 @@ describe('web e2e: seeded history renders through cold resume', () => {
       source: { kind: 'plugin', plugin: 'fixture' },
     }), { surfaceOp: 'append' })
 
-    const disclosure = page.getByRole('button', { name: 'Context injection fixture', exact: true })
+    const disclosure = page.locator('[data-conversation-scroll]')
+      .getByRole('button', { name: 'Context injection fixture', exact: true })
     await disclosure.waitFor({ timeout: 10_000 })
     await disclosure.click()
     await expect.poll(() => disclosure.getAttribute('aria-expanded')).toBe('true')

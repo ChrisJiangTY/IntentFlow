@@ -52,10 +52,13 @@ kind: "package-reference"
 | `roots` | `[]` | 按优先级排列的扫描目录；每项提供 `path`（开头的 `~` 会展开）与 `trust`（默认为 `user`） |
 | `includeShippedRoot` | `true` | 在全部已配置根目录之前，前置本包随附的 preset 作为 `system` 根目录 |
 | `includeUserRoot` | `true` | 在全部已配置根目录之后追加 `<dshHome>/.agent-presets` 作为 `user` 根目录 |
+| `toolAllowLists` | `{}` | 对每个命名的 preset 只允许所列继承工具；未列出的 preset 保留全部继承工具 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-agent-presets)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
 随附根目录前置在全部已配置根目录之前，因此即使补丁替换 roster 配置，内置集合仍然可用并赢得重复 id。`includeShippedRoot: false` 会为完全自行提供 preset 的部署移除内置集合。`includeUserRoot: false` 会移除推导出的可写根目录；钉住确切 roster 的测试会同时关闭两个推导根目录。
+
+`toolAllowLists` 限制所选 agent 及其子 agent 从宿主和 preset 常驻组装继承的工具。Web profile 为 `minimal` 只允许 `bash` 和 `str_replace_editor`，因此宿主的需求工具不会进入该 preset。未知工具名或缺少 tools 服务会在改变 agent 的 preset 链接之前拒绝组装；空列表表示不允许任何继承工具。空白会话切换 preset 后会应用新 preset 的列表；若新 preset 没有列表，则恢复不受限制的继承。
 
 ### 选择默认 preset
 

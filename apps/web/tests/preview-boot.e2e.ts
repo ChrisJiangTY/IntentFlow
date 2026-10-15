@@ -35,7 +35,7 @@ import {
   type PreviewFixtureManifest,
 } from '@deepseek-ai/dsh-experimental-webworker-runtime'
 import { captureStableAria, compareOrRefreshGolden, webSnapshotMode } from './scaffold.ts'
-import { newEnglishPage, REPO_ROOT, saveFailureShot } from './support.ts'
+import { newEnglishPage, openRightChat, REPO_ROOT, saveFailureShot } from './support.ts'
 
 const DIST_ROOT = fileURLToPath(new URL('../dist', import.meta.url))
 
@@ -310,8 +310,10 @@ async function bootPreview(origin: string, browser: Browser): Promise<void> {
     const configureLater = page.getByRole('button', { name: 'Configure later' })
     await configureLater.waitFor({ timeout: 30_000 })
     await configureLater.click()
-    await page.locator('[data-composer-input][data-placeholder="Describe what you want to build... / commands, @ files or sessions"]')
+    await openRightChat(page)
+    await page.locator('[data-right-chat-panel] [data-composer-input][data-placeholder="Describe what you want to build... / commands, @ files or sessions"]')
       .waitFor({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Close Chat' }).click()
 
     const exercised = await page.evaluate(async () => {
       type Result<T> = { result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } } }
@@ -394,10 +396,11 @@ async function bootPreview(origin: string, browser: Browser): Promise<void> {
     await page.getByText(SHOWCASE_TAIL, { exact: true }).waitFor({ timeout: 30_000 })
 
     expect(await page.getByText(SHOWCASE_OLDEST, { exact: true }).count()).toBe(0)
-    await page.getByText('PREVIEW.md', { exact: true }).waitFor()
-    await page.getByText('src/preview.ts', { exact: true }).waitFor()
-    await page.getByText('Update to-do list', { exact: true }).waitFor()
-    await page.getByText('Error: ENOENT: no such file, open missing.txt', { exact: true }).waitFor()
+    const transcript = page.locator('[data-conversation-scroll]')
+    await transcript.getByText('PREVIEW.md', { exact: true }).waitFor()
+    await transcript.getByText('src/preview.ts', { exact: true }).waitFor()
+    await transcript.getByText('Update to-do list', { exact: true }).waitFor()
+    await transcript.getByText('Error: ENOENT: no such file, open missing.txt', { exact: true }).waitFor()
 
     const subagents = page.getByRole('button', { name: '2 subagents' })
     await subagents.waitFor({ timeout: 15_000 })

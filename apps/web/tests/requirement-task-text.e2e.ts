@@ -53,7 +53,8 @@ describe('requirement task translation and human-directed revision', () => {
       expect(translated.task?.summary).toBeTruthy()
       const humanInstruction = '改为导出JSON，保留全部搜索结果；不要再生成CSV。'
       const rewritten = await scaffold.ctx.sessionRequirements.editTask(agent, { roundId, taskId: original.id,
-        title: translated.task!.title, summary: humanInstruction, statement: translated.task!.statement, humanEdit: true })
+        title: '导出完整 JSON 结果', summary: humanInstruction, statement: translated.task!.statement, humanEdit: true })
+      expect(rewritten.task?.title).toBe('导出完整 JSON 结果')
       expect(rewritten.task?.summary).toBe(humanInstruction)
       expect(rewritten.task?.humanInstruction).toBe(humanInstruction)
       expect(rewritten.task?.statement).toMatch(/JSON/iu)

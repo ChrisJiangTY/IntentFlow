@@ -95,6 +95,23 @@ interface ToolArgsMap {
     /** Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access. */
     justification?: string;
   } & Record<string, JsonValue>;
+  /** Ask one batch of Chinese clarification questions for the active Requirement Notebook round. Use only for user-owned choices or material ambiguity that repository inspection cannot resolve. */
+  clarify_requirements: {
+    /** One to the configured maximum related clarification questions. */
+    questions: {
+      /** Stable id echoed in the answer. */
+      id: string;
+      /** One concise Chinese question. */
+      question: string;
+      /** Optional short Chinese heading. */
+      header?: string;
+      /** Two or three mutually exclusive choices; put the recommended option first. */
+      options?: {
+        label: string;
+        description?: string;
+      }[];
+    }[];
+  } & Record<string, JsonValue>;
   /** Create one persisted same-session completion goal when the current direct human request is a long-running objective that should continue across autonomous goal rounds. You may infer that intent without requiring the user to say "create a goal". Do not use this for trivial single-turn work. Execution rejects non-human and subagent authority. */
   create_goal: {
     /** The concrete completion objective inferred from the direct human request. */
@@ -219,6 +236,38 @@ interface ToolArgsMap {
     /** Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it. */
     run_in_background?: boolean;
   } & Record<string, JsonValue>;
+  /** Commit ordered implementation and checkpoint tasks from the active Chinese requirement document. Each task verifies its assigned criteria; together they cover every acceptance criterion. */
+  submit_requirement_tasks: {
+    /** At least one implementation or checkpoint task, in dependency order. Each task includes its own verification. */
+    tasks: ({
+      kind: "implementation" | "checkpoint";
+      /** Concise Chinese title for the top-level task block. */
+      title: string;
+      /** Complete Chinese Markdown checklist with concrete implementation and verification steps for this task. */
+      markdown: string;
+      /** Acceptance criterion ids implemented or verified by this task, for example ["1.1", "2.3"]. */
+      requirement_refs: string[];
+    })[];
+  } & Record<string, JsonValue>;
+  /** Commit the complete Chinese requirement document for the active Requirement Notebook round after all material ambiguity is resolved. */
+  submit_requirements_document: {
+    /** Read-only Chinese round summary of at most 30 characters. */
+    summary: string;
+    /** Complete Chinese Markdown using # 需求文档, ## 简介, and ## 需求. */
+    markdown: string;
+    /** Requirement dependencies and explicit refinement or supersession links. Submit [] when no relation exists. */
+    relations: ({
+      /** Top-level requirement number in the document being submitted, for example "2". */
+      source_requirement_id: string;
+      /** Top-level prerequisite or prior requirement number. */
+      target_requirement_id: string;
+      /** Existing ROUND-NN identity for refines or supersedes; omit for a dependency in the current round. */
+      target_round_id?: string;
+      kind: "depends-on" | "refines" | "supersedes";
+      /** Concise Chinese explanation of the relation. */
+      reason: string;
+    })[];
+  } & Record<string, JsonValue>;
   /** Record and update a structured task list for the current work. Send the ENTIRE list every call — it REPLACES the previous list (there are no partial updates, no per-item edits). Use it to plan multi-step work and show progress: add one todo per concrete step before you start. Mark every todo being actively worked on `in_progress` — several at once when work genuinely runs in parallel (e.g. concurrent subagents or background commands), one for sequential work; while work remains, at least one task should be `in_progress`. Mark a todo `completed` the moment it is done (do not batch completions), and allow no `in_progress` item only once all work is complete. Skip the list for trivial single-step tasks. Statuses: `pending` (not started), `in_progress` (being worked on now), `completed` (finished). */
   todo_write: {
     /** The COMPLETE task list, replacing any previous list. */
@@ -328,6 +377,13 @@ interface ToolOutputMap {
       enforcement?: string;
       runnerFailed?: boolean;
     };
+  };
+  clarify_requirements: {
+    answers: {
+      id: string;
+      selected: string[];
+      custom?: string;
+    }[];
   };
   create_goal: {
     goal: null;
@@ -500,6 +556,15 @@ interface ToolOutputMap {
     kind: "foreground";
     runId: string;
     output: JsonValue[];
+  };
+  submit_requirement_tasks: {
+    accepted: true;
+    documentRevision: number;
+    taskCount: number;
+  };
+  submit_requirements_document: {
+    accepted: true;
+    revision: number;
   };
   todo_write: {
     todos: ({

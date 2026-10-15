@@ -203,7 +203,7 @@ function TurnStatus({ startTime, t }: {
  */
 export function ChatView({
   useSession, useChat, useSessions, useStore, actions, renderSlot, sessionId, openFile, loadOlder, loadImage, openView, chatScroll, forkAt,
-  fileMentions, useTranscriptView, t,
+  fileMentions, useTranscriptView, surface = 'main', t,
 }: ChatViewSlotProps) {
   const order = useChat(s => s.order)
   const nodeStore = useChat(s => s.nodes)
@@ -283,7 +283,7 @@ export function ChatView({
   const columnRef = useRef<HTMLDivElement | null>(null)
   // A saved position starts disarmed; the first layout effect synchronously
   // restores it and normalizes a floor-clamped position back to following.
-  const [atBottom, setAtBottom] = useState(() => chatScroll.read() === null)
+  const [atBottom, setAtBottom] = useState(() => chatScroll.read(surface) === null)
   const atBottomRef = useRef(atBottom)
   const [activeTurn, setActiveTurn] = useState<number | null>(
     () => turnNavigationItems.at(-1)?.turn ?? null,
@@ -369,7 +369,7 @@ export function ChatView({
     observedTopRef.current = el.scrollTop
     atBottomRef.current = true
     setAtBottom(true)
-    chatScroll.save(null)
+    chatScroll.save(null, surface)
     setActiveTurn(turnNavigationItems.at(-1)?.turn ?? null)
   }
 
@@ -383,7 +383,7 @@ export function ChatView({
     // is restored instead of snapping the reader back to the floor.
     if (openState === 'open' && !openedRef.current) {
       openedRef.current = true
-      const saved = chatScroll.read()
+      const saved = chatScroll.read(surface)
       if (saved === null) {
         toBottom(el)
       } else {
@@ -395,8 +395,8 @@ export function ChatView({
         atBottomRef.current = isAtBottom
         setAtBottom(isAtBottom)
         const normalized = isAtBottom ? null : scrollPosition(local, el)
-        if (isAtBottom) chatScroll.save(null)
-        else if (normalized !== null) chatScroll.save(normalized)
+        if (isAtBottom) chatScroll.save(null, surface)
+        else if (normalized !== null) chatScroll.save(normalized, surface)
       }
       firstSeqRef.current = firstSeq
       lastKeyRef.current = lastKey
@@ -470,8 +470,8 @@ export function ChatView({
     }
     // Continuous save (unmount happens after ref detach, so saving there is
     // too late); pinned-to-bottom clears so a remount keeps following.
-    if (isAtBottom) chatScroll.save(null)
-    else if (position !== null) chatScroll.save(position)
+    if (isAtBottom) chatScroll.save(null, surface)
+    else if (position !== null) chatScroll.save(position, surface)
     observedTopRef.current = el.scrollTop
     scheduleActiveTurn()
   }
@@ -500,7 +500,7 @@ export function ChatView({
       const el = scrollerOf(local)
       el.scrollTop = el.scrollHeight
       observedTopRef.current = el.scrollTop
-      chatScroll.save(null)
+      chatScroll.save(null, surface)
     }
   }
   // Streaming, tool disclosures, and other flow changes resize the column;
@@ -565,9 +565,9 @@ export function ChatView({
     setAtBottom(isAtBottom)
     setActiveTurn(item.turn)
     const position = isAtBottom ? null : scrollPosition(local, el)
-    if (isAtBottom) chatScroll.save(null)
-    else if (position !== null) chatScroll.save(position)
-  }, [loadingOlder, chatScroll])
+    if (isAtBottom) chatScroll.save(null, surface)
+    else if (position !== null) chatScroll.save(position, surface)
+  }, [loadingOlder, chatScroll, surface])
 
   return (
     <div className={css.root}>

@@ -88,6 +88,8 @@ interface BenchOptions {
   commandMenuOpen?: boolean
   busyEnter?: 'queue' | 'steer'
   toggleCommandMenu?: (selection: { start: number; end: number }) => void
+  submitIntent?: InputBarProps['submitIntent']
+  submitOverride?: InputBarProps['submitOverride']
 }
 
 /** One pending queue row (the runtime snapshot shape, as the dock tests build it). */
@@ -197,6 +199,8 @@ function bench(over?: BenchOptions) {
     ...(over?.overlay !== undefined ? { overlay: over.overlay } : {}),
     ...(over?.leftItems !== undefined ? { leftItems: over.leftItems } : {}),
     ...(over?.rightItems !== undefined ? { rightItems: over.rightItems } : {}),
+    ...(over?.submitIntent !== undefined ? { submitIntent: over.submitIntent } : {}),
+    ...(over?.submitOverride !== undefined ? { submitOverride: over.submitOverride } : {}),
   }
   const view = render(<InputBar {...props} />)
   const textarea = view.container.querySelector<HTMLDivElement>('[data-composer-input]')!
@@ -434,6 +438,63 @@ describe('image draft rail', () => {
       ])
     })
     expect(result.view.getByRole('alert').textContent).toContain('图片读取服务不可用')
+  })
+})
+
+describe('right Chat intent choice', () => {
+  it('asks on Enter, keeps a canceled draft, and sends a requirement through the selected route', async () => {
+    const submitIntent = vi.fn(async () => true)
+    const submitOverride = vi.fn(async () => true)
+    const result = bench({ draft: 'a new requirement', submitIntent, submitOverride })
+    fireEvent.keyDown(result.textarea, { key: 'Enter' })
+    expect(result.view.getByRole('button', { name: '提出需求' })).toBeTruthy()
+    expect(result.sink).not.toHaveBeenCalled()
+    expect(submitOverride).not.toHaveBeenCalled()
+    fireEvent.click(result.view.getByRole('button', { name: '取消' }))
+    expect(result.shell.snapshot.draft).toBe('a new requirement')
+    expect(result.view.queryByRole('button', { name: '提出需求' })).toBeNull()
+    fireEvent.keyDown(result.textarea, { key: 'Enter' })
+    fireEvent.click(result.view.getByRole('button', { name: '提出需求' }))
+    await act(async () => { await Promise.resolve() })
+    expect(submitIntent).toHaveBeenCalledWith('a new requirement', 'requirement')
+    expect(submitOverride).not.toHaveBeenCalled()
+    expect(result.sink).not.toHaveBeenCalled()
+    expect(result.shell.snapshot.draft).toBe('')
+  })
+
+  it('asks from the send button, routes a standalone task, and leaves rejected input in the editor', async () => {
+    const submitIntent = vi.fn(async () => false)
+    const result = bench({ draft: 'one task', submitIntent })
+    fireEvent.click(result.button)
+    expect(result.view.getByRole('button', { name: '提出任务' })).toBeTruthy()
+    fireEvent.click(result.view.getByRole('button', { name: '提出任务' }))
+    await act(async () => { await Promise.resolve() })
+    expect(submitIntent).toHaveBeenCalledWith('one task', 'task')
+    expect(result.shell.snapshot.draft).toBe('one task')
+  })
+
+  it('sends normal chat through InputHub even when an active-view override exists', () => {
+    const submitIntent = vi.fn(async () => true)
+    const submitOverride = vi.fn(async () => true)
+    const result = bench({ draft: 'hello', submitIntent, submitOverride })
+    fireEvent.keyDown(result.textarea, { key: 'Enter' })
+    fireEvent.click(result.view.getByRole('button', { name: '普通对话' }))
+    expect(result.sink).toHaveBeenCalledWith('hello', [], 'queue', expect.any(AbortSignal))
+    expect(submitIntent).not.toHaveBeenCalled()
+    expect(submitOverride).not.toHaveBeenCalled()
+  })
+
+  it('does not clear a newly selected session after an earlier intent finishes', async () => {
+    let finish: ((accepted: boolean) => void) | undefined
+    const submitIntent = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve }))
+    const result = bench({ draft: 'old task', submitIntent })
+    fireEvent.keyDown(result.textarea, { key: 'Enter' })
+    fireEvent.click(result.view.getByRole('button', { name: '提出任务' }))
+    result.view.rerender(<InputBar {...result.props} sessionId={'s2' as SessionId} />)
+    writeDraft(result.shell, 'new session draft')
+    await act(async () => { finish?.(true); await Promise.resolve() })
+    expect(result.shell.snapshot.draft).toBe('new session draft')
+    expect(result.view.queryByRole('button', { name: '提出任务' })).toBeNull()
   })
 })
 

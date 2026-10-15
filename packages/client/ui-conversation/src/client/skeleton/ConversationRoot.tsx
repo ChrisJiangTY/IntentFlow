@@ -1,8 +1,8 @@
-// Resident conversation skeleton. Hero chrome, composer positioning, the
-// chain, AND the composer bar (session-maybe slot) stay mounted across
-// no-session/session transitions — the bar renders inert via owner props.
+// Conversation skeleton. A no-Session workspace picker stays in the left
+// hero; a selected Session places its sole composer under the right Chat.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
@@ -132,7 +132,8 @@ function WidthHandle(props: {
 export function ConversationRoot({
   sessionId, useSession, useSessions, useSessionPendingInteraction,
   useWorkspaces, useConversation, useInput, useComposerBlock,
-  renderSlot, renderSlotChain, selectWorkspace, submitActiveView, t,
+  useRightChat, useRightPanelWidth, renderSlot, renderSlotChain,
+  selectWorkspace, submitIntent, t,
 }: ConversationRootProps) {
   const session = useSession(s => s)
   const pendingInteraction = useSessionPendingInteraction(snapshot =>
@@ -159,6 +160,8 @@ export function ConversationRoot({
   // A plugin this package cannot import (ui-model-selection) says this session cannot
   // send; its reason is already localized by whoever raised it.
   const composerBlock = useComposerBlock(block => block)
+  const rightChatOpen = useRightChat(open => open)
+  const rightPanelWidth = useRightPanelWidth(width => width)
 
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pendingWorkspaceId, setPendingWorkspaceId] = useState<WorkspaceId | undefined>()
@@ -282,6 +285,7 @@ export function ConversationRoot({
   )
   const hero = sessionId === undefined
     || (shellPhase === 'blank' && (openState === 'open' || summaryBlank === true))
+  const heroComposerInMain = hero && (sessionId === undefined || !rightChatOpen)
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
 
@@ -338,7 +342,7 @@ export function ConversationRoot({
   // when both hold — picking a workspace is the earlier prerequisite.
   const blocked = !inert && composerBlock !== undefined
   const inputBar = renderSlot('conversation.composer.bar', {
-    variant: hero ? 'hero' : 'composer',
+    variant: heroComposerInMain ? 'hero' : 'composer',
     ...(inert
       ? {
         disabled: true,
@@ -357,16 +361,21 @@ export function ConversationRoot({
     rightItems: zone === undefined ? null : renderSlot('conversation.input.right', zone),
     // Ambient dock under the card shares the composer's width constraint.
     footer: !hero && zone !== undefined ? renderSlot('conversation.composer.dock', zone) : null,
-    ...(activeView === 'requirements' && sessionId !== undefined && submitActiveView !== undefined
-      ? { submitOverride: (draft: string) => submitActiveView(sessionId, draft) }
+    ...(sessionId !== undefined && submitIntent !== undefined
+      ? { submitIntent: (draft: string, intent: 'requirement' | 'task') => submitIntent(sessionId, draft, intent) }
       : {}),
   })
 
-  const composerBar = (
-    <div className={clsx(css.composerStack, hero && css.composerHero)}>
-      {hero && <HeroGlow className={css.heroGlow} />}
-      {hero && <HeroShell t={t} renderSlot={renderSlot} />}
-      {hero && heroWorkspaceRow}
+  const composerBar = heroComposerInMain ? (
+    <div className={clsx(css.composerStack, css.composerHero)}>
+      <HeroGlow className={css.heroGlow} />
+      <HeroShell t={t} renderSlot={renderSlot} />
+      {heroWorkspaceRow}
+      {zone !== undefined && renderSlot('conversation.input.dock', zone)}
+      {inputBar}
+    </div>
+  ) : (
+    <div className={css.composerStack}>
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
       {inputBar}
     </div>
@@ -390,24 +399,47 @@ export function ConversationRoot({
   )
 
   return (
-    <div ref={rootResizeRef} className={css.root} data-phase={phase}>
-      {sessionId === undefined ? null : renderSlot('conversation.session.header', {})}
-      <div className={css.scrollBody} data-conversation-scroll="">
-        {sessionId === undefined ? null : renderSlot('conversation.session', { onActiveViewChange })}
-        {composerSeat}
+    <>
+      <div ref={rootResizeRef} className={css.root} data-phase={phase}>
+        {sessionId === undefined ? null : renderSlot('conversation.session.header', {})}
+        <div className={css.scrollBody} data-conversation-scroll="">
+          {sessionId === undefined ? null : renderSlot('conversation.session', { surface: 'main', onActiveViewChange })}
+          {heroComposerInMain ? composerSeat : hero ? (
+            <div className={clsx(css.composerStack, css.composerHero)}>
+              <HeroGlow className={css.heroGlow} />
+              <HeroShell t={t} renderSlot={renderSlot} />
+              {heroWorkspaceRow}
+            </div>
+          ) : null}
+        </div>
+        {/* Width handles only while a transcript is on screen; the hero has no
+            content column to size. */}
+        {phase === 'active' && activeView === 'chat' && (['left', 'right'] as const).map(side => (
+          <WidthHandle
+            key={side}
+            side={side}
+            onStart={onHandleStart}
+            onDrag={onHandleDrag}
+            onCommit={onHandleCommit}
+            onEnd={onHandleEnd}
+          />
+        ))}
       </div>
-      {/* Width handles only while a transcript is on screen; the hero has no
-          content column to size. */}
-      {phase === 'active' && (['left', 'right'] as const).map(side => (
-        <WidthHandle
-          key={side}
-          side={side}
-          onStart={onHandleStart}
-          onDrag={onHandleDrag}
-          onCommit={onHandleCommit}
-          onEnd={onHandleEnd}
-        />
-      ))}
-    </div>
+      {sessionId !== undefined && rightChatOpen && createPortal(
+        <div
+          className={css.rightChatPanel}
+          style={{ '--dsh-right-chat-width': `${rightPanelWidth}px` } as React.CSSProperties}
+          data-right-chat-panel=""
+          role="region"
+          aria-label={t('rightChat.title')}
+        >
+          <div className={css.rightChatTranscript}>
+            {renderSlot('conversation.session', { surface: 'right' })}
+          </div>
+          <div className={css.rightChatComposer}>{!heroComposerInMain && composerSeat}</div>
+        </div>,
+        document.body,
+      )}
+    </>
   )
 }

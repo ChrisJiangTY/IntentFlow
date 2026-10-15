@@ -16,7 +16,9 @@ import {
   launchWebScaffold, watchConsole,
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import {
+  chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, openRightChat, saveFailureShot,
+} from './support.ts'
 
 const BASE_FIXTURE = fileURLToPath(new URL('../../../snapshots/web/live-interactions/session.jsonl', import.meta.url))
 const AVAILABLE_CHILD_EXPECTED = fileURLToPath(new URL('../../../snapshots/web/subagent-conversation/ui.expected.md', import.meta.url))
@@ -114,6 +116,7 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
     const parentInput = page.locator('[data-composer-input][contenteditable="true"]').first()
     await parentInput.fill(PARENT_PROMPT)
     await parentInput.press('Enter')
+    await chooseNormalChatIntent(page)
     expect(await parentSettled).toBe(parent.id)
 
     const started = await scaffold.ctx.subagents.startContinuable({
@@ -394,9 +397,9 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
       await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
       await expect.poll(() => requested, { timeout: 15_000 }).toBe(true)
       expect(await page.getByText('This subagent is read-only for now', { exact: true }).count()).toBe(0)
-      expect(await page.locator('[data-composer-seat]').evaluate(element =>
-        getComputedStyle(element).visibility)).toBe('hidden')
+      expect(await page.locator('[data-conversation-scroll] [data-composer-seat]').count()).toBe(0)
       releaseCatalog()
+      await openRightChat(page)
       const input = page.getByRole('textbox', { name: 'Message or run a task... / commands, @ files or sessions' })
       await input.waitFor({ timeout: 15_000 })
       await expect.poll(() => input.isEnabled(), { timeout: 15_000 }).toBe(true)
@@ -424,12 +427,13 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
     const input = page.getByRole('textbox', { name: 'Message or run a task... / commands, @ files or sessions' })
     await input.fill(FOLLOWUP)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await expect.poll(
       () => scaffold.ctx.agents.get(childId)?.status,
       { timeout: 10_000 },
     ).toBe('running')
     await ended
-    await expect.poll(() => page.getByText(FOLLOWUP, { exact: true }).count(), { timeout: 10_000 }).toBe(1)
+    await expect.poll(() => page.locator('[data-conversation-scroll]').getByText(FOLLOWUP, { exact: true }).count(), { timeout: 10_000 }).toBe(1)
     await expect.poll(() => scaffold.ctx.agents.get(childId), { timeout: 10_000 }).toBeUndefined()
     expect(await page.getByRole('button', { name: 'Stop generating' }).count()).toBe(0)
   })
@@ -478,7 +482,7 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
     // about the transcript below it. The golden pins that transcript, and
     // `captureStableAria` calls two identical polls stable — including two of
     // "Loading history…". Wait for the message the golden asserts.
-    await page.getByText(NESTED_PROMPT).waitFor()
+    await page.locator('[data-conversation-scroll]').getByText(NESTED_PROMPT).waitFor()
     const hierarchy = page.getByRole('navigation', { name: 'Session hierarchy' })
     const crumbs = await hierarchy.getByRole('button').allTextContents()
     expect(crumbs.slice(-2)).toEqual([LABEL, NESTED_LABEL])
@@ -559,6 +563,7 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
       new URL(response.url()).pathname === '/api/subagents/prompt')
     await input.fill(POST_FORK_FOLLOWUP)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     const promptReceipt = await (await promptResponse).json() as {
       result: { ok: true } | { ok: false; error: { code: string; message: string } }
     }

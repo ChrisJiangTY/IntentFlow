@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentProps, ReactNode } from 'react'
-import { act, cleanup, fireEvent, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionListState, SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -121,8 +121,8 @@ function mount(
     composerBlock?: { reason: string }
     /** Selected view used to exercise active-view composer routing. */
     activeView?: string
-    /** Requirement view route supplied by the requirements plugin. */
-    requirementsSubmit?: (sessionId: SessionId, draft: string) => Promise<boolean>
+    /** Right composer intent route supplied by the requirements plugin. */
+    submitIntent?: (sessionId: SessionId, draft: string, intent: 'requirement' | 'task') => Promise<boolean>
     /** Mutable view ledger used by registration-order regressions. */
     viewTabs?: ViewTab[]
   } = {},
@@ -157,6 +157,8 @@ function mount(
   const useSession = bindSnapshotSelector(session)
   const conversation = createSnapshotStore<ConversationSnapshot>(EMPTY_CONVERSATION_SNAPSHOT)
   const useConversation = bindSnapshotSelector(conversation)
+  const rightChat = createSnapshotStore(true)
+  const rightPanelWidth = createSnapshotStore(440)
   const useSessionPendingInteraction = bindSnapshotSelector(
     createSnapshotStore<SessionPendingInteractionSnapshot>(new Map()),
   )
@@ -235,6 +237,7 @@ function mount(
           actions={store.actions}
           renderSlot={renderSlot as never}
           bindDraftMirror={write => wiring.bindMirror(write)}
+          surface={sessionOwner.surface ?? 'main'}
           {...sessionOwner.onActiveViewChange === undefined
             ? {}
             : { onActiveViewChange: sessionOwner.onActiveViewChange }}
@@ -303,17 +306,20 @@ function mount(
     useWorkspaces: bindSnapshotSelector(workspaces),
     useProjection: (() => undefined),
     useComposerBlock: select => select(options.composerBlock),
+    useRightChat: bindSnapshotSelector(rightChat),
+    useRightPanelWidth: bindSnapshotSelector(rightPanelWidth),
     useInput,
     inputActions,
     renderSlot,
     renderSlotChain,
     selectWorkspace: retargetWorkspace,
     t,
-    ...(options.requirementsSubmit === undefined ? {} : { submitActiveView: options.requirementsSubmit }),
+    ...(options.submitIntent === undefined ? {} : { submitIntent: options.submitIntent }),
   }
   const view = render(<ConversationRoot {...props} />)
   return {
-    view, store, wiring, sink, retargetWorkspace, session, conversation, slotCalls, lineageOwners, seatOwners, viewOwners, open,
+    view, store, wiring, sink, retargetWorkspace, session, conversation, rightChat, rightPanelWidth,
+    slotCalls, lineageOwners, seatOwners, viewOwners, open,
     pickerOwner: () => pickerOwner,
     rerender: () => { view.rerender(<ConversationRoot {...props} />) },
   }
@@ -386,23 +392,30 @@ describe('ConversationRoot resident composer', () => {
     expect(b.view.queryByText('Root')).toBeNull()
   })
 
-  it('opens Requirements by default and routes the native composer into a new round', async () => {
-    const requirementsSubmit = vi.fn(async (_sessionId: SessionId, _draft: string) => true)
+  it('opens Requirements on the left while a task intent submits from the right composer', async () => {
+    const submitIntent = vi.fn(async (_sessionId: SessionId, _draft: string, _intent: 'requirement' | 'task') => true)
     const b = mount(sessionSnapshotOf(), undefined, undefined, {
-      requirementsSubmit,
+      submitIntent,
       viewTabs: [{ id: 'chat', label: 'Chat' }, { id: 'requirements', label: 'Requirements' }],
     })
     expect(b.view.getByTestId('view-requirements')).toBeTruthy()
-    expect(b.viewOwners.at(-1)).toMatchObject({
+    expect(b.view.container.querySelector('[data-width-handle]')).toBeNull()
+    expect(b.viewOwners.find(owner => 'navigation' in owner)).toMatchObject({
       navigation: { activeId: 'requirements', tabs: [
         { id: 'chat', label: 'Chat' }, { id: 'requirements', label: 'Requirements' },
       ] },
     })
+    const right = document.querySelector('[data-right-chat-panel]') as HTMLElement
+    expect(right).toBeTruthy()
+    expect(b.view.container.querySelector('[data-composer-card]')).toBeNull()
+    expect(within(right).getByTestId('view-chat')).toBeTruthy()
     const box = b.view.getByRole('textbox')
     act(() => { b.wiring.setDraft('start a requirement round') })
     fireEvent.keyDown(box, { key: 'Enter' })
+    expect(b.view.getByText('普通对话')).toBeTruthy()
+    fireEvent.click(b.view.getByRole('button', { name: '提出任务' }))
     await act(async () => { await Promise.resolve() })
-    expect(requirementsSubmit).toHaveBeenCalledWith(SID, 'start a requirement round')
+    expect(submitIntent).toHaveBeenCalledWith(SID, 'start a requirement round', 'task')
     expect(b.sink).not.toHaveBeenCalled()
     expect(b.wiring.snapshot.draft).toBe('')
   })
@@ -412,7 +425,7 @@ describe('ConversationRoot resident composer', () => {
       activeView: 'chat',
       viewTabs: [{ id: 'chat', label: 'Chat' }, { id: 'requirements', label: 'Requirements' }],
     })
-    expect(b.view.getByTestId('view-chat')).toBeTruthy()
+    expect(b.view.getAllByTestId('view-chat')).toHaveLength(2)
     expect(b.view.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
   })
 
@@ -440,34 +453,55 @@ describe('ConversationRoot resident composer', () => {
     expect(b.lineageOwners.at(-1)?.openTitle).toBeUndefined()
   })
 
-  it('active phase: fixed header outside the scrollport; sticky composer seat inside it', () => {
+  it('active phase: fixed left header and a sole composer in the right Chat', () => {
     const b = mount(sessionSnapshotOf())
     const host = b.view.container.querySelector('[data-conversation-scroll]')
-    const seat = b.view.container.querySelector('[data-composer-seat]')
+    const right = document.querySelector('[data-right-chat-panel]') as HTMLElement
+    const seat = right.querySelector('[data-composer-seat]')
     const header = b.view.container.querySelector('header')
-    const textarea = b.view.container.querySelector<HTMLDivElement>('[data-composer-input]')
+    const textarea = right.querySelector<HTMLDivElement>('[data-composer-input]')
     expect(host).not.toBeNull()
     expect(seat).not.toBeNull()
     expect(header).not.toBeNull()
-    // Header is column chrome above the scrollport; the seat sticks inside it.
+    // The left transcript has no composer; the right Chat holds its only editor.
     expect(host?.contains(header)).toBe(false)
-    expect(host?.contains(seat)).toBe(true)
+    expect(host?.contains(seat)).toBe(false)
     expect(seat?.contains(textarea)).toBe(true)
+    expect(document.querySelectorAll('[data-composer-card]')).toHaveLength(1)
     expect(b.slotCalls).toContain('conversation.session.header.lineage')
     expect(b.slotCalls).toContain('conversation.session.header.actions')
     expect(b.slotCalls).toContain('conversation.session.header.utilities')
   })
 
-  it('sticky composer seat wraps the whole overlay chain, not only the fallback stack', () => {
+  it('restores the same right composer and draft after closing and reopening Chat', () => {
+    const b = mount(sessionSnapshotOf())
+    const box = document.querySelector('[data-right-chat-panel] [data-composer-input]')
+    expect(box).toBeTruthy()
+    act(() => { b.wiring.setDraft('kept draft') })
+    act(() => { b.rightChat.set(false) })
+    expect(document.querySelector('[data-right-chat-panel]')).toBeNull()
+    expect(document.querySelector('[data-composer-card]')).toBeNull()
+
+    act(() => {
+      b.rightPanelWidth.set(620)
+      b.rightChat.set(true)
+    })
+    const restored = document.querySelector<HTMLElement>('[data-right-chat-panel]')
+    expect(restored?.style.getPropertyValue('--dsh-right-chat-width')).toBe('620px')
+    expect(restored?.querySelector('[data-composer-input]')?.textContent).toBe('kept draft')
+    expect(document.querySelectorAll('[data-composer-card]')).toHaveLength(1)
+  })
+
+  it('right Chat composer seat wraps the whole overlay chain, not only the fallback stack', () => {
     const b = mount(sessionSnapshotOf(), undefined, undefined, { overlayTakeover: true })
-    const seat = b.view.container.querySelector('[data-composer-seat]')
+    const seat = document.querySelector('[data-right-chat-panel] [data-composer-seat]')
     const takeover = b.view.getByTestId('composer-takeover')
-    const fallback = b.view.container.querySelector('[data-chain-overlay-fallback="conversation.composer"]')
+    const fallback = document.querySelector('[data-right-chat-panel] [data-chain-overlay-fallback="conversation.composer"]')
     expect(seat?.contains(takeover)).toBe(true)
     expect(seat?.contains(fallback)).toBe(true)
   })
 
-  it('hero phase: same textarea, hero chrome, no header, picker switches the workspace', () => {
+  it('hero phase: right editor, left hero chrome, no header, picker switches the workspace', () => {
     const b = mount(
       sessionSnapshotOf({ blank: true }),
       [
@@ -483,12 +517,11 @@ describe('ConversationRoot resident composer', () => {
     expect(header?.getAttribute('aria-hidden')).toBe('true')
     expect(b.view.getByText('让意图自然流向实现')).toBeTruthy()
     expect(b.view.getByText('预览版')).toBeTruthy()
-    expect(b.view.queryByTestId('view-chat')).toBeNull()
-    // The same machine-backed textarea is live in the hero, and the
-    // persistence mirror stays bound (ConversationSession mounts chrome-hidden
-    // for blank sessions): hero typing reaches the Conversation store.
+    expect(b.view.container.querySelector('[data-testid="view-chat"]')).toBeNull()
+    // The machine-backed right editor stays live while the left hero shows.
     const box = b.view.getByRole('textbox')
-    expect(host?.contains(box)).toBe(true)
+    expect(host?.contains(box)).toBe(false)
+    expect(document.querySelector('[data-right-chat-panel]')?.contains(box)).toBe(true)
     act(() => { b.wiring.setDraft('draft in hero') })
     expect(b.store.store.getSnapshot().draft).toBe('draft in hero')
     // Picker: open through the chip; a pick switches to the other
@@ -499,6 +532,22 @@ describe('ConversationRoot resident composer', () => {
     act(() => { owner.onPick(wid('second')) })
     expect(b.retargetWorkspace).toHaveBeenCalledWith(wid('second'))
     expect(b.view.getByText('Selected Folder')).toBeTruthy()
+  })
+
+  it('keeps the blank Session entry composer in the main hero while right Chat is closed', () => {
+    const b = mount(sessionSnapshotOf({ blank: true }))
+    act(() => { b.rightChat.set(false) })
+    const host = b.view.container.querySelector('[data-conversation-scroll]')
+    const input = host?.querySelector('[data-composer-input]')
+    expect(input).not.toBeNull()
+    expect(host?.querySelector('[data-composer-seat]')?.contains(input ?? null)).toBe(true)
+    expect(document.querySelector('[data-right-chat-panel]')).toBeNull()
+    expect(document.querySelectorAll('[data-composer-card]')).toHaveLength(1)
+
+    act(() => { b.rightChat.set(true) })
+    expect(document.querySelector('[data-right-chat-panel] [data-composer-input]')).not.toBeNull()
+    expect(host?.querySelector('[data-composer-input]')).toBeNull()
+    expect(document.querySelectorAll('[data-composer-card]')).toHaveLength(1)
   })
 
   it('keeps a rejected first prompt engaging instead of returning to the Hero', () => {
@@ -551,22 +600,21 @@ describe('ConversationRoot resident composer', () => {
     expect(b.view.getByRole('textbox')).toBeTruthy()
   })
 
-  it('same textarea DOM node survives the hero → active flip into the sticky scrollport', () => {
+  it('same right textarea DOM node survives the hero → active flip', () => {
     const b = mount(sessionSnapshotOf({ blank: true }))
     const before = b.view.getByRole('textbox')
     act(() => { b.wiring.setDraft('kept across flip') })
-    // First message landed: content exists, phase leaves blank. Composer
-    // already sat in the resident scrollport during hero, so the textarea
-    // node and InputHub draft both survive.
+    // First message landed: content exists, phase leaves blank. The right
+    // editor and InputHub draft both survive.
     b.session.set(sessionSnapshotOf({ blank: false }))
     b.rerender()
     const after = b.view.getByRole('textbox')
     expect(after).toBe(before)
     expect(b.wiring.snapshot.draft).toBe('kept across flip')
     expect(b.store.store.getSnapshot().draft).toBe('kept across flip')
-    expect(b.view.container.querySelector('[data-conversation-scroll]')?.contains(after)).toBe(true)
+    expect(document.querySelector('[data-right-chat-panel]')?.contains(after)).toBe(true)
     expect(b.view.queryByText('让意图自然流向实现')).toBeNull()
-    expect(b.view.getByTestId('view-chat')).toBeTruthy()
+    expect(b.view.getAllByTestId('view-chat')).toHaveLength(2)
   })
 
   it('keeps the Chat fallback selected by id when Requirements is unavailable', () => {
@@ -578,12 +626,12 @@ describe('ConversationRoot resident composer', () => {
     // A removed dynamic view leaves its persisted id behind. The visible
     // fallback is Chat and must stay Chat when another lower-order view lands.
     act(() => { b.store.actions.setView('removed-view') })
-    expect(b.view.getByTestId('view-chat')).toBeTruthy()
+    expect(b.view.getAllByTestId('view-chat')).toHaveLength(2)
 
     viewTabs.unshift({ id: 'new-view', label: 'New view' })
     b.rerender()
 
-    expect(b.view.getByTestId('view-chat')).toBeTruthy()
+    expect(b.view.getAllByTestId('view-chat')).toHaveLength(2)
     expect(b.view.queryByTestId('view-new-view')).toBeNull()
     expect(b.view.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
     expect(b.view.getByRole('tab', { name: 'New view' }).getAttribute('aria-selected')).toBe('false')

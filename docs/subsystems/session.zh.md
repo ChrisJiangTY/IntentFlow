@@ -591,7 +591,7 @@ interface TurnEndReasonMap {
 
 `RequirementChangesProjection` 通过 `RequirementCodeChange` 条目携带已记录的文件修改，包括事件序列号、执行 Turn、路径和修改前后片段。`requirementChanges` 投影独立于聊天分页，需求图谱通过 Task 执行 Turn 关联该投影。片段表示已记录执行，不代表文件当前内容。
 
-`RequirementNotebookProjection` 的 `entries` 覆盖完整 Session 历史，独立于已加载的对话分页。每个 `RequirementNotebookEvent` 包含事件类型、序列号、时间戳和类型化需求负载。`requirementNotebook` 投影保留文档修订、每个文档修订的最新任务列表、单元格值和执行记录。[Session Requirements](../../packages/session/session-requirements/README.zh.md)负责折叠，[Notebook 视图](../../packages/client/ui-requirements/README.zh.md)负责编辑和历史展示。
+`RequirementNotebookProjection` 的 `entries` 覆盖完整 Session 历史，独立于已加载的对话分页。每个 `RequirementNotebookEvent` 包含事件类型、序列号、时间戳和类型化需求负载。`requirementNotebook` 投影保留文档修订、每个文档修订的最新任务列表、独立任务轮次的零号修订列表、单元格值和执行记录。[Session Requirements](../../packages/session/session-requirements/README.zh.md)负责折叠，[Notebook 视图](../../packages/client/ui-requirements/README.zh.md)负责编辑和历史展示。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -759,6 +759,23 @@ Coordinates clarified requirement documents, executable Tasks, and serialized in
  * @returns the durable round identity and first event sequence.
  */
 @Remote('startRound') startRound(agent: Agent, request: RequirementRoundStartRequest): RequirementRoundStartResult
+
+/**
+ * Append user direction to the latest requirement round and queue a complete document revision.
+ * Completed task and validation records remain historical; the new document revision supersedes their source.
+ * @param agent - exact live Agent that receives the revision request.
+ * @param request - raw additional requirement and authoring language.
+ * @returns the existing round identity and appended event position.
+ */
+@Remote('appendRequirement') appendRequirement(agent: Agent, request: RequirementRoundAppendRequest): RequirementRoundStartResult
+
+/**
+ * Store one standalone pending Task round without queuing an Agent turn.
+ * @param agent - exact live Agent that owns the task.
+ * @param request - raw user task and authoring language.
+ * @returns the round and task identities for the new Notebook block.
+ */
+@Remote('startTaskRound') startTaskRound(agent: Agent, request: RequirementTaskRoundStartRequest): RequirementTaskRoundStartResult
 
 /**
  * Persist an editable requirement-document draft without starting Agent work.

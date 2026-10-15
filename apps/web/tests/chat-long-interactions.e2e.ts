@@ -19,7 +19,10 @@ import {
   webSnapshotMode,
   type WebScaffold,
 } from './scaffold.ts'
-import { conversationContextKey, expandOwningTurnProcess, newEnglishPage, saveFailureShot } from './support.ts'
+import {
+  chooseNormalChatIntent, conversationContextKey, expandOwningTurnProcess,
+  newEnglishPage, openRightChat, saveFailureShot,
+} from './support.ts'
 
 const MODE = webSnapshotMode()
 const SESSION_ID = 'chat-long-interactions-e2e'
@@ -321,10 +324,12 @@ describe('web e2e: long Chat interaction contract', () => {
       .toBe(`${FIXTURE.title} (1)`)
     await page.getByText(branchAssistantMarker, { exact: false }).last().waitFor({ timeout: 15_000 })
     const settled = scaffold.whenTurnSettled(60_000)
+    await openRightChat(page)
     const composer = page.locator('[data-composer-input][contenteditable="true"]').last()
     await composer.fill(CONTINUE_PROMPT)
     await page.getByRole('button', { name: 'Send message', exact: true }).click()
-    await expect.poll(() => page.getByText(CONTINUE_PROMPT, { exact: true }).count(), { timeout: 15_000 }).toBe(1)
+    await chooseNormalChatIntent(page)
+    await expect.poll(() => page.locator('[data-conversation-scroll]').getByText(CONTINUE_PROMPT, { exact: true }).count(), { timeout: 15_000 }).toBe(1)
     expect(await settled).toBe(child.session.id)
     await page.getByText(CONTINUE_DONE, { exact: false }).last().waitFor({ timeout: 15_000 })
     await expect.poll(() => page.locator('[data-streaming="true"]').count(), { timeout: 15_000 }).toBe(0)

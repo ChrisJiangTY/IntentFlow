@@ -156,17 +156,17 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async mount(agentCtx: Context, id?: string): Promise<AgentPreset>',
-        description: 'Compose one agent from a preset: ensure the preset\'s standing mount, then parent the agent\'s scope key to it so the mount\'s registrations and listeners cover this agent.\n\nCall from the agent factory\'s `setup(agentCtx)`; a rejection there rolls the agent creation back, so a broken preset never yields a half-composed session.',
+        description: 'Compose one agent from a preset: ensure the preset\'s standing mount, then parent the agent\'s scope key to it so the mount\'s registrations and listeners cover this agent. A configured allow list filters host and preset tools in the Agent\'s own scope.\n\nCall from the agent factory\'s `setup(agentCtx)`; a rejection there rolls the agent creation back, so a broken preset never yields a half-composed session.',
         parameters: [{ name: 'agentCtx', description: 'the agent\'s scope context.' }, { name: 'id', description: 'the preset id, or `undefined` for {@link defaultId}.' }],
         returns: 'the preset that was composed, for the caller to record.',
         throws: ['when the preset is unknown or its composition is unusable.'],
       },
       {
         signature: 'composeFrom(agentCtx: Context, parentCtx: Context): string | undefined',
-        description: 'Join one agent to the SAME standing composition another already runs on.\n\nThis is how a child agent inherits its parent\'s capabilities. It is a bind, not a mount: the parent\'s generation is already composed, so the child gets that exact instance — the same plugin objects, the same tool registrations, the same prompt sections. Re-resolving the parent\'s preset by id instead would re-read the roster, and a composition file edited since the parent started would hand the child a DIFFERENT generation than the one its parent\'s history was produced under (and a preset deleted since would fail the child outright while its parent keeps running).\n\nSynchronous, and with no composition failure mode of its own — it reads no roster, mounts nothing, and touches no file — which is what lets a child creation window use it: the two in-process subagent drivers compose their children inside a synchronous `setup`. It still rejects a caller error, as the `@throws` below record.\n\nA parent that joined no preset — a rosterless deployment — yields no join and no error: there, the model-facing rows sit in the host composition and the child already sees them through the global layer.',
+        description: 'Join one agent to the SAME standing composition another already runs on.\n\nThis is how a child agent inherits its parent\'s capabilities. It is a bind, not a mount: the parent\'s generation is already composed, so the child gets that exact instance — the same plugin objects, the same tool registrations, the same prompt sections. Re-resolving the parent\'s preset by id instead would re-read the roster, and a composition file edited since the parent started would hand the child a DIFFERENT generation than the one its parent\'s history was produced under (and a preset deleted since would fail the child outright while its parent keeps running).\n\nSynchronous: it reads no roster, mounts nothing, and touches no file, so child creation can call it inside `setup`. A configured inherited-tool allow list applies to the child and rejects unknown tool names before binding its scope.\n\nA parent that joined no preset — a rosterless deployment — yields no join and no error: there, the model-facing rows sit in the host composition and the child already sees them through the global layer.',
         parameters: [{ name: 'agentCtx', description: 'the joining agent\'s scope context.' }, { name: 'parentCtx', description: 'the scope context of the agent whose composition to join.' }],
         returns: 'the preset id joined, or undefined when the parent joined none.',
-        throws: ['when `agentCtx` carries no scope, or has already joined a preset.'],
+        throws: ['when `agentCtx` carries no scope, has already joined a preset, or the selected tool allow list is invalid.'],
       },
       {
         signature: 'composedPreset(agentCtx: Context): string | undefined',
@@ -222,7 +222,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async recompose(agentCtx: Context, id: string): Promise<AgentPreset>',
-        description: 'Re-link one agent to a different preset\'s standing composition.\n\nOnly valid while the agent has produced nothing: swapping tools mid conversation would leave logged tool calls the new composition cannot make. The CALLER owns that check — this method does not read session history.\n\nThe swap is a parent re-link, not an unmount: standing mounts are shared and permanent, so the old composition stays for its other agents and the new one is ensured BEFORE the link moves. An unknown or unusable preset therefore throws with the agent exactly as it was — there is no torn-down state to restore. The re-link runs through the binding this roster kept from the agent\'s mount — dsh-scope\'s only re-link authority. An agent that never composed one has nothing to re-link: the switch is then the agent\'s first bind, exactly a mount. A committed re-link emits `tools/change` because changing the parent scope changes the Agent\'s resolved tool set without adding or removing registry entries.',
+        description: 'Re-link one agent to a different preset\'s standing composition.\n\nOnly valid while the agent has produced nothing: swapping tools mid conversation would leave logged tool calls the new composition cannot make. The CALLER owns that check — this method does not read session history.\n\nThe swap is a parent re-link, not an unmount: standing mounts are shared and permanent, so the old composition stays for its other agents and the new one is ensured BEFORE the link moves. An unknown or unusable preset therefore throws with the agent exactly as it was — there is no torn-down state to restore. The re-link runs through the binding this roster kept from the agent\'s mount — dsh-scope\'s only re-link authority. An agent that never composed one has nothing to re-link: the switch is then the agent\'s first bind, exactly a mount. A committed re-link emits `tools/change` because changing the parent scope changes the Agent\'s resolved tool set without adding or removing registry entries. The Agent\'s inherited-tool allow list changes with the preset.',
         parameters: [{ name: 'agentCtx', description: 'the agent\'s scope context.' }, { name: 'id', description: 'the preset to compose the agent from instead.' }],
         returns: 'the preset now installed.',
         throws: ['when the preset is unknown or its composition is unusable.'],
@@ -1774,6 +1774,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Start one product requirement round and queue its requirement-analysis turn.',
         parameters: [{ name: 'agent', description: 'exact live Agent that receives the round.' }, { name: 'request', description: 'raw requirement and authoring language.' }],
         returns: 'the durable round identity and first event sequence.',
+      },
+      {
+        signature: '@Remote(\'appendRequirement\') appendRequirement(agent: Agent, request: RequirementRoundAppendRequest): RequirementRoundStartResult',
+        description: 'Append user direction to the latest requirement round and queue a complete document revision. Completed task and validation records remain historical; the new document revision supersedes their source.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that receives the revision request.' }, { name: 'request', description: 'raw additional requirement and authoring language.' }],
+        returns: 'the existing round identity and appended event position.',
+      },
+      {
+        signature: '@Remote(\'startTaskRound\') startTaskRound(agent: Agent, request: RequirementTaskRoundStartRequest): RequirementTaskRoundStartResult',
+        description: 'Store one standalone pending Task round without queuing an Agent turn.',
+        parameters: [{ name: 'agent', description: 'exact live Agent that owns the task.' }, { name: 'request', description: 'raw user task and authoring language.' }],
+        returns: 'the round and task identities for the new Notebook block.',
       },
       {
         signature: '@Remote(\'editDocument\') editDocument(agent: Agent, request: RequirementDocumentEditRequest): RequirementDocumentActionResult',
@@ -4772,6 +4784,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface RequirementRef {\n    readonly id: RequirementId;\n    readonly version: number;\n}',
   },
   {
+    name: 'RequirementRoundAppendRequest',
+    declaration: 'export type RequirementRoundAppendRequest = RequirementRoundStartRequest;',
+  },
+  {
     name: 'RequirementRoundId',
     declaration: 'export type RequirementRoundId = Branded<\'RequirementRoundId\'>;',
   },
@@ -4830,6 +4846,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RequirementTaskMutationResult',
     declaration: 'export interface RequirementTaskMutationResult {\n    readonly roundId: RequirementRoundId;\n    readonly taskId: RequirementTaskId;\n    readonly eventSeq: number;\n    readonly task?: RequirementTask;\n}',
+  },
+  {
+    name: 'RequirementTaskRoundStartRequest',
+    declaration: 'export type RequirementTaskRoundStartRequest = RequirementRoundStartRequest;',
+  },
+  {
+    name: 'RequirementTaskRoundStartResult',
+    declaration: 'export interface RequirementTaskRoundStartResult extends RequirementRoundStartResult {\n    readonly taskId: RequirementTaskId;\n}',
   },
   {
     name: 'RequirementTaskRunRequest',

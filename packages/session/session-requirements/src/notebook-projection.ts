@@ -49,7 +49,7 @@ function entry<T extends string, S extends z.ZodType>(type: T, data: S) {
 
 const eventSchema = z.discriminatedUnion('type', [
   entry('requirement/round', z.object({ ...revised, round: revision, sourceMessageId: id,
-    language: z.enum(['zh', 'en']), input: z.string(), generationMessageId: id.optional(), turn: integer.optional(),
+    kind: z.literal('task').optional(), language: z.enum(['zh', 'en']), input: z.string(), generationMessageId: id.optional(), turn: integer.optional(),
     status: z.enum(['analyzing', 'clarifying', 'awaiting-input', 'document-ready', 'generating-tasks', 'tasks-ready', 'executing', 'reviewing', 'validating', 'completed', 'failed']),
   }).strict()),
   entry('requirement/document', z.object({ ...revised, turn: integer, summary: z.string(), markdown: z.string(), valid: z.boolean(), issues: z.array(z.string()) }).strict()),
@@ -59,7 +59,7 @@ const eventSchema = z.discriminatedUnion('type', [
     answers: z.array(z.object({ id, selected: z.array(z.string()), custom: z.string().optional() }).strict()).optional(),
     error: z.string().optional(),
   }).strict()),
-  entry('requirement/task-list', z.object({ ...revised, documentRevision: revision, tasks: z.array(task) }).strict()),
+  entry('requirement/task-list', z.object({ ...revised, documentRevision: integer, tasks: z.array(task) }).strict()),
   entry('requirement/task-execution', z.object({ ...revised, taskId: id, messageId: id,
     status: z.enum(['submitted', 'processing', 'reviewing', 'completed', 'failed']), turn: integer.optional(), output: z.string().optional(),
   }).strict()),
@@ -99,7 +99,7 @@ function cellKey(event: RequirementNotebookEvent): string {
 /** Persisted Notebook projection with one value per cell/revision and per execution attempt. */
 export const requirementNotebookProjectionDefinition = {
   key: 'requirementNotebook',
-  stateVersion: 1,
+  stateVersion: 2,
   stateSchema: schema,
   init: (): RequirementNotebookProjection => ({ entries: [] }),
   apply: (state, event) => {

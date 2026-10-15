@@ -27,10 +27,11 @@ export interface SessionRequirementNode extends RequirementGraphProjectedNode {
   readonly round: number
 }
 
-/** Executable work associated with one exact document revision. */
+/** Executable work in one Notebook round, with or without a requirement document. */
 export interface TraceTask {
   readonly key: string
   readonly roundId: RequirementRoundId
+  readonly round: number
   readonly task: RequirementTask
 }
 
@@ -83,6 +84,27 @@ export function sessionRequirementGraph(
     turnOwners.set(turn, owners)
   }
   const connect = (source: string, target: string): void => { edges.set(JSON.stringify([source, target]), { source, target }) }
+  const recordTask = (
+    roundId: RequirementRoundId, round: number, task: RequirementTask,
+    parents: readonly SessionRequirementNode[],
+  ): void => {
+    if (task.status === 'withdrawn') return
+    const key = `task:${roundId}:${task.id}`
+    tasks.push({ key, roundId, round, task })
+    for (const node of parents) {
+      if (node.acceptanceRefs.some(ref => task.requirementRefs.includes(ref))) connect(node.key, key)
+    }
+    const turns = new Set(snapshot.taskExecutions.filter(execution => execution.data.roundId === roundId
+      && execution.data.taskId === task.id && execution.data.turn !== undefined).map(execution => execution.data.turn))
+    for (const change of summary?.projectionValues?.requirementChanges?.changes ?? []) {
+      if (!turns.has(change.turn) || turnOwners.get(change.turn)?.size !== 1) continue
+      const fileKey = `file:${change.path}`
+      const file = files.get(fileKey) ?? { key: fileKey, path: change.path, changes: [] }
+      file.changes.push({ ...change, taskKey: key })
+      files.set(fileKey, file)
+      connect(key, fileKey)
+    }
+  }
   for (const round of summary?.projectionValues?.requirementGraph?.rounds ?? []) {
     const documentKey = `document:${round.roundId}`
     const document = snapshot.documents.find(node => node.data.roundId === round.roundId && node.data.revision === round.documentRevision)
@@ -94,25 +116,16 @@ export function sessionRequirementGraph(
     const list = snapshot.taskLists.filter(node => node.data.roundId === round.roundId
       && node.data.documentRevision === round.documentRevision)
       .sort((a, b) => a.anchorSeq - b.anchorSeq).at(-1)
-    for (const task of list?.data.tasks ?? []) {
-      if (task.status === 'withdrawn') continue
-      const key = `task:${round.roundId}:${task.id}`
-      tasks.push({ key, roundId: round.roundId, task })
-      for (const node of nodes) {
-        if (node.acceptanceRefs.some(ref => task.requirementRefs.includes(ref))) connect(node.key, key)
-      }
-      const turns = new Set(snapshot.taskExecutions.filter(execution => execution.data.roundId === round.roundId
-        && execution.data.taskId === task.id && execution.data.turn !== undefined).map(execution => execution.data.turn))
-      for (const change of summary?.projectionValues?.requirementChanges?.changes ?? []) {
-        if (!turns.has(change.turn) || turnOwners.get(change.turn)?.size !== 1) continue
-        const fileKey = `file:${change.path}`
-        const file = files.get(fileKey) ?? { key: fileKey, path: change.path, changes: [] }
-        file.changes.push({ ...change, taskKey: key })
-        files.set(fileKey, file)
-        connect(key, fileKey)
-      }
-    }
+    for (const task of list?.data.tasks ?? []) recordTask(round.roundId, round.round, task, nodes)
   }
+  const standaloneRounds = new Map(snapshot.rounds.filter(node => node.data.kind === 'task')
+    .map(node => [String(node.data.roundId), node.data] as const))
+  for (const round of standaloneRounds.values()) {
+    const list = snapshot.taskLists.findLast(node => node.data.roundId === round.roundId
+      && node.data.documentRevision === 0)
+    for (const task of list?.data.tasks ?? []) recordTask(round.roundId, round.round, task, [])
+  }
+  tasks.sort((left, right) => left.round - right.round || left.task.order - right.task.order)
   return { sessionId, title: summary?.displayTitle ?? '', documents, requirements, tasks, files: [...files.values()], edges: [...edges.values()] }
 }
 

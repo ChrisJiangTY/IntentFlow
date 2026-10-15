@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-24-reco-requirements-workspace.md
-2026-09-24-reco-requirements-workspace.md: 49389ee38907547dc52ec6bab1b1380ec21b2cb9
-2026-09-24-reco-requirements-workspace.zh.md: 0f72a4e09db3564d3d6a589882318d9db6de36fd
+2026-09-24-reco-requirements-workspace.md: de6e8a191c190ed1e753ee92b724238c87dd0655
+2026-09-24-reco-requirements-workspace.zh.md: c16b901da306bc4f5d81af873c52cc66f3ace1a0

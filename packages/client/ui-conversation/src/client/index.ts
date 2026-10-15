@@ -70,5 +70,7 @@ declare module '@deepseek-ai/cordis' {
     conversation: import('./service.ts').IConversation
     /** Target-neutral Conversation registries and per-Session assembly. */
     uiConversation: import('./conversation/assembly.ts').UiConversation
+    /** Visibility of the main Session's right Chat surface. */
+    rightChat: import('./right-chat.ts').IRightChat
   }
 }

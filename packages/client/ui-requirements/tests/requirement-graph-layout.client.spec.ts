@@ -18,7 +18,7 @@ function node(kind: TraceNode['kind'], index: number): TraceNode {
       acceptanceRefs: [`${index}.1`], taskIds: [], status: 'pending',
     } as TraceNode
     case 'task': return {
-      ...shared, roundId: 'round-1' as never, task: {
+      ...shared, roundId: 'round-1' as never, round: 1, task: {
         id: `task-${index}`, title: `Task ${index}`, summary: '', statement: '', kind: 'implementation', order: index,
         status: 'pending', requirementRefs: [`${index}.1`],
       },

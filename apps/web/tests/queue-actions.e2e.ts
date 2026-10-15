@@ -16,7 +16,7 @@ import {
   assertFixtureInventory, captureExpandedTurnProcessAria, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/queue-actions', import.meta.url))
 const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/live-interactions/session.jsonl', import.meta.url))
@@ -91,6 +91,7 @@ describe('web e2e: queue row actions', () => {
     const firstSettled = scaffold.whenTurnSettled()
     await input.fill(ACTIVE_PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await expect.poll(() => existsSync(readyFile), { timeout: 15_000 }).toBe(true)
 
     for (const text of [REMOVE, EDIT]) {
@@ -98,6 +99,7 @@ describe('web e2e: queue row actions', () => {
       await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
       await input.fill(text)
       await input.press('Enter')
+      await chooseNormalChatIntent(page)
     }
     const queueHeader = page.getByRole('button', { name: '2 queued messages' })
     await expect.poll(() => queueHeader.getAttribute('aria-expanded'), { timeout: 10_000 })
@@ -155,6 +157,7 @@ describe('web e2e: queue row actions', () => {
 
     await input.fill(TAIL)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await expect.poll(
       () => page.getByRole('button', { name: 'Remove queued message' }).count(),
       { timeout: 10_000 },
@@ -179,6 +182,7 @@ describe('web e2e: queue row actions', () => {
     const settled = scaffold.whenTurnSettled()
     await input.fill(WAKE)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await settled
     await expect.poll(() => turnEndReasons(sessionEvents), { timeout: 15_000 })
       .toEqual(['aborted', 'completed', 'completed', 'completed'])
@@ -228,6 +232,7 @@ describe('web e2e: queue row actions', () => {
       await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
       await input.fill(text)
       await input.press('Enter')
+      await chooseNormalChatIntent(page)
     }
     const queueHeader = page.getByRole('button', { name: '2 queued messages' })
     await expect.poll(() => queueHeader.getAttribute('aria-expanded'), { timeout: 10_000 })

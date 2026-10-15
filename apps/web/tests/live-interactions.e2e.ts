@@ -27,7 +27,7 @@ import {
   compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/live-interactions', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.jsonl')
@@ -125,6 +125,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     const settled = scaffold!.whenTurnSettled(timeoutMs)
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     return { settled }
   }
 
@@ -155,9 +156,11 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     // hang (prefix chunks delivered to the loop) before the stop click.
     await expect.poll(() => existsSync(marker), { timeout: 15_000 }).toBe(true)
     await expect.poll(
-      () => page.getByRole('status').filter({ hasText: 'Deep diving...' }).isVisible(),
+      () => page.locator('[data-conversation-scroll]').getByRole('status').filter({ hasText: 'Deep diving...' }).isVisible(),
       { timeout: 10_000 },
     ).toBe(true)
+    await page.locator('[data-conversation-scroll]').getByText('partial', { exact: true })
+      .waitFor({ timeout: 10_000 })
     const loadingSnapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(LOADING_EXPECTED, loadingSnapshot, MODE)
 
@@ -169,6 +172,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     const runningDraftSnapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(RUNNING_DRAFT_EXPECTED, runningDraftSnapshot, MODE)
     await send.click()
+    await chooseNormalChatIntent(page)
     await expect.poll(() => input.textContent(), { timeout: 10_000 }).toBe('')
     const queuedRow = page.locator('[data-queue-dock]').getByRole('listitem').filter({ hasText: RUNNING_DRAFT })
     await queuedRow.waitFor({ timeout: 10_000 })
@@ -210,7 +214,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     expect(sessionEvents.filter(e => e.type === 'llm/retry').length).toBe(0)
     await expect.poll(() => page.locator('[data-composer-input]').first().isEnabled(), { timeout: 10_000 }).toBe(true)
     expect(await page.locator('[data-streaming="true"]').count()).toBe(0)
-    const errorStatus = page.getByRole('status').filter({ hasText: 'This turn failed' })
+    const errorStatus = page.locator('[data-conversation-scroll]').getByRole('status').filter({ hasText: 'This turn failed' })
     await errorStatus.waitFor({ timeout: 10_000 })
     expect(await errorStatus.textContent()).toContain('API key is invalid')
     expect(await errorStatus.textContent()).toContain('AUTH')
@@ -221,7 +225,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     const requestMarker = page.locator('tr[data-request-only="true"]').last()
       .getByRole('button', { name: /Request #/ })
     await requestMarker.click()
-    await page.getByText('API key is invalid', { exact: true }).waitFor({ timeout: 10_000 })
+    await page.getByLabel('Summary').getByText('API key is invalid', { exact: true }).waitFor({ timeout: 10_000 })
     expect(await page.locator('body').textContent()).not.toContain('sk-preview-secret')
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
@@ -308,7 +312,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     // The terminal error row must render even though the turn owns a retry
     // chain: exhausted recovery shares the failing turn, so suppressing the
     // row by retry history would leave the failure invisible.
-    const errorStatus = page.getByRole('status').filter({ hasText: 'This turn failed' })
+    const errorStatus = page.locator('[data-conversation-scroll]').getByRole('status').filter({ hasText: 'This turn failed' })
     await errorStatus.waitFor({ timeout: 10_000 })
     expect(await errorStatus.textContent()).toContain('upstream 503')
     expect(await errorStatus.textContent()).toContain('SERVER')

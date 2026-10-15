@@ -19,6 +19,7 @@ async function freshComposer(): Promise<HTMLElement> {
   const start = tree.querySelector<HTMLButtonElement>('button[aria-label="New session in fixture"]')
   if (start === null) throw new Error('fixture Workspace new-session action missing')
   fireEvent.click(start)
+  fireEvent.click(await screen.findByRole('button', { name: 'Open Chat' }))
   return await waitFor(() => {
     const surface = document.querySelector<HTMLElement>(
       '[data-composer-input][data-placeholder="Describe what you want to build... / commands, @ files or sessions"]',

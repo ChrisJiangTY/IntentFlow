@@ -18,7 +18,7 @@ import {
   captureStableAria, compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, expandOwningTurnProcess, newEnglishPage, saveFailureShot } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, expandOwningTurnProcess, newEnglishPage, saveFailureShot } from './support.ts'
 
 const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/cordis-tool-round/session.jsonl', import.meta.url))
 const UI_EXPECTED = fileURLToPath(new URL('../../../snapshots/web/cordis-tool-round/ui.expected.md', import.meta.url))
@@ -111,6 +111,7 @@ describe('web e2e: Cordis tools use their owned cards', () => {
     const runTurnSettled = scaffold.whenTurnSettled()
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
 
     // The approval is the TEST's action in every mode: the fixture pins what the
     // model said, and the gate is a real round trip through the real panel.
@@ -133,6 +134,7 @@ describe('web e2e: Cordis tools use their owned cards', () => {
     const stopTurnSettled = scaffold.whenTurnSettled()
     await input.fill(STOP_PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await stopTurnSettled
     await expect.poll(() => {
       const stop = sessionEvents.find(
@@ -198,12 +200,12 @@ describe('web e2e: Cordis tools use their owned cards', () => {
     // Final Assistant text precedes turn/end. Three footers prove every turn
     // reached the render state covered by the ARIA golden.
     await expect.poll(
-      () => page.getByRole('button', { name: 'Branch into a new conversation', exact: true }).count(),
+      () => page.locator('[data-conversation-scroll]').getByRole('button', { name: 'Branch into a new conversation', exact: true }).count(),
       { timeout: 15_000 },
     ).toBe(3)
     await page.locator('[data-conversation-scroll]').evaluate((host) => { host.scrollTop = host.scrollHeight })
     await expect.poll(
-      async () => page.getByRole('button', { name: 'Back to bottom', exact: true }).count(),
+      async () => page.locator('[data-conversation-scroll]').getByRole('button', { name: 'Back to bottom', exact: true }).count(),
       { timeout: 10_000 },
     ).toBe(0)
     await page.mouse.move(0, 0)

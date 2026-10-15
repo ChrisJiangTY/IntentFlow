@@ -30,6 +30,7 @@ import { registerLocalizedFilesTab } from './localized-files-tab.ts'
 import { registerRequirementGraphSidebar } from './RequirementGraphSidebar.tsx'
 import { RequirementsView, type RequirementsViewInjected } from './RequirementsView.tsx'
 import type { TraceNavigation } from './knowledge-graph.ts'
+import { createRequirementsComposer } from './requirements-composer.ts'
 
 export type { RequirementsSnapshot, UseRequirements } from './contract.ts'
 export type { RequirementsKey } from './locales.ts'
@@ -80,15 +81,10 @@ export function apply(ctx: Context): void {
     ctx.betterSidebar.openFile({ sessionId, ...(cwd === undefined ? {} : { cwd }) }, path)
     return true
   }
-  ctx.provide('requirementsComposer', {
-    submit: async (sessionId: SessionId, input: string): Promise<boolean> => {
-      const result = await ctx.remote.sessionRequirements.startRound(sessionId, {
-        input,
-        language: ctx.locale.getLocale().active === 'zh' ? 'zh' : 'en',
-      })
-      return result.ok
-    },
-  })
+  ctx.provide('requirementsComposer', createRequirementsComposer(
+    ctx.remote.sessionRequirements,
+    () => ctx.locale.getLocale().active === 'zh' ? 'zh' : 'en',
+  ))
   const sourceFor = (sessionId: SessionId): ObservableSnapshot<RequirementsSnapshot> => {
     let source = sources.get(sessionId)
     if (source === undefined) {

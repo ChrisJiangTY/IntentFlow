@@ -17,7 +17,7 @@ function fixture(): SessionRequirementGraph {
     sessionId: 'session' as never, title: '本次对话',
     documents: [{ key: 'd1', roundId, round: 1, title: '饮料编年史', revision: 1, markdown: '包含品类筛选与搜索' }],
     requirements: ['品类筛选', '关键词搜索'].map((title, index) => ({ key: `r${index + 1}`, roundId, round: 1, requirementId: String(index + 1), title, acceptanceRefs: [`${index + 1}.1`], status: 'in-progress', taskIds: ['t1' as never] })),
-    tasks: [{ key: 't1', roundId, task: { id: 't1' as never, title: '实现交互', summary: '可访问筛选', statement: '使用事件委托', kind: 'implementation', order: 0, status: 'completed', requirementRefs: ['1.1', '2.1'] } }],
+    tasks: [{ key: 't1', roundId, round: 1, task: { id: 't1' as never, title: '实现交互', summary: '可访问筛选', statement: '使用事件委托', kind: 'implementation', order: 0, status: 'completed', requirementRefs: ['1.1', '2.1'] } }],
     files: [{ key: 'f1', path: 'src/page.html', changes: [{ seq: 5, turn: 2, path: 'src/page.html', oldText: null, newText: '<script>unsafe()</script>', taskKey: 't1' }] }],
     edges: [{ source: 'd1', target: 'r1' }, { source: 'd1', target: 'r2' }, { source: 'r1', target: 't1' }, { source: 'r2', target: 't1' }, { source: 't1', target: 'f1' }],
   }
@@ -61,6 +61,22 @@ it('starts with the latest requirement document selected and splits graph and do
   expect(detail.textContent).not.toContain('# 需求文档')
   expect(detail.textContent).not.toContain('包含品类筛选与搜索')
   expect(screen.getByRole('separator', { name: '调整图谱详情高度' }).getAttribute('aria-valuenow')).toBe('50')
+})
+
+it('shows a document-free task round as a graph root and a round filter option', () => {
+  const graph = fixture()
+  const standaloneRoundId = 'round2' as never
+  const standalone = { ...graph.tasks[0]!, key: 'standalone', roundId: standaloneRoundId, round: 2,
+    task: { ...graph.tasks[0]!.task, id: 'standalone' as never, title: '独立任务', requirementRefs: [] } }
+  const { container } = setup({ ...graph, documents: [], requirements: [], tasks: [standalone], files: [], edges: [] })
+  const task = screen.getByRole('button', { name: '查看任务：独立任务' })
+  expect(task.getAttribute('aria-pressed')).toBe('true')
+  expect(screen.queryByText('还没有需求节点')).toBeNull()
+  const filter = screen.getByRole('combobox', { name: '按轮次筛选' })
+  expect(within(filter).getByRole('option', { name: '第 2 轮任务： 独立任务' })).toBeTruthy()
+  const details = screen.getByRole('region', { name: '图谱节点详情' })
+  expect(details.textContent).toContain('这是独立任务，不依附需求文档。')
+  expect(container.querySelector('[data-layer="document"][data-node-key]')).toBeNull()
 })
 
 it('keeps planes fixed and wraps dense nodes in ascending row-major order', () => {

@@ -6,7 +6,7 @@
 // durable user/message replaces the echo without a duplicate. The fixture host
 // echoes the prompt requestId as the durable source's rpcId, so the retirement
 // path here is the production correlation, not a test hook.
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, it } from 'vitest'
 import { installAssembledBootEnv, mountAssembledApp } from './assembled-boot.ts'
 
@@ -19,6 +19,7 @@ it('paints the submission echo on the send keystroke and swaps it for the durabl
   const start = tree.querySelector<HTMLButtonElement>('button[aria-label="New session in fixture"]')
   if (start === null) throw new Error('fixture Workspace new-session action missing')
   fireEvent.click(start)
+  fireEvent.click(await screen.findByRole('button', { name: 'Open Chat' }))
 
   const composer = await waitFor(() => {
     const surface = document.querySelector<HTMLElement>('[data-composer-input]')
@@ -42,8 +43,12 @@ it('paints the submission echo on the send keystroke and swaps it for the durabl
   })
   await waitFor(() => { expect(composer.textContent).toBe('回显这条消息') })
   fireEvent.keyDown(composer, { key: 'Enter' })
+  const intent = await screen.findByRole('dialog', { name: 'What should this message do?' })
+  const normalChat = intent.querySelector<HTMLButtonElement>('[data-intent-choice="chat"]')
+  if (normalChat === null) throw new Error('normal Chat intent option missing')
+  fireEvent.click(normalChat)
 
-  // Synchronously after the keystroke: the echo bubble is in the flow with
+  // Synchronously after the normal-chat choice: the echo bubble is in the flow with
   // the draft text and the object-URL preview, while the prompt has not even
   // been serialized yet (it starts after a paint yield). The composer is
   // already cleared, editable, and free of the rail.
@@ -63,7 +68,9 @@ it('paints the submission echo on the send keystroke and swaps it for the durabl
       throw new Error('submission echo still present after the durable node arrived')
     }
   }, { timeout: 10_000 })
-  expect(screen.getAllByText('回显这条消息')).toHaveLength(1)
+  const left = document.querySelector<HTMLElement>('[data-conversation-scroll]')
+  if (left === null) throw new Error('left transcript missing')
+  expect(within(left).getAllByText('回显这条消息')).toHaveLength(1)
   await waitFor(() => {
     if (document.querySelector('[data-align="end"] img') === null) {
       throw new Error('durable user gallery missing')

@@ -137,6 +137,8 @@ export interface Config {
    * configured root. False mounts a roster without the derived writable root.
    */
   includeUserRoot: boolean
+  /** Per-preset inherited-tool allow lists. Empty hides all inherited tools; absent means unrestricted. */
+  toolAllowLists?: Readonly<Record<string, readonly string[]>>
 }
 
 /** One directory scanned for preset subdirectories. */
@@ -2029,7 +2031,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/session/session-requirements/src/index.ts:80`](../packages/session/session-requirements/src/index.ts)
+Source: [`packages/session/session-requirements/src/index.ts:83`](../packages/session/session-requirements/src/index.ts)
 
 <a id="deepseek-aidsh-session-telemetry-otel"></a>
 

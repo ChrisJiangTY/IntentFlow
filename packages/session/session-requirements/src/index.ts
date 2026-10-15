@@ -44,6 +44,7 @@ import type {
   RequirementRunAllStopResult,
   RequirementRoundEvent,
   RequirementRoundId,
+  RequirementRoundAppendRequest,
   RequirementRoundStartRequest,
   RequirementRoundStartResult,
   RequirementTask,
@@ -58,6 +59,8 @@ import type {
   RequirementTaskRunResult,
   RequirementTaskGenerateRequest,
   RequirementTaskListEvent,
+  RequirementTaskRoundStartRequest,
+  RequirementTaskRoundStartResult,
   RequirementTaskWithdrawRequest,
   RequirementText,
   RequirementUserVersionEvent,
@@ -543,6 +546,14 @@ function latestDocument(session: Session, roundId: RequirementRoundId): Requirem
   return event?.type === 'requirement/document' ? event.data : undefined
 }
 
+function documentPredatesRoundInput(session: Session, round: RequirementRoundEvent): boolean {
+  const source = session.events.find(event => event.type === 'requirement/round'
+    && event.data.roundId === round.roundId && event.data.sourceMessageId === round.sourceMessageId)
+  const document = session.events.findLast(event => event.type === 'requirement/document'
+    && event.data.roundId === round.roundId)
+  return document === undefined || (source !== undefined && document.seq < source.seq)
+}
+
 function latestGraph(session: Session, roundId: RequirementRoundId): RequirementGraphEvent | undefined {
   const event = session.events.findLast(candidate => candidate.type === 'requirement/graph'
     && candidate.data.roundId === roundId)
@@ -563,6 +574,14 @@ function latestTaskList(session: Session, roundId: RequirementRoundId): Requirem
   return event?.type === 'requirement/task-list' ? event.data : undefined
 }
 
+function currentDocumentHasTaskExecution(session: Session, roundId: RequirementRoundId, revision: number): boolean {
+  const list = latestTaskList(session, roundId)
+  if (list?.documentRevision !== revision) return false
+  const currentTaskIds = new Set(list.tasks.map(task => task.id))
+  return session.events.some(event => event.type === 'requirement/task-execution'
+    && event.data.roundId === roundId && currentTaskIds.has(event.data.taskId))
+}
+
 function latestTaskExecution(
   session: Session,
   roundId: RequirementRoundId,
@@ -579,9 +598,11 @@ function latestRunAll(session: Session, roundId: RequirementRoundId): Requiremen
   return event?.type === 'requirement/run-all' ? event.data : undefined
 }
 
-function clarificationAttempts(session: Session, roundId: RequirementRoundId): number {
+function clarificationAttempts(session: Session, roundId: RequirementRoundId, sourceMessageId?: string): number {
+  const sourceSeq = sourceMessageId === undefined ? 0 : session.events.find(event => event.type === 'requirement/round'
+    && event.data.roundId === roundId && event.data.sourceMessageId === sourceMessageId)?.seq ?? 0
   return session.events.filter(event => event.type === 'requirement/clarification'
-    && event.data.roundId === roundId && event.data.status === 'asked').length
+    && event.data.roundId === roundId && event.data.status === 'asked' && event.seq > sourceSeq).length
 }
 
 function shortHash(value: string): string {
@@ -804,6 +825,7 @@ function submittedTask(
   order: number,
   input: SubmittedTask,
   knownRefs: ReadonlySet<string>,
+  documentRevision: number,
 ): RequirementTask {
   const title = normalizedTaskText(input.title, 'title')
   const body = normalizedTaskText(input.markdown, 'statement')
@@ -825,7 +847,7 @@ function submittedTask(
   const requirementRefs = normalizedRequirementRefs(input.requirement_refs, knownRefs, `task ${order + 1}`)
   const statement = `${body.replace(/\n+_关联需求：[^\n]+_\s*$/u, '')}\n\n_关联需求：${requirementRefs.join('、')}_`
   return {
-    id: stableTaskId(roundId, title, statement),
+    id: stableTaskId(roundId, documentRevision === 1 ? title : `${documentRevision}:${title}`, statement),
     order,
     kind: input.kind,
     title,
@@ -845,6 +867,7 @@ function taskRefsFromStatement(statement: string, knownRefs: ReadonlySet<string>
 function taskStatementWithRefs(statement: string, refs: readonly string[]): string {
   const body = statement.replace(/\n*_关联需求：[^\n]+_\s*$/u, '').trim()
   if (body === '') return ''
+  if (refs.length === 0) return body
   return `${body}\n\n_关联需求：${refs.join('、')}_`
 }
 
@@ -1156,7 +1179,7 @@ export class SessionRequirements extends TypertRemoteService {
     const agent = exec.agent
     if (agent === undefined) throw new Error('requirement clarification requires an owning agent session')
     const attempt = clarificationAttempts(agent.session, round.roundId) + 1
-    if (attempt > this.config.maxClarificationRounds) {
+    if (clarificationAttempts(agent.session, round.roundId, round.sourceMessageId) >= this.config.maxClarificationRounds) {
       this.updateRound(agent.session, round.roundId, { status: 'awaiting-input' })
       throw new Error(`requirement clarification is limited to ${this.config.maxClarificationRounds} batches; wait for the user to add information`)
     }
@@ -1271,7 +1294,7 @@ export class SessionRequirements extends TypertRemoteService {
     if (document === undefined || !document.valid) throw new Error('the active requirement document is missing or invalid')
     if (inputs.length === 0) throw new TypeError('at least one implementation or checkpoint task is required')
     const knownRefs = requirementAcceptanceRefs(document.markdown)
-    const tasks = inputs.map((input, order) => submittedTask(round.roundId, order, input, knownRefs))
+    const tasks = inputs.map((input, order) => submittedTask(round.roundId, order, input, knownRefs, document.revision))
     const coveredRefs = new Set(tasks.flatMap(task => task.requirementRefs))
     const missing = [...knownRefs].filter(ref => !coveredRefs.has(ref))
     if (missing.length > 0) throw new TypeError(`tasks must verify every acceptance criterion; missing ${missing.join(', ')}`)
@@ -1327,6 +1350,98 @@ export class SessionRequirements extends TypertRemoteService {
   }
 
   /**
+   * Append user direction to the latest requirement round and queue a complete document revision.
+   * Completed task and validation records remain historical; the new document revision supersedes their source.
+   * @param agent - exact live Agent that receives the revision request.
+   * @param request - raw additional requirement and authoring language.
+   * @returns the existing round identity and appended event position.
+   */
+  @Remote('appendRequirement')
+  appendRequirement(agent: Agent, request: RequirementRoundAppendRequest): RequirementRoundStartResult {
+    this.requireLiveAgent(agent)
+    normalizedRequirementText(request.input, 'statement')
+    this.requireLanguage(request.language)
+    const session = agent.session
+    const current = rounds(session).reduce<RequirementRoundEvent | undefined>((latest, round) => (
+      round.kind === 'task' || latest !== undefined && latest.round > round.round ? latest : round
+    ), undefined)
+    if (current === undefined) return this.startRound(agent, request)
+    if (['analyzing', 'clarifying', 'generating-tasks', 'executing', 'reviewing', 'validating'].includes(current.status)) {
+      throw new Error(`requirement round "${current.roundId}" is busy; wait for its current operation to settle`)
+    }
+    const currentRounds = new Map(rounds(session).map(round => [round.roundId, round]))
+    if (this.runAllStates.has(session)
+      || [...currentRounds.values()].some(round => round.status === 'executing' || round.status === 'reviewing')) {
+      throw new Error('a task is still executing or under review')
+    }
+    const document = latestDocument(session, current.roundId)
+    const input = `${current.input}\n\n追加需求：\n${request.input}`
+    const message = createUserMessage({
+      content: [{ type: 'text', text: this.appendRoundPrompt(current, document, request.input) }],
+      source: { kind: 'user' },
+    })
+    const event = session.append('requirement/round', {
+      version: 1,
+      revision: current.revision + 1,
+      roundId: current.roundId,
+      round: current.round,
+      sourceMessageId: message.id,
+      language: request.language,
+      input,
+      status: 'analyzing',
+    })
+    try {
+      agent.followup(message)
+    } catch (error: unknown) {
+      this.updateRound(session, current.roundId, { status: 'failed' })
+      throw error
+    }
+    return { roundId: current.roundId, round: current.round, eventSeq: event.seq }
+  }
+
+  /**
+   * Store one standalone pending Task round without queuing an Agent turn.
+   * @param agent - exact live Agent that owns the task.
+   * @param request - raw user task and authoring language.
+   * @returns the round and task identities for the new Notebook block.
+   */
+  @Remote('startTaskRound')
+  startTaskRound(agent: Agent, request: RequirementTaskRoundStartRequest): RequirementTaskRoundStartResult {
+    this.requireLiveAgent(agent)
+    normalizedRequirementText(request.input, 'statement')
+    this.requireLanguage(request.language)
+    const session = agent.session
+    const round = Math.max(0, ...rounds(session).map(item => item.round)) + 1
+    const roundId = `ROUND-${String(round).padStart(2, '0')}` as RequirementRoundId
+    const source = createUserMessage({ content: [{ type: 'text', text: request.input }], source: { kind: 'user' } })
+    const roundEvent = session.append('requirement/round', {
+      version: 1,
+      kind: 'task',
+      revision: 1,
+      roundId,
+      round,
+      sourceMessageId: source.id,
+      language: request.language,
+      input: request.input,
+      status: 'tasks-ready',
+    })
+    const statement = request.input.trim()
+    const title = Array.from(statement.split('\n', 1)[0] ?? statement).slice(0, 60).join('')
+    const taskId = stableTaskId(roundId, 'standalone', statement)
+    this.appendTaskList(session, roundId, [{
+      id: taskId,
+      order: 0,
+      kind: 'implementation',
+      title,
+      summary: Array.from(statement).slice(0, 120).join(''),
+      statement,
+      requirementRefs: [],
+      status: 'pending',
+    }], 0)
+    return { roundId, round, taskId, eventSeq: roundEvent.seq }
+  }
+
+  /**
    * Persist an editable requirement-document draft without starting Agent work.
    * @param agent - exact live Agent that owns the round.
    * @param request - round, optimistic revision, and replacement Markdown.
@@ -1345,11 +1460,13 @@ export class SessionRequirements extends TypertRemoteService {
       throw new Error(`stale requirement document revision ${request.revision}; current is ${document.revision}`)
     }
     const round = latestRound(session, request.roundId)
-    if (round?.status === 'generating-tasks') {
-      throw new Error('the requirement document cannot be edited while task generation is running')
+    if (round?.status === 'generating-tasks' || round?.status === 'analyzing' || round?.status === 'clarifying') {
+      throw new Error('the requirement document cannot be edited while authoring or task generation is running')
     }
-    if (session.events.some(event => event.type === 'requirement/task-execution'
-      && event.data.roundId === request.roundId)) {
+    if (round !== undefined && documentPredatesRoundInput(session, round)) {
+      throw new Error('the latest requirement input has not been saved as a document yet')
+    }
+    if (currentDocumentHasTaskExecution(session, request.roundId, document.revision)) {
       throw new Error('the requirement document is locked after task execution begins')
     }
     if (typeof request.markdown !== 'string') throw new TypeError('requirement document Markdown must be a string')
@@ -1395,12 +1512,17 @@ export class SessionRequirements extends TypertRemoteService {
     if (round === undefined || document === undefined) {
       throw new Error(`requirement document for round "${request.roundId}" does not exist`)
     }
+    if (round.status === 'analyzing' || round.status === 'clarifying') {
+      throw new Error('the requirement document is still being authored')
+    }
+    if (documentPredatesRoundInput(session, round)) {
+      throw new Error('the latest requirement input has not been saved as a document yet')
+    }
     if (document.revision !== request.documentRevision) {
       throw new Error(`stale requirement document revision ${request.documentRevision}; current is ${document.revision}`)
     }
     if (!document.valid) throw new Error(`requirement document is invalid: ${document.issues.join(' ')}`)
-    if (session.events.some(event => event.type === 'requirement/task-execution'
-      && event.data.roundId === request.roundId)) {
+    if (currentDocumentHasTaskExecution(session, request.roundId, document.revision)) {
       throw new Error('tasks cannot be regenerated after task execution begins')
     }
     if (latestTaskList(session, request.roundId)?.documentRevision === document.revision) {
@@ -1560,7 +1682,9 @@ export class SessionRequirements extends TypertRemoteService {
     const list = this.currentTaskList(session, request.roundId)
     this.requireTaskListEditable(list)
     const document = latestDocument(session, request.roundId)
-    if (document === undefined) throw new Error(`requirement document for round "${request.roundId}" does not exist`)
+    if (document === undefined && latestRound(session, request.roundId)?.kind !== 'task') {
+      throw new Error(`requirement document for round "${request.roundId}" does not exist`)
+    }
     const finalIndex = list.tasks.findIndex(task => task.kind === 'final-test')
     const afterIndex = request.afterTaskId === undefined
       ? finalIndex < 0 ? list.tasks.length - 1 : finalIndex - 1
@@ -1570,7 +1694,7 @@ export class SessionRequirements extends TypertRemoteService {
     }
     if (finalIndex >= 0 && afterIndex >= finalIndex) throw new Error('tasks cannot be inserted after Final Test')
     const taskId = stableTaskId(request.roundId, `manual-${list.revision + 1}`, `${title}\n${summary}\n${statement}`)
-    const knownRefs = requirementAcceptanceRefs(document.markdown)
+    const knownRefs = document === undefined ? new Set<string>() : requirementAcceptanceRefs(document.markdown)
     const parsedRefs = taskRefsFromStatement(statement, knownRefs)
     const requirementRefs = title === '' && statement === '' ? [] : parsedRefs.length > 0 ? parsedRefs : [...knownRefs]
     const task: RequirementTask = {
@@ -1617,8 +1741,10 @@ export class SessionRequirements extends TypertRemoteService {
     const humanEdit = request.humanEdit ?? summary !== task.summary
     if (!humanEdit && task.status === 'completed') throw new Error(`requirement task "${request.taskId}" is completed and locked`)
     const document = latestDocument(session, request.roundId)
-    if (document === undefined) throw new Error(`requirement document for round "${request.roundId}" does not exist`)
-    const knownRefs = requirementAcceptanceRefs(document.markdown)
+    if (document === undefined && latestRound(session, request.roundId)?.kind !== 'task') {
+      throw new Error(`requirement document for round "${request.roundId}" does not exist`)
+    }
+    const knownRefs = document === undefined ? new Set<string>() : requirementAcceptanceRefs(document.markdown)
     const parsedRefs = taskRefsFromStatement(statement, knownRefs)
     const requirementRefs = title === '' && statement === ''
       ? []
@@ -1629,7 +1755,7 @@ export class SessionRequirements extends TypertRemoteService {
     if (humanEdit || (title !== '' && statement !== '')) {
       const text = await this.transformTask(agent, candidate, humanEdit ? summary : undefined)
       if (!humanEdit && text.markdown !== candidate.statement) throw new TypeError('translation must preserve the complete Agent task verbatim')
-      rewritten = { ...candidate, title: text.title, summary: humanEdit ? summary : text.summary,
+      rewritten = { ...candidate, title: title !== task.title ? title : text.title, summary: humanEdit ? summary : text.summary,
         statement: taskStatementWithRefs(text.markdown, requirementRefs) }
     }
     this.requireLiveAgent(agent)
@@ -1795,11 +1921,13 @@ export class SessionRequirements extends TypertRemoteService {
       throw new Error(`requirement task "${request.taskId}" can no longer be withdrawn`)
     }
     const document = latestDocument(session, request.roundId)
-    if (document === undefined) throw new Error(`requirement document for round "${request.roundId}" does not exist`)
+    if (document === undefined && latestRound(session, request.roundId)?.kind !== 'task') {
+      throw new Error(`requirement document for round "${request.roundId}" does not exist`)
+    }
     const tasks = list.tasks.map(item => item.id === request.taskId
       ? { ...item, status: 'withdrawn' as const }
       : { ...item })
-    requireTaskCoverage(tasks, requirementAcceptanceRefs(document.markdown))
+    requireTaskCoverage(tasks, document === undefined ? new Set<string>() : requirementAcceptanceRefs(document.markdown))
     const needsReview = activeTasksCompleted(tasks)
     const reviewCandidate = needsReview
       ? lastCompletedTaskExecution(session, request.roundId, tasks)
@@ -1954,6 +2082,17 @@ export class SessionRequirements extends TypertRemoteService {
     return `第 ${round} 轮需求 Notebook\n\n用户原始需求：\n${input}\n\n先通过只读检查了解实际仓库，能从代码和文档确定的事实不要询问用户。判断是否存在必须由用户决定的关键歧义；如有，调用 clarify_requirements，一次提出 1 至 ${this.config.maxQuestionsPerRound} 个相关中文问题，最多调用 ${this.config.maxClarificationRounds} 次。没有关键歧义，或回答已经足够时，调用 submit_requirements_document。不要进入 Plan 模式，不要修改文件，不要生成实现任务。\n\n需求文档必须全部使用中文，结构固定为：\n# 需求文档\n## 简介\n## 需求\n### 需求 1：<标题>\n**用户故事：** <作为……我希望……以便……>\n#### 验收标准\n1. <使用“当、如果、在……期间、系统应当”等明确条件和结果>\n\n需求编号和每项验收标准编号必须连续。不得包含术语表。summary 是 30 个中文字符以内的一句话轮次摘要。relations 必须列出当前文档内真实的 depends-on 依赖；只有当前需求明确细化或取代下列历史需求时，才使用 refines 或 supersedes 并填写 target_round_id。没有关系时提交空数组，不得为了连线臆造关系。最终只通过 submit_requirements_document 提交完整文档，不要把文档作为普通回复输出。\n\n当前 Session 的历史需求图谱索引：\n${JSON.stringify(priorGraphs)}`
   }
 
+  private appendRoundPrompt(
+    round: RequirementRoundEvent,
+    document: RequirementDocumentEvent | undefined,
+    input: string,
+  ): string {
+    const prior = document === undefined
+      ? '本轮尚无需求文档。请根据本轮原始需求及追加内容编写完整文档。'
+      : `当前完整需求文档 v${document.revision}：\n${document.markdown}\n\n请保留仍然有效的现有需求，将本次追加内容合并进完整文档。旧任务和验证属于先前文档版本，不证明新增内容已实现。`
+    return `继续第 ${round.round} 轮需求 Notebook。\n\n本轮原始及历史追加需求：\n${round.input}\n\n本次追加的用户需求：\n${input}\n\n${prior}\n\n先只读检查实际仓库，解决可从代码确定的问题；仅在关键用户选择不明时调用 clarify_requirements。最终必须调用 submit_requirements_document，提交完整中文需求文档及真实图谱关系。文档保留 # 需求文档、## 简介、## 需求三级结构；每项使用 ### 需求 N：<中文标题>、**用户故事：** 和 #### 验收标准，需求及标准编号连续。不要修改代码、生成任务或把需求文档仅作为普通回复输出。`
+  }
+
   private taskGenerationPrompt(round: RequirementRoundEvent, document: RequirementDocumentEvent): string {
     return `为第 ${round.round} 轮需求 Notebook 生成完整的中文实施任务。先只读检查实际仓库和可用命令，不要修改文件，不要进入 Plan 模式。最终调用 submit_requirement_tasks。\n\n需求文档 v${document.revision}：\n${document.markdown}\n\n每个任务对应一个可交付结果，按依赖顺序排列。先完成 markdown，包含目标、输入和范围、约束、连续编号的 - [ ] N.x 具体动作、验收与验证、产出、失败处理。每个任务都要验证自己关联的验收标准；发现问题就在该任务中修复并重新验证，不得删除测试、放宽断言或隐藏失败。所有项目必做，不得提前勾选。title 为中文动作标题；此阶段不生成 summary，提交后由独立翻译器读取完整任务并生成人类说明。requirement_refs 引用真实验收编号，其并集必须覆盖文档中的全部验收标准。不要提交 final_test，也不要另设重复验证全部标准的任务。`
   }
@@ -1970,7 +2109,10 @@ export class SessionRequirements extends TypertRemoteService {
       : `下一项待处理任务是「${nextTask.title}」：${nextTask.summary}。请用大白话说明接下来会完成什么。`
     const directions = tasks.filter(item => item.humanInstruction !== undefined)
       .map(item => ({ task: item.title, instruction: item.humanInstruction }))
-    return `继续执行第 ${round.round} 轮需求 Notebook 的任务 ${task.order + 1}：${task.title}\n\n任务说明：\n${task.statement}\n\n本轮人类最新修改（优先于冲突的旧需求、旧任务和旧验收标准；验证必须按修改后的意图执行）：\n${JSON.stringify(directions)}\n\n只完成这个任务，保留未冲突的其他需求，并在完成后给出可验证结果。${finalInstruction}\n\n最终回复仅含两个二级标题：\n## 交付结果\n用中文写一个供“需求”页直接展示的短段落，正文可见内容为 50–300 字（不计 Markdown 符号与链接目标）。按顺序说清：本步实际做出了什么；用户怎样打开并开始使用（交付网页时，用行内代码标出 Notebook 支持预览的可点击文件名，如 \`web-calculator/index.html\`，并明确写“点击该文件名打开”；其他产物给出确切打开或使用方式；没有可打开的产物时，说明用户怎样查看或使用结果，不要编造链接）；${handoff} 只写用户能直接理解的成果和行动，不要写 SHA-256、日志路径、断言数量、命令记录、测试清单或验证过程。失败或未交付时如实说明，不能把计划说成已完成。\n## 说明\n用简短自然语言说明必要限制、失败或待处理事项；无补充则写“无”。不得把计划写成已完成，不得隐瞒失败。不要附加开场白、执行过程、命令日志、步骤统计、验收对照表、测试明细或其他章节；这些证据留在工具与轨迹记录中。`
+    const heading = round.kind === 'task'
+      ? `执行第 ${round.round} 轮独立任务 ${task.order + 1}：${task.title}`
+      : `继续执行第 ${round.round} 轮需求 Notebook 的任务 ${task.order + 1}：${task.title}`
+    return `${heading}\n\n任务说明：\n${task.statement}\n\n本轮人类最新修改（优先于冲突的旧需求、旧任务和旧验收标准；验证必须按修改后的意图执行）：\n${JSON.stringify(directions)}\n\n只完成这个任务，保留未冲突的其他需求，并在完成后给出可验证结果。${finalInstruction}\n\n最终回复仅含两个二级标题：\n## 交付结果\n用中文写一个供“需求”页直接展示的短段落，正文可见内容为 50–300 字（不计 Markdown 符号与链接目标）。按顺序说清：本步实际做出了什么；用户怎样打开并开始使用（交付网页时，用行内代码标出 Notebook 支持预览的可点击文件名，如 \`web-calculator/index.html\`，并明确写“点击该文件名打开”；其他产物给出确切打开或使用方式；没有可打开的产物时，说明用户怎样查看或使用结果，不要编造链接）；${handoff} 只写用户能直接理解的成果和行动，不要写 SHA-256、日志路径、断言数量、命令记录、测试清单或验证过程。失败或未交付时如实说明，不能把计划说成已完成。\n## 说明\n用简短自然语言说明必要限制、失败或待处理事项；无补充则写“无”。不得把计划写成已完成，不得隐瞒失败。不要附加开场白、执行过程、命令日志、步骤统计、验收对照表、测试明细或其他章节；这些证据留在工具与轨迹记录中。`
   }
 
   private notePrompt(round: RequirementRoundEvent, kind: 'text' | 'comment', content: string): string {
@@ -2041,6 +2183,14 @@ export class SessionRequirements extends TypertRemoteService {
   private currentTaskList(session: Session, roundId: RequirementRoundId): RequirementTaskListEvent {
     const list = latestTaskList(session, roundId)
     if (list === undefined) throw new Error(`requirement task list for round "${roundId}" does not exist`)
+    const round = latestRound(session, roundId)
+    if (round?.kind === 'task') {
+      if (list.documentRevision !== 0) throw new Error('standalone task list has an invalid source revision')
+      return list
+    }
+    if (round !== undefined && documentPredatesRoundInput(session, round)) {
+      throw new Error('requirement document revision is still in progress')
+    }
     const document = latestDocument(session, roundId)
     if (document === undefined) throw new Error(`requirement document for round "${roundId}" does not exist`)
     if (list.documentRevision !== document.revision) {

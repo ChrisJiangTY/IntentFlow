@@ -176,7 +176,7 @@ export function ConversationSessionHeader({
  */
 export function ConversationSession({
   useSession, useConversation, useConversationViews, useInput, inputActions, useStore, actions,
-  renderSlot, bindDraftMirror, onActiveViewChange,
+  renderSlot, bindDraftMirror, onActiveViewChange, surface = 'main',
 }: ConversationSessionProps) {
   const tabs = useConversationViews(value => value)
   const selectedId = useStore(s => s.view)
@@ -188,22 +188,37 @@ export function ConversationSession({
   const viewRequest = useStore(s => s.viewRequest ?? null)
 
   useEffect(() => {
+    if (surface === 'right') return
     if (active !== undefined) onActiveViewChange?.(active.id)
-  }, [active?.id, onActiveViewChange])
+  }, [active?.id, onActiveViewChange, surface])
 
   useEffect(() => {
+    if (surface === 'right') return
     if (inputState.draft === '' && storedDraft !== '') inputActions.setDraft(storedDraft)
     const unmirror = bindDraftMirror(actions.setDraft)
     return () => { unmirror() }
     // Mount-only (deps pinned to inputActions): later store writes come from
     // the machine mirror, not this seed effect.
-  }, [inputActions])
+  }, [inputActions, surface])
 
-  if (session.blank && conversationPhase(session, conversation) === 'blank') return null
+  const blank = session.blank && conversationPhase(session, conversation) === 'blank'
+  if (surface === 'right') {
+    return (
+      <div className={css.rightViewArea}>
+        {renderSlot('conversation.view', {
+          surface: 'right',
+          viewRequest,
+          openView: actions.openView,
+          completeViewRequest: actions.completeViewRequest,
+        }, { only: 'chat' })}
+      </div>
+    )
+  }
   return (
-    <div className={css.viewArea}>
+    blank ? null : <div className={css.viewArea}>
       {active !== undefined && renderSlot('conversation.view', {
         ...(active.id === 'requirements' ? { navigation: { tabs, activeId: active.id, select: actions.setView } } : {}),
+        surface: 'main',
         viewRequest,
         openView: actions.openView,
         completeViewRequest: actions.completeViewRequest,

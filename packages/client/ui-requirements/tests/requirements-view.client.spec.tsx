@@ -306,10 +306,65 @@ function reviewSnapshot(): RequirementsSnapshot {
 }
 
 describe('RequirementsView Notebook', () => {
-  it('owns Notebook scrolling while the shared composer overlays the view', () => {
+  it('owns Notebook scrolling without reserving a left composer', () => {
     const { container } = render(<RequirementsView {...props()} />)
-    expect(container.querySelector('[data-conversation-composer-overlay]')).toBeTruthy()
+    expect(container.querySelector('[data-conversation-composer-overlay]')).toBeNull()
     expect(container.querySelector('[data-notebook-scroll]')).toBeTruthy()
+  })
+
+  it('renders a standalone task round without a requirement document or clarification', () => {
+    const value = snapshot()
+    const taskRoundId = 'ROUND-02' as never
+    const task = { ...value.taskLists[0]!.data.tasks[0]!, id: 'TASK-02' as never,
+      title: '修复右侧交互', statement: '检查侧栏切换与输入框。', requirementRefs: [] }
+    const taskRound = { ...value.rounds[0]!, key: 'requirements-round:7', anchorSeq: 7, data: {
+      ...value.rounds[0]!.data, roundId: taskRoundId, round: 2, kind: 'task' as const,
+      input: '修复右侧交互', status: 'tasks-ready' as const,
+    } }
+    const taskList = { ...value.taskLists[0]!, key: 'requirements-task-list:8', anchorSeq: 8,
+      data: { ...value.taskLists[0]!.data, roundId: taskRoundId, documentRevision: 0, tasks: [task] } }
+    const { container } = render(<RequirementsView {...props({}, {
+      ...value, rounds: [...value.rounds, taskRound], taskLists: [...value.taskLists, taskList],
+    })} />)
+    const round = container.querySelector<HTMLElement>('[data-round-id="ROUND-02"]')!
+    expect(round.textContent).toContain('第 2 轮任务：')
+    expect(round.textContent).toContain('独立任务')
+    expect(round.querySelector('[data-cell="clarification-record"]')).toBeNull()
+    expect(round.querySelector('[data-cell="document"]')).toBeNull()
+    const taskCell = round.querySelector<HTMLElement>('[data-cell="task"]')!
+    expect(within(taskCell).getByText('修复右侧交互')).toBeTruthy()
+    expect(within(taskCell).getByRole('button', { name: '运行任务 修复右侧交互' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: '全部运行' }).hasAttribute('disabled')).toBe(false)
+    fireEvent.click(taskCell)
+    fireEvent.click(within(taskCell).getByRole('button', { name: '更多单元格操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '查看详情与证据' }))
+    expect(screen.getByRole('complementary', { name: '需求工作区详情' }).textContent).toContain('修复右侧交互')
+  })
+
+  it('shows an appended document revision while marking prior tasks and validation historical', () => {
+    const value = snapshot()
+    const revisedRound = { ...value.rounds[0]!, key: 'requirements-round:8', anchorSeq: 8,
+      data: { ...value.rounds[0]!.data, revision: 2, sourceMessageId: 'message-2' as never,
+        input: '实现一个 Notebook 需求流。\n\n追加需求：\n增加导出功能。', status: 'document-ready' as const } }
+    const currentDocument = value.documents[0]!
+    const revisedDocument = { ...currentDocument, key: 'requirements-document:9', anchorSeq: 9,
+      data: { ...currentDocument.data, revision: 2, summary: '扩展 Notebook 需求流',
+        markdown: `${currentDocument.data.markdown}\n\n### 需求 2：追加内容\n\n#### 验收标准\n\n1. 展示追加内容。` } }
+    const { container } = render(<RequirementsView {...props({}, {
+      ...value, rounds: [...value.rounds, revisedRound], documents: [currentDocument, revisedDocument],
+    })} />)
+    const round = container.querySelector<HTMLElement>('[data-round-id="ROUND-01"]')!
+    expect(round.querySelectorAll('[data-cell="document"]')).toHaveLength(1)
+    expect(round.textContent).toContain('扩展 Notebook 需求流')
+    expect(round.textContent).toContain('展示追加内容')
+    const inputRecord = round.querySelector<HTMLElement>('[data-cell="clarification-record"]')!
+    expect(inputRecord.textContent).toContain('实现一个 Notebook 需求流。')
+    expect(inputRecord.textContent).toContain('追加需求：\n增加导出功能。')
+    expect(round.querySelectorAll('[data-cell="task"]')).toHaveLength(2)
+    expect(round.textContent).toContain('需求已更新 · 历史任务（只读）')
+    expect(round.querySelector('[data-cell="validation"]')).toBeNull()
+    expect(round.querySelector('[data-cell="historical-validation"]')?.textContent).toContain('历史验证（需求或任务已更新）')
+    expect(screen.getByRole('button', { name: '全部运行' }).hasAttribute('disabled')).toBe(true)
   })
 
   it('renders the requirement-to-validation order with top-only add controls', () => {
@@ -540,6 +595,25 @@ describe('RequirementsView Notebook', () => {
     const link = screen.getByRole('link', { name: '页面' })
     expect(fireEvent.click(link)).toBe(true)
     expect(openDeliveryUrl).toHaveBeenCalledWith('https://example.com/result')
+  })
+
+  it('saves the card title and human description together after focus leaves the card', async () => {
+    const injected = props()
+    render(<RequirementsView {...injected} />)
+    const cell = selectTask()
+    const title = within(cell).getByRole('textbox', { name: '任务标题' })
+    const summary = within(cell).getByRole('textbox', { name: '人类任务说明' })
+    fireEvent.change(title, { target: { value: '整理任务卡片' } })
+    fireEvent.blur(title, { relatedTarget: summary })
+    expect(injected.editTask).not.toHaveBeenCalled()
+    fireEvent.change(summary, { target: { value: '标题和正文在同一张卡片中编辑。' } })
+    fireEvent.blur(summary, { relatedTarget: title })
+    expect(injected.editTask).not.toHaveBeenCalled()
+    fireEvent.blur(title)
+    await waitFor(() => { expect(injected.editTask).toHaveBeenCalledExactlyOnceWith({
+      roundId, taskId, title: '整理任务卡片', summary: '标题和正文在同一张卡片中编辑。',
+      statement: '渲染需求、Task 和验证单元格。\n\n_关联需求：1.1_', humanEdit: true,
+    }) })
   })
 
   it('autosaves the title and indented statement without Save or Cancel controls', async () => {

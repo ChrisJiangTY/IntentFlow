@@ -38,6 +38,8 @@ const SUBJECT = '@deepseek-ai/dsh-timeout'
 const LANDLOCK = '@deepseek-ai/node-addon-landlock-run'
 const PLUGIN_INVENTORY = '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
 const WEB_SERVER = '@deepseek-ai/dsh-host-webserver'
+const BARE_PLUGIN = 'picomatch'
+const SIDEBAR_PLUGIN = 'dsh-better-sidebar'
 
 const workspaces = indexWorkspacePackages(repoRoot)
 
@@ -114,6 +116,24 @@ const packedWebServer = (): ReturnType<typeof packVfsImage> => webServerMemo ??=
   entries: [],
 })
 
+let barePluginMemo: ReturnType<typeof packVfsImage> | undefined
+const packedBarePlugin = (): ReturnType<typeof packVfsImage> => barePluginMemo ??= packVfsImage({
+  config: `- id: group\n  name: cordis:group\n  group: true\n  config:\n    - id: bare\n      name: ${BARE_PLUGIN}\n      config:\n        labels:\n          - name: not-a-plugin\n`,
+  profile: 'bare-plugin-check',
+  workspaces,
+  resolveFrom: repoRoot,
+  entries: [],
+})
+
+let sidebarMemo: ReturnType<typeof packVfsImage> | undefined
+const packedSidebar = (): ReturnType<typeof packVfsImage> => sidebarMemo ??= packVfsImage({
+  config: `- id: sidebar\n  name: ${SIDEBAR_PLUGIN}\n`,
+  profile: 'sidebar-plugin-check',
+  workspaces,
+  resolveFrom: repoRoot,
+  entries: [],
+})
+
 /** The image's archive, inflated once: mounting reads the tar, not the gzip member. */
 let archiveMemo: Uint8Array | undefined
 const archive = async (): Promise<Uint8Array> =>
@@ -126,6 +146,35 @@ const archive = async (): Promise<Uint8Array> =>
     expect(result.roster).toEqual([SUBJECT])
     expect(result.packages.has(SUBJECT)).toBe(true)
     expect(result.missing).toEqual([])
+  })
+
+  it('keeps an unscoped Loader package installed by a workspace and roots its entry', () => {
+    const result = packedBarePlugin()
+    expect(result.roster).toEqual([BARE_PLUGIN])
+    expect(result.packages.has(BARE_PLUGIN)).toBe(true)
+    expect(result.missing).toEqual([])
+    expect(Object.hasOwn(result.files, `node_modules/${BARE_PLUGIN}/index.js`)).toBe(true)
+  })
+
+  // The installed sidebar includes its full editor dependency tree.
+  it('packs the Web sidebar plugin entry from its bundle dependency', () => {
+    const result = packedSidebar()
+    expect(result.roster).toEqual([SIDEBAR_PLUGIN])
+    expect(result.missing).toEqual([])
+    expect(Object.hasOwn(result.files, `node_modules/${SIDEBAR_PLUGIN}/lib/index.js`)).toBe(true)
+  }, 30_000)
+
+  it('reports a missing unscoped Loader package as an incomplete image', () => {
+    const name = 'no-such-preview-plugin'
+    const result = packVfsImage({
+      config: `- id: unavailable\n  name: ${name}\n`,
+      profile: 'missing-bare-plugin-check',
+      workspaces,
+      resolveFrom: repoRoot,
+      entries: [],
+    })
+    expect(result.roster).toEqual([name])
+    expect(result.missing).toEqual([`${name} (from .)`])
   })
 
   it('records the wrapper contract in the manifest and rewrote what it visited', () => {

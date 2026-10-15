@@ -79,7 +79,9 @@
     - button "Run task Export navigation results":
       - img
     - text: TASK3
-    - strong: Export navigation results
+    - textbox "Task title":
+      - /placeholder: New task
+      - text: Export navigation results
     - textbox "Human task description":
       - /placeholder: Translate this Agent task in one or two sentences…
       - text: Users can export the current navigation results as a clear CSV file.
@@ -143,6 +145,11 @@
     - text: js
     - button "Copy"
     - code: const reviewed = true
+  - article:
+    - text: "[×]"
+    - img
+    - strong: Previous validation (requirements or tasks changed)
+    - paragraph: The HTML was generated; one ordinary mobile check failed, with no historical requirement regression.
   - group "Notebook zoom":
     - button "Zoom out Notebook": −
     - text: 100%

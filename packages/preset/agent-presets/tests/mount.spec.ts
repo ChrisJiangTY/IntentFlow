@@ -89,6 +89,61 @@ beforeEach(async () => {
 })
 
 describe('composing an agent from a preset', () => {
+  it('keeps host tools out of a filtered preset while its own tools and other presets stay visible', async () => {
+    const filtered = await harness({
+      default: 'standard', roots: ROOTS, includeShippedRoot: false, includeUserRoot: false,
+      toolAllowLists: { minimal: ['beta'] },
+    })
+    filtered.tools.register({
+      name: 'host-requirements', description: 'host requirement tool',
+      parameters: { type: 'object', properties: {} },
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value as string }] },
+      execute: () => Promise.resolve('host'),
+    })
+    const minimal = await agentOn(filtered, 'sess-filtered-minimal', 'minimal')
+    const standard = await agentOn(filtered, 'sess-filtered-standard', 'standard')
+    const child = (await filtered.agents.create({
+      sessionId: SessionId('sess-filtered-child'),
+      setup: childCtx => void filtered.agentPresets.composeFrom(childCtx, minimal.ctx),
+    })).agent
+
+    expect(toolNames(filtered, minimal)).toEqual(['beta'])
+    expect(toolNames(filtered, child)).toEqual(['beta'])
+    expect(toolNames(filtered, standard)).toEqual(['alpha', 'host-requirements'])
+    expect(toolNames(filtered)).toEqual(['host-requirements'])
+  })
+
+  it('replaces a blank Agent tool filter when its preset changes', async () => {
+    const filtered = await harness({
+      default: 'standard', roots: ROOTS, includeShippedRoot: false, includeUserRoot: false,
+      toolAllowLists: { minimal: ['beta'] },
+    })
+    filtered.tools.register({
+      name: 'host-requirements', description: 'host requirement tool',
+      parameters: { type: 'object', properties: {} },
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value as string }] },
+      execute: () => Promise.resolve('host'),
+    })
+    const agent = await agentOn(filtered, 'sess-filter-switch', 'minimal')
+    expect(toolNames(filtered, agent)).toEqual(['beta'])
+
+    await filtered.agentPresets.recompose(agent.ctx, 'standard')
+    expect(toolNames(filtered, agent)).toEqual(['alpha', 'host-requirements'])
+
+    await filtered.agentPresets.recompose(agent.ctx, 'minimal')
+    expect(toolNames(filtered, agent)).toEqual(['beta'])
+  })
+
+  it('rejects an unknown filtered tool before binding an Agent to the preset', async () => {
+    const filtered = await harness({
+      default: 'standard', roots: ROOTS, includeShippedRoot: false, includeUserRoot: false,
+      toolAllowLists: { minimal: ['missing'] },
+    })
+    await expect(agentOn(filtered, 'sess-invalid-filter', 'minimal'))
+      .rejects.toThrow(/tool allow list names unknown inherited tools: missing/)
+    expect(filtered.agents.get(SessionId('sess-invalid-filter'))).toBeUndefined()
+  })
+
   it('hands an absolute plugin path to Node as a file URL', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-preset-absolute-plugin-'))
     const presetDir = join(root, 'absolute')

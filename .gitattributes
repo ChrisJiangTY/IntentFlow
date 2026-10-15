@@ -11,3 +11,7 @@
 # Pairing records are generated from the three confirmed owner-blob pairs.
 # The worktree-local installer registers the fail-closed driver command.
 *.i18n.yaml merge=dsh-translation-pairing
+
+# A patch is itself a unified diff: context lines and removed blank lines are
+# significant even when an outer Git diff sees them as added whitespace.
+patches/*.patch whitespace=-blank-at-eol,-space-before-tab

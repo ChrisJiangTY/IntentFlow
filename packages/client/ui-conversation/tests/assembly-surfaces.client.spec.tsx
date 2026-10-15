@@ -151,7 +151,7 @@ describe('resident composer', () => {
     await runtime.dispose()
   })
 
-  it('the textarea survives the blank→active conversion as the same DOM node', async () => {
+  it('keeps the draft when the blank Hero becomes an active transcript', async () => {
     const runtime = await bench({ blank: true })
     await runtime.workspaces.update((draft) => {
       draft.items = [{ workspaceId: 'w1', title: 'Proj', path: '/proj', sessionIds: [SID] }] as never
@@ -160,11 +160,18 @@ describe('resident composer', () => {
     const hero = view.container.querySelector<HTMLDivElement>('[data-composer-input]')
     expect(hero).not.toBeNull()
     expect(hero!.getAttribute('aria-disabled')).not.toBe('true')
+    const conversation = runtime.ctx.get('conversation') as { input: unknown }
+    const shell = (conversation.input as InputHub).shell(SID)
+    act(() => { shell.setDraft('keep this draft') })
 
     await runtime.sessions.updateSessionSnapshot(SID, (draft) => {
       draft.blank = false
     })
-    expect(view.container.querySelector<HTMLDivElement>('[data-composer-input]')).toBe(hero)
+    expect(view.container.querySelector('[data-composer-input]')).toBeNull()
+    expect(shell.snapshot.draft).toBe('keep this draft')
+    act(() => { runtime.ctx.rightChat.toggle() })
+    const rightInput = document.querySelector('[data-right-chat-panel] [data-composer-input]')
+    expect(rightInput?.textContent).toBe('keep this draft')
     await runtime.dispose()
   })
 })
@@ -188,14 +195,16 @@ describe('prompt rejection through the assembled composer', () => {
     await runtime.root.declare(LAYOUT_CHILDREN, AppRoot)
     await runtime.mount({ inject: [...inject], apply })
     const view = runtime.renderRoot()
+    act(() => { runtime.ctx.rightChat.toggle() })
 
-    const composer = view.container.querySelector<HTMLDivElement>('[data-composer-input]')!
+    const composer = document.querySelector<HTMLDivElement>('[data-right-chat-panel] [data-composer-input]')!
     // Write through the assembled input resolver (contenteditable change
     // events carry no value; the resolver is the public draft write path).
     const conversation = runtime.ctx.get('conversation') as { input: unknown }
     const shell = (conversation.input as InputHub).shell(SID)
     act(() => { shell.setDraft('do not lose this') })
     fireEvent.keyDown(composer, { key: 'Enter' })
+    fireEvent.click(await view.findByRole('button', { name: '普通对话' }))
     await waitFor(() => { expect(prompt).toHaveBeenCalledOnce() })
 
     await runtime.sessions.updateSessionSnapshot(SID, (draft) => {

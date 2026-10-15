@@ -587,7 +587,7 @@ The backends that consume this contract are on [persistence.md](persistence.md).
 
 `RequirementChangesProjection` carries recorded file mutations as `RequirementCodeChange` entries with an event sequence, execution Turn, path, and before/after snippets. Its `requirementChanges` projection is independent of Chat pagination; the requirement graph joins it with Task execution Turns. Snippets describe recorded executions, not current file contents.
 
-`RequirementNotebookProjection` carries `entries` across the complete Session history, independently of the loaded conversation page. Each `RequirementNotebookEvent` contains its event type, sequence, timestamp, and typed requirement payload. The `requirementNotebook` projection retains document revisions, the latest task list per document revision, cell values, and execution attempts. [Session Requirements](../../packages/session/session-requirements/README.md) owns the fold and [the Notebook view](../../packages/client/ui-requirements/README.md) owns editing and historical display.
+`RequirementNotebookProjection` carries `entries` across the complete Session history, independently of the loaded conversation page. Each `RequirementNotebookEvent` contains its event type, sequence, timestamp, and typed requirement payload. The `requirementNotebook` projection retains document revisions, the latest task list per document revision, revision-zero lists for task-only rounds, cell values, and execution attempts. [Session Requirements](../../packages/session/session-requirements/README.md) owns the fold and [the Notebook view](../../packages/client/ui-requirements/README.md) owns editing and historical display.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -755,6 +755,23 @@ Coordinates clarified requirement documents, executable Tasks, and serialized in
  * @returns the durable round identity and first event sequence.
  */
 @Remote('startRound') startRound(agent: Agent, request: RequirementRoundStartRequest): RequirementRoundStartResult
+
+/**
+ * Append user direction to the latest requirement round and queue a complete document revision.
+ * Completed task and validation records remain historical; the new document revision supersedes their source.
+ * @param agent - exact live Agent that receives the revision request.
+ * @param request - raw additional requirement and authoring language.
+ * @returns the existing round identity and appended event position.
+ */
+@Remote('appendRequirement') appendRequirement(agent: Agent, request: RequirementRoundAppendRequest): RequirementRoundStartResult
+
+/**
+ * Store one standalone pending Task round without queuing an Agent turn.
+ * @param agent - exact live Agent that owns the task.
+ * @param request - raw user task and authoring language.
+ * @returns the round and task identities for the new Notebook block.
+ */
+@Remote('startTaskRound') startTaskRound(agent: Agent, request: RequirementTaskRoundStartRequest): RequirementTaskRoundStartResult
 
 /**
  * Persist an editable requirement-document draft without starting Agent work.

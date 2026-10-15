@@ -64,6 +64,10 @@ function validate(event: SessionEvent, fail: InvariantFailure): void {
     if (!Number.isSafeInteger(data.round) || data.round < 1) {
       fail(`requirement/round at seq ${event.seq} has an invalid round number`)
     }
+    const kind: unknown = data.kind
+    if (kind !== undefined && kind !== 'task') {
+      fail(`requirement/round at seq ${event.seq} has an invalid kind`)
+    }
     if (!['analyzing', 'clarifying', 'awaiting-input', 'document-ready', 'generating-tasks', 'tasks-ready',
       'executing', 'reviewing', 'validating', 'completed', 'failed'].includes(data.status)) {
       fail(`requirement/round at seq ${event.seq} has an invalid status`)
@@ -167,7 +171,7 @@ function validate(event: SessionEvent, fail: InvariantFailure): void {
     const data = event.data
     const version: unknown = data.version
     if (version !== 1 || !Number.isSafeInteger(data.revision) || data.revision < 1 || data.roundId.trim() === ''
-      || !Number.isSafeInteger(data.documentRevision) || data.documentRevision < 1) {
+      || !Number.isSafeInteger(data.documentRevision) || data.documentRevision < 0) {
       fail(`requirement/task-list at seq ${event.seq} has an invalid payload`)
     }
     const ids = new Set<string>()
@@ -319,6 +323,7 @@ function validateRelations(events: readonly SessionEvent[], fail: InvariantFailu
   const versions = new Map<string, { readonly version: number; readonly messageId: string }>()
   const executions = new Map<string, 'processing' | 'completed' | 'failed'>()
   const rounds = new Map<string, number>()
+  const taskRounds = new Set<string>()
   const clarificationRevisions = new Map<string, number>()
   const documentRevisions = new Map<string, number>()
   const graphRevisions = new Map<string, number>()
@@ -331,17 +336,26 @@ function validateRelations(events: readonly SessionEvent[], fail: InvariantFailu
   const notes = new Map<string, RequirementNoteEvent>()
   for (const event of events) {
     if (event.type === 'requirement/round') {
-      const previous = rounds.get(String(event.data.roundId))
+      const key = String(event.data.roundId)
+      const previous = rounds.get(key)
       const expected = (previous ?? 0) + 1
       if (event.data.revision !== expected) {
         fail(`requirement/round at seq ${event.seq} violates revision order`)
       }
-      rounds.set(String(event.data.roundId), event.data.revision)
+      if (previous !== undefined && taskRounds.has(key) !== (event.data.kind === 'task')) {
+        fail(`requirement/round at seq ${event.seq} changes round kind`)
+      }
+      if (event.data.kind === 'task' && previous === undefined && event.data.status !== 'tasks-ready') {
+        fail(`requirement/round at seq ${event.seq} must start as a pending task round`)
+      }
+      rounds.set(key, event.data.revision)
+      if (event.data.kind === 'task') taskRounds.add(key)
       continue
     }
     if (event.type === 'requirement/clarification') {
       const key = String(event.data.roundId)
-      if (!rounds.has(key) || event.data.revision !== (clarificationRevisions.get(key) ?? 0) + 1) {
+      if (!rounds.has(key) || taskRounds.has(key)
+        || event.data.revision !== (clarificationRevisions.get(key) ?? 0) + 1) {
         fail(`requirement/clarification at seq ${event.seq} has no valid round or revision`)
       }
       clarificationRevisions.set(key, event.data.revision)
@@ -349,7 +363,8 @@ function validateRelations(events: readonly SessionEvent[], fail: InvariantFailu
     }
     if (event.type === 'requirement/document') {
       const key = String(event.data.roundId)
-      if (!rounds.has(key) || event.data.revision !== (documentRevisions.get(key) ?? 0) + 1) {
+      if (!rounds.has(key) || taskRounds.has(key)
+        || event.data.revision !== (documentRevisions.get(key) ?? 0) + 1) {
         fail(`requirement/document at seq ${event.seq} has no valid round or revision`)
       }
       documentRevisions.set(key, event.data.revision)
@@ -368,7 +383,8 @@ function validateRelations(events: readonly SessionEvent[], fail: InvariantFailu
           ? currentNodeIds.has(relation.target.requirementId)
           : graphNodes.get(targetRound)?.has(relation.target.requirementId) === true
       })
-      if (!rounds.has(key) || event.data.revision !== (graphRevisions.get(key) ?? 0) + 1
+      if (!rounds.has(key) || taskRounds.has(key)
+        || event.data.revision !== (graphRevisions.get(key) ?? 0) + 1
         || event.data.documentRevision !== documentRevisions.get(key) || !validRelation) {
         fail(`requirement/graph at seq ${event.seq} has no valid document or relation endpoint`)
       }
@@ -378,9 +394,18 @@ function validateRelations(events: readonly SessionEvent[], fail: InvariantFailu
     }
     if (event.type === 'requirement/task-list') {
       const key = String(event.data.roundId)
+      const validSource = taskRounds.has(key)
+        ? event.data.documentRevision === 0 && !documentRevisions.has(key)
+        : event.data.documentRevision > 0
+          && (documentRevisions.get(key) ?? 0) >= event.data.documentRevision
       if (!rounds.has(key) || event.data.revision !== (taskListRevisions.get(key) ?? 0) + 1
-        || (documentRevisions.get(key) ?? 0) < event.data.documentRevision) {
+        || !validSource) {
         fail(`requirement/task-list at seq ${event.seq} has no valid round or revision`)
+      }
+      if (taskRounds.has(key) && (event.data.tasks.some(task => task.requirementRefs.length !== 0)
+        || event.data.revision === 1 && (event.data.tasks.length !== 1
+          || event.data.tasks[0]?.kind !== 'implementation' || event.data.tasks[0].status !== 'pending'))) {
+        fail(`requirement/task-list at seq ${event.seq} has invalid standalone tasks`)
       }
       taskListRevisions.set(key, event.data.revision)
       taskIds.set(key, new Set(event.data.tasks.map(task => String(task.id))))

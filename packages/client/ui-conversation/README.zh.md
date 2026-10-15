@@ -15,6 +15,7 @@ kind: "package-reference"
 
 - [Conversation 组装](#conversation-assembly)
 - [Shell 与标准 props](#shell-and-standard-props)
+- [右侧 Chat 与提示词意图](#right-chat-and-prompt-intents)
 - [临时 composer entry](#temporary-composer-entries)
 - [模型体验](#model-experience)
 - [已知限制与暂缓事项](#known-limitations-and-deferred-work)
@@ -38,11 +39,18 @@ target package 通过 declaration merge 扩展 snapshot 与 Location data map，
 
 View 选择规则固定：有效且已注册的持久化选择优先，其次是已注册的 `requirements`，再其次是已注册的 `chat`，否则不渲染 View。新进入的 Session 会在需求插件可用时直接打开面向人的需求 Notebook。Shell 绝不选择第一个已注册 View。Shell phase 只组合 Session lifecycle 与 active-target set，不读取任何 target-specific snapshot。
 
-常驻 composer 在无 Session 与有 Session 之间保持挂载。无 Session 时，同一个编辑器表面保持 inert，Workspace picker 连接 blank Session。该表面是 shell 所有的 Lexical 编辑器：引用 chip 是携带 owner 序列化身份的原子 decorator 节点（提交时经 owner codec 展开），已认领的 slash command 保持为带样式的行首文本，文件夹文本引用以图标前缀携带文件夹图形，草稿的剪贴板投影镜像到逐 Session Conversation store。Queue 操作通过 scoped `ctx.conversation` service 寻址准确的 queue occurrence；queue 预览经 `ui-primitives` 的共享行内引用投影渲染已发送文本（wire 会话形式折叠为其标签），编辑态则展示字面发送文本。繁忙时 Enter 行为保存在 Host-backed `ui-conversation` settings namespace。
+未选择 Session 时，shell 在左侧 Hero 显示用于选择 Workspace 的 inert 输入框。新建的空白 Session 在 Hero 中保留可用的输入框。打开右侧 Chat 时，同一输入框移到右侧；首轮开始后，输入框归右侧 Chat，主对话记录区域不再显示输入控件。面板关闭或切换 Session 时，输入状态和草稿仍按 Session 保存。该表面是 shell 所有的 Lexical 编辑器：引用 chip 是携带 owner 序列化身份的原子 decorator 节点（提交时经 owner codec 展开），已认领的 slash command 保持为带样式的行首文本，文件夹文本引用以图标前缀携带文件夹图形，草稿的剪贴板投影镜像到逐 Session Conversation store。Queue 操作通过 scoped `ctx.conversation` service 寻址准确的 queue occurrence；queue 预览经 `ui-primitives` 的共享行内引用投影渲染已发送文本（wire 会话形式折叠为其标签），编辑态则展示字面发送文本。繁忙时 Enter 行为保存在 Host-backed `ui-conversation` settings namespace。
 
 默认发送采用乐观提交：Enter 在同一事务里清空草稿、occurrence 表和撤销历史，composer 保持 `plain`，发送作为 detached attempt 运行，发送期间可以继续输入和提交。`sendSession` 在序列化之前注册 Session 提交回显（`session.beginSubmission`），让出一帧使回显在点击当帧渲染，图片经浏览器原生 `FileReader` data-URL 路径编码。多个并发发送失败时，在用户编辑还原内容之前按提交顺序合并还原；命令提交保持冻结的 `submitting` 阶段。Detached attempt 持有图片 id，直到 admission 完成或 Session scope 销毁。回显以 observed 退休时，durable 图片缓存立即公开预览 URL，同时读取 admitted 附件，随后用规范化 URL 替换预览，并在两个 URL 各自停止使用后撤销。直接 subagent continuation 不创建本地回显，因为其 transport 不保留浏览器 request id。
 
 普通 composer 运行时，如果草稿为空或输入不可用，主指针操作保持为 Stop。可提交的文字或附件会把同一位置切换为 Queue Send；清空或成功提交草稿后恢复 Stop。繁忙态 Enter 设置继续选择 Queue 或 Steer 键盘操作。可继续 subagent 保留独立的 Send 与 Stop 操作（[决策](../../../.agents/notes/implemented/bug-fix/2026-08-20-running-draft-primary-send.zh.md)）。
+
+<a id="right-chat-and-prompt-intents"></a>
+## 右侧 Chat 与提示词意图
+
+右上角 Chat 按钮在 Better Sidebar 原有的可拖动宽度上打开完整 Chat 视图。关闭后恢复侧栏先前选中的文件、需求图谱或子代理视图。左侧 Chat 标签页和右侧 Chat 读取当前 Session 的同一份 binding 与记录；初始空白 Hero 在右侧 Chat 打开或首轮开始前保留入口输入框。进入对话后，左侧记录区不再显示输入框，右侧始终显示 Chat。`ctx.rightChat` 控制器只保存临时覆盖状态，不创建另一 Session 或事件源。
+
+提交普通提示词时会打开本地化的三选一弹窗：普通对话、提出需求或提出任务。取消保留草稿。普通对话走现有 Session 发送路径；需求和任务选择调用当前 Session 对应的 `sessionRequirements` Remote。任务选择只创建待执行的 Notebook Task，不会立即运行。命令与临时 composer takeover 保留原有分发路径；右侧输入框仍支持引用、附件、模型与权限控件、排队、转向和停止。
 
 <a id="temporary-composer-entries"></a>
 ## 临时 composer entry

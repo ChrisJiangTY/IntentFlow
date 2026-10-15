@@ -15,7 +15,7 @@ import {
   assertFinalWorkspaceSnapshot, assertFixtureInventory, fixtureUserPrompts, launchWebScaffold, recordFixture,
   watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot, writeComposerDraft } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, saveFailureShot, writeComposerDraft } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/permission-policy-context', import.meta.url))
 const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/permission-policy-context/session.jsonl', import.meta.url))
@@ -105,6 +105,7 @@ describe('web e2e: current sandbox policy reaches the model before tools', () =>
       const settled = scaffold.whenTurnSettled()
       await writeComposerDraft(page, input, PROMPTS[index] as string)
       await input.press('Enter')
+      await chooseNormalChatIntent(page)
       sessionId = await settled
       await input.waitFor({ timeout: 10_000 })
     }
@@ -115,6 +116,7 @@ describe('web e2e: current sandbox policy reaches the model before tools', () =>
     const settled = scaffold.whenTurnSettled()
     await writeComposerDraft(page, input, PROMPTS[3])
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     sessionId = await settled
 
     if (sessionId === undefined) throw new Error('permission-policy scenario completed no model turn')

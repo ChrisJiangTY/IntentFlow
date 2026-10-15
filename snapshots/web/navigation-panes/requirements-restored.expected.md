@@ -140,6 +140,11 @@
       - img
       - text: Edit note
     - paragraph: Saved after reconnect
+  - article:
+    - text: "[×]"
+    - img
+    - strong: Previous validation (requirements or tasks changed)
+    - paragraph: The HTML was generated; one ordinary mobile check failed, with no historical requirement regression.
   - group "Notebook zoom":
     - button "Zoom out Notebook": −
     - text: 100%

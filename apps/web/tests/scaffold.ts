@@ -443,6 +443,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     ? []
     : loadOverlayPatches('web e2e scaffold', options.extraOverlayPath)
   const composedRows = composeEntries([basePatches, surfacePatches, extraOverlayPatches])
+  const shippedRosterConfig = composedRows.find(row => row.id === 'agent-presets')?.config as Record<string, unknown> | undefined
   const webRuntimeConfig = composedRows.find(row => row.id === 'web-runtime')?.config as {
     surfaceContext?: boolean
   } | undefined
@@ -451,14 +452,13 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     ...basePatches,
     ...surfacePatches,
     ...extraOverlayPatches,
-    // The roster's shipped presets are the plugin's own, bundled inside
-    // `dsh-agent-presets` and prepended by it. Pin only the machine-local
-    // root away: a developer's own `~/.dsh/.agent-presets` must not be able
-    // to change a golden.
+    // Keep the shipped roster policy while pinning the machine-local root
+    // away: a developer's own presets must not change a golden.
     {
       id: 'agent-presets',
       config: {
-        default: 'standard',
+        ...shippedRosterConfig,
+        ...options.agentPresets,
         includeUserRoot: false,
       },
     },
@@ -535,11 +535,6 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       { id: 'directory-picker-browse', name: '@deepseek-ai/dsh-host-directory-picker-browse' },
       { id: 'ui-directory-picker-browse', name: '@deepseek-ai/dsh-client-ui-directory-picker-browse' },
     ] },
-    ...options.agentPresets === undefined
-      ? []
-      // Never the derived harness-home root: a developer's own presets must not
-      // be able to change a golden, whatever roots a scenario asks for.
-      : [{ id: 'agent-presets', config: { ...options.agentPresets, includeUserRoot: false } }],
     ...options.toolsMode === undefined ? [] : [{ id: 'tools', config: { mode: options.toolsMode } }],
     // The shipped Web bundle already owns both runners and the Cordis UI. This
     // scenario adds only the model-facing tools that exercise those services.

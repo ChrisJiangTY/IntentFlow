@@ -42,7 +42,7 @@ export function traceNodes(graph: SessionRequirementGraph): TraceNode[] {
 }
 
 /**
- * Compute reachable visible nodes; hidden expansion flags never expose descendants.
+ * Compute reachable visible nodes; document-free Tasks are roots of their own trace.
  * @param graph - Graph after round filtering.
  * @param expanded - Nodes whose direct children are disclosed.
  * @param revealed - Explicit search targets, including Tasks with no recorded requirement assignment.
@@ -52,7 +52,12 @@ export function visibleTraceKeys(
   graph: SessionRequirementGraph, expanded: ReadonlySet<string>, revealed: ReadonlySet<string> = new Set(),
 ): Set<string> {
   const available = new Set(traceNodes(graph).map(node => node.key))
-  const visible = new Set([...graph.documents.map(node => node.key), ...[...revealed].filter(key => available.has(key))])
+  const documentRounds = new Set(graph.documents.map(node => String(node.roundId)))
+  const visible = new Set([
+    ...graph.documents.map(node => node.key),
+    ...graph.tasks.filter(node => !documentRounds.has(String(node.roundId))).map(node => node.key),
+    ...[...revealed].filter(key => available.has(key)),
+  ])
   const queue = [...visible]
   for (const key of queue) {
     if (!expanded.has(key)) continue

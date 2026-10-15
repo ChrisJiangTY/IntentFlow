@@ -27,7 +27,7 @@ import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import WebSocket from 'ws'
-import { REPO_ROOT, connectFreshWorkspace, newEnglishPage, probeFreePort, requireDist, saveFailureShot } from './support.ts'
+import { REPO_ROOT, chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, openRightChat, probeFreePort, requireDist, saveFailureShot } from './support.ts'
 
 const WEB_SURFACE_PROMPT = fileURLToPath(new URL('./expected/web-runtime-context/web-surface-prompt.expected.md', import.meta.url))
 const authenticatedCookies = new Map<string, Promise<{ origin: string; cookie: string }>>()
@@ -301,7 +301,11 @@ describe('dsh web keyless CLI smoke', () => {
     const tsxLoader = pathToFileURL(createRequire(join(REPO_ROOT, 'package.json')).resolve('tsx')).href
     const child = spawn(
       process.execPath,
-      ['--import', tsxLoader, join(REPO_ROOT, 'apps/cli/src/bin.ts'), 'web', '--no-open', '--port', '0'],
+      [
+        '--import', tsxLoader, join(REPO_ROOT, 'apps/cli/src/bin.ts'), 'web',
+        '--patch', fileURLToPath(new URL('./pin-browse-picker.overlay.yml', import.meta.url)),
+        '--no-open', '--port', '0',
+      ],
       {
         cwd: sessionsDir,
         env: {
@@ -374,6 +378,42 @@ describe('dsh web keyless CLI smoke', () => {
         ))).toBe(true)
         expect(firstMappedSource(script, payload)).toMatch(/^\/packages\/.+\/src\//)
       }
+
+      const authenticated = await authenticatedWeb(readyUrl)
+      const sidebarChunk = await fetch(`${authenticated.origin}/sidebar/bundle/terminal.js`, {
+        headers: { cookie: authenticated.cookie },
+      })
+      expect(sidebarChunk.status).toBe(200)
+      expect(sidebarChunk.headers.get('content-type')).toContain('javascript')
+
+      const welcome = page.getByRole('button', { name: 'Continue', exact: true })
+      if (await welcome.isVisible()) await welcome.click()
+      const configureLater = page.getByRole('button', { name: 'Configure later' })
+      if (await configureLater.isVisible()) await configureLater.click()
+      const workspace = join(sessionsDir, 'workspace')
+      mkdirSync(workspace)
+      await page.getByRole('button', { name: 'Add workspace' }).click()
+      const directory = page.getByRole('dialog', { name: 'Select Workspace Directory' })
+      await directory.waitFor({ timeout: 10_000 })
+      await directory.getByRole('button', { name: 'Edit path' }).click()
+      const pathInput = directory.getByRole('textbox', { name: 'Edit path' })
+      await pathInput.fill(workspace)
+      await pathInput.press('Enter')
+      await directory.getByRole('button', { name: 'Open', exact: true }).click()
+      await openRightChat(page)
+      const rightChat = page.locator('[data-right-chat-panel]')
+      expect(await rightChat.isVisible()).toBe(true)
+      expect(await rightChat.locator('[data-composer-input]').count()).toBe(1)
+      const sidebar = page.locator('[data-dsh-panel]:not([data-dsh-bottom-panel])')
+      await page.getByRole('button', { name: 'Close Chat' }).click()
+      await rightChat.waitFor({ state: 'detached' })
+      const closedSidebarClass = await sidebar.getAttribute('class')
+      await page.getByRole('button', { name: 'Open Chat' }).click()
+      await rightChat.waitFor({ state: 'visible' })
+      expect((await page.locator('[data-dsh-bottom-panel]').getAttribute('class'))?.includes('bottomPanelHidden')).toBe(true)
+      await page.getByRole('button', { name: 'Close Chat' }).click()
+      await rightChat.waitFor({ state: 'detached' })
+      expect(await sidebar.getAttribute('class')).toBe(closedSidebarClass)
     } finally {
       await browser?.close()
       const closed = child.exitCode === null
@@ -750,6 +790,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || notReady.length > 0)('web smoke
     const prompt = `Please answer this request carefully: explain event sourcing in two sentences, ending with exactly ${ROUND_DONE_MARKER}.`
     await input.fill(prompt)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     // The first send must keep the session tree mounted; a near-empty body
     // reveals a duplicate runtime bundle with incompatible scope tags.
     await page.waitForFunction(() => document.body.innerText.length > 50, undefined, { timeout: 15_000 })
@@ -806,6 +847,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || notReady.length > 0)('web smoke
     const input = page.locator('[data-composer-input]').first()
     await input.fill('请用 bash 工具运行命令 echo w5marker 然后告诉我结果')
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     // Wait for the tool ROW, not response text (the reply echoes any marker).
     // Bash renders through the third-party sample registration. Match that
     // exact row: other clickable variants (for example Think disclosure)

@@ -20,7 +20,7 @@ import {
   launchWebScaffold, recordFixture, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
 import {
-  connectFreshWorkspace, expandTurnProcesses, newEnglishPage, saveFailureShot,
+  chooseNormalChatIntent, connectFreshWorkspace, expandTurnProcesses, newEnglishPage, saveFailureShot,
 } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/question-composer', import.meta.url))
@@ -152,11 +152,12 @@ describe('web e2e: resident question composer round trip', () => {
     const settled = scaffold.whenTurnSettled(MODE === 'record' ? 180_000 : 30_000)
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
 
     // The composer takes over the input area while the tool blocks. Its
     // presence is a STABLE waiting state (not a transient): it stays until
     // answered, so a plain waitFor is race-free.
-    const composer = page.locator('[data-question-key]')
+    const composer = page.locator('[data-right-chat-panel] [data-question-key]')
     await composer.waitFor({ timeout: MODE === 'record' ? 120_000 : 30_000 })
     await expect.poll(() => composer.getByText('Which color do you prefer?').count(), { timeout: 10_000 }).toBeGreaterThan(0)
 
@@ -167,7 +168,7 @@ describe('web e2e: resident question composer round trip', () => {
     if (MODE !== 'record') {
       // This golden owns the stable question surface; the answered-state
       // golden below owns the resulting transcript.
-      const snapshot = await captureStableAria(page, '[data-question-key]', scaffold.workspaceCwd)
+      const snapshot = await captureStableAria(page, '[data-right-chat-panel] [data-question-key]', scaffold.workspaceCwd)
       await compareOrRefreshGolden(UI_EXPECTED, snapshot, MODE)
       const sidebar = await captureStableAria(page, '[role="treeitem"][aria-selected="true"]', scaffold.workspaceCwd)
       await compareOrRefreshGolden(SIDEBAR_EXPECTED, sidebar, MODE)
@@ -266,7 +267,7 @@ describe('web e2e: resident question composer round trip', () => {
 
       // This golden now owns the composed state after a real A -> B -> A
       // Session cycle, not merely the state before the remount.
-      const snapshot = await captureStableAria(page, '[data-question-key]', scaffold.workspaceCwd)
+      const snapshot = await captureStableAria(page, '[data-right-chat-panel] [data-question-key]', scaffold.workspaceCwd)
       await compareOrRefreshGolden(COMPOSED_EXPECTED, snapshot, MODE)
     }
     await custom.press('Enter')
@@ -289,7 +290,7 @@ describe('web e2e: resident question composer round trip', () => {
     })
     await expect.poll(() => page.getByText('DONE', { exact: true }).count(), { timeout: 15_000 }).toBeGreaterThanOrEqual(1)
     // Composer gone; regular input restored.
-    expect(await page.locator('[data-question-key]').count()).toBe(0)
+    expect(await page.locator('[data-right-chat-panel] [data-question-key]').count()).toBe(0)
     expect(await selectedRow.locator('[data-state="warning"]').count()).toBe(0)
     await expect.poll(() => page.locator('[data-composer-input]').first().isEnabled(), { timeout: 10_000 }).toBe(true)
     // The default golden pins Compact mode before process disclosure.
@@ -298,12 +299,13 @@ describe('web e2e: resident question composer round trip', () => {
     // Keep the ask_user_question card's readable answer in the expanded golden
     // even though Compact mode hides the process by default.
     await expandTurnProcesses(page)
-    const answeredRow = page.getByRole('button', { name: 'Ask question 1/1 answered', exact: true })
+    const transcript = page.locator('[data-conversation-scroll]')
+    const answeredRow = transcript.getByRole('button', { name: 'Ask question 1/1 answered', exact: true })
     await answeredRow.click()
-    await page.getByText('Which color do you prefer?', { exact: true }).waitFor({ timeout: 10_000 })
-    expect(await page.getByText('Blue', { exact: true }).count()).toBeGreaterThanOrEqual(1)
-    expect(await page.getByText('Include accessibility notes', { exact: true }).count()).toBe(1)
-    expect(await page.getByText(/"answers"/).count()).toBe(0)
+    await transcript.getByText('Which color do you prefer?', { exact: true }).waitFor({ timeout: 10_000 })
+    expect(await transcript.getByText('Blue', { exact: true }).count()).toBeGreaterThanOrEqual(1)
+    expect(await transcript.getByText('Include accessibility notes', { exact: true }).count()).toBe(1)
+    expect(await transcript.getByText(/"answers"/).count()).toBe(0)
     const expanded = await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(ANSWERED_EXPANDED_EXPECTED, expanded, MODE)
     expect(tripwire.pageErrors).toEqual([])
@@ -326,7 +328,7 @@ describe('web e2e: resident question composer round trip', () => {
       questions: [{ id: 'free', header: 'More', question: 'Anything else?' }],
     })
 
-    const composer = page.locator('[data-question-key]')
+    const composer = page.locator('[data-right-chat-panel] [data-question-key]')
     await composer.waitFor({ timeout: 30_000 })
     const field = composer.getByRole('textbox')
     // The empty field reserves its two lines AND the textarea fills that frame:
@@ -348,7 +350,7 @@ describe('web e2e: resident question composer round trip', () => {
     // Settle the wait so teardown is not racing a pending question.
     await composer.getByRole('button', { name: 'Skip this question' }).click()
     expect(await asked).toEqual({ answers: [{ id: 'free', selected: [] }] })
-    await expect.poll(() => page.locator('[data-question-key]').count(), { timeout: 10_000 }).toBe(0)
+    await expect.poll(() => page.locator('[data-right-chat-panel] [data-question-key]').count(), { timeout: 10_000 }).toBe(0)
   }, 60_000)
 
 })

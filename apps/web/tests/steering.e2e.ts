@@ -15,7 +15,7 @@ import {
   compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/steering', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.jsonl')
@@ -100,11 +100,13 @@ describe('web e2e: mid-turn steering lands durably and visibly', () => {
       expect(fixtureUserPrompts(await readFile(FIXTURE, 'utf8'))).toEqual([PROMPT, STEER])
     }
     const input = page.locator('[data-composer-input]').first()
+    const transcript = page.locator('[data-conversation-scroll]')
     await input.waitFor({ timeout: 10_000 })
     const settled = scaffold.whenTurnSettled(MODE === 'record' ? 180_000 : 30_000)
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await expect.poll(
       () => sessionEvents.some(event => event.type === 'request/context'),
       { timeout: 10_000 },
@@ -115,23 +117,24 @@ describe('web e2e: mid-turn steering lands durably and visibly', () => {
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(STEER)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     const queuedRow = page.getByRole('listitem').filter({ hasText: STEER })
     await queuedRow.waitFor({ timeout: 10_000 })
     const steerButton = queuedRow.getByRole('button', { name: 'Steer queued message' })
     await expect.poll(() => steerButton.isEnabled(), { timeout: 10_000 }).toBe(true)
     await steerButton.click({ timeout: 10_000 })
-    const pendingSteering = page.locator('[data-pending-steering]').filter({ hasText: STEER })
+    const pendingSteering = transcript.locator('[data-pending-steering]').filter({ hasText: STEER })
     // A timeout while the Queue row remains means strict steer lost to a
     // closing window (`steer-unavailable`); inspect replay pacing first.
     await pendingSteering.waitFor({ timeout: 10_000 })
 
     // The blocked composer keeps steering pending long enough to observe the
     // Host-authoritative mirror before the loop admits it durably.
-    const composer = page.locator('[data-question-key]')
+    const composer = page.locator('[data-right-chat-panel] [data-question-key]')
     await composer.waitFor({ timeout: MODE === 'record' ? 120_000 : 30_000 })
 
     if (MODE !== 'record') {
-      expect(await page.getByText(STEER, { exact: true }).count()).toBe(1)
+      expect(await transcript.getByText(STEER, { exact: true }).count()).toBe(1)
       expect(await pendingSteering.count()).toBe(1)
       expect(await page.getByRole('button', { name: 'Edit queued message' }).count()).toBe(0)
       const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd)
@@ -166,10 +169,10 @@ describe('web e2e: mid-turn steering lands durably and visibly', () => {
 
     // Visible: the plain steering bubble plus the reply that obeys it
     // (steer text + final reply each contain the marker word).
-    await expect.poll(() => page.getByText(STEER, { exact: true }).count(), { timeout: 15_000 }).toBe(1)
+    await expect.poll(() => transcript.getByText(STEER, { exact: true }).count(), { timeout: 15_000 }).toBe(1)
     expect(await pendingSteering.count()).toBe(0)
-    await expect.poll(() => page.getByText('BANANA', { exact: false }).count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(2)
-    expect(await page.locator('[data-question-key]').count()).toBe(0)
+    await expect.poll(() => transcript.getByText('BANANA', { exact: false }).count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(2)
+    expect(await page.locator('[data-right-chat-panel] [data-question-key]').count()).toBe(0)
     // Settled golden: steer text between the question round trip and the
     // obeying reply, composer takeover gone.
     const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd)
@@ -218,22 +221,25 @@ describe('web e2e: composer shortcut steers directly', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-composer-steering'))
     expect(fixtureUserPrompts(await readFile(FIXTURE, 'utf8'))).toEqual([PROMPT, STEER])
     const input = page.locator('[data-composer-input]').first()
+    const transcript = page.locator('[data-conversation-scroll]')
     await input.waitFor({ timeout: 10_000 })
     const settled = scaffold.whenTurnSettled(30_000)
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await page.getByRole('button', { name: 'Stop generating' }).waitFor({ timeout: 10_000 })
 
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(STEER)
     await input.press('Meta+Enter')
+    await chooseNormalChatIntent(page)
     await expect.poll(() => input.textContent(), { timeout: 5_000 }).toBe('')
     expect(await page.locator('[data-queue-dock]').count()).toBe(0)
 
-    const composer = page.locator('[data-question-key]')
+    const composer = page.locator('[data-right-chat-panel] [data-question-key]')
     await composer.waitFor({ timeout: 30_000 })
-    const pendingSteering = page.locator('[data-pending-steering]').filter({ hasText: STEER })
+    const pendingSteering = transcript.locator('[data-pending-steering]').filter({ hasText: STEER })
     await pendingSteering.waitFor({ timeout: 10_000 })
     await composer.getByRole('radio', { name: 'Yes' }).click()
     await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
@@ -241,9 +247,9 @@ describe('web e2e: composer shortcut steers directly', () => {
 
     const steerEvents = claimedMessages(sessionEvents, STEER)
     expect(steerEvents).toHaveLength(1)
-    await expect.poll(() => page.getByText(STEER, { exact: true }).count(), { timeout: 15_000 }).toBe(1)
+    await expect.poll(() => transcript.getByText(STEER, { exact: true }).count(), { timeout: 15_000 }).toBe(1)
     expect(await pendingSteering.count()).toBe(0)
-    await expect.poll(() => page.getByText('BANANA', { exact: false }).count(), { timeout: 10_000 })
+    await expect.poll(() => transcript.getByText('BANANA', { exact: false }).count(), { timeout: 10_000 })
       .toBeGreaterThanOrEqual(2)
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
@@ -283,25 +289,28 @@ describe('web e2e: composer shortcut follows the swapped busy behavior', () => {
     await page.keyboard.press('Escape')
 
     const input = page.locator('[data-composer-input]').first()
+    const transcript = page.locator('[data-conversation-scroll]')
     const settled = scaffold.whenTurnSettled(30_000)
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await page.getByRole('button', { name: 'Stop generating' }).waitFor({ timeout: 10_000 })
 
     const queuedText = 'Queued by the complementary Cmd+Enter shortcut.'
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(queuedText)
     await input.press('Meta+Enter')
+    await chooseNormalChatIntent(page)
     const queuedRow = page.locator('[data-queue-dock]').getByRole('listitem').filter({ hasText: queuedText })
     await queuedRow.getByText(queuedText, { exact: true }).waitFor({ timeout: 10_000 })
-    expect(await page.locator('[data-pending-steering]').filter({ hasText: queuedText }).count()).toBe(0)
+    expect(await transcript.locator('[data-pending-steering]').filter({ hasText: queuedText }).count()).toBe(0)
     expect(claimedMessages(sessionEvents, queuedText)).toHaveLength(0)
 
     // Remove the asserted Queue row, then finish the recorded question turn
     // so replay teardown still proves that every fixture call was consumed.
     await queuedRow.getByRole('button', { name: 'Remove queued message' }).click()
-    const composer = page.locator('[data-question-key]')
+    const composer = page.locator('[data-right-chat-panel] [data-question-key]')
     await composer.waitFor({ timeout: 30_000 })
     await composer.getByRole('radio', { name: 'Yes' }).click()
     await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
@@ -345,6 +354,7 @@ describe('web e2e: empty-draft Cmd+Enter steers the whole queue', () => {
   it.skipIf(MODE === 'record')('queues two messages, then flushes both with an empty-draft Cmd+Enter', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-steer-all'))
     const input = page.locator('[data-composer-input]').first()
+    const transcript = page.locator('[data-conversation-scroll]')
     await input.waitFor({ timeout: 10_000 })
     const settled = scaffold.whenTurnSettled(30_000)
 
@@ -353,12 +363,15 @@ describe('web e2e: empty-draft Cmd+Enter steers the whole queue', () => {
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(STEER_ONE)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(STEER_TWO)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     const dock = page.locator('[data-queue-dock]')
     // Both messages queued: the two-row dock shows a collapsed count header,
     // and Playwright text matching skips the hidden rows — expand the list,
@@ -367,26 +380,26 @@ describe('web e2e: empty-draft Cmd+Enter steers the whole queue', () => {
     await dock.getByRole('button').click()
     await dock.getByText(STEER_ONE, { exact: true }).waitFor({ timeout: 10_000 })
     await dock.getByText(STEER_TWO, { exact: true }).waitFor({ timeout: 10_000 })
-    expect(await page.locator('[data-pending-steering]').count()).toBe(0)
+    expect(await transcript.locator('[data-pending-steering]').count()).toBe(0)
 
     // Empty draft + Cmd+Enter: both queued rows steer in FIFO order, the dock
     // empties, and the pending steering renders at the conversation tail.
     await input.press('Meta+Enter')
     await expect.poll(
-      () => page.locator('[data-pending-steering]').filter({ hasText: /BANANA|ORANGE/ }).count(),
+      () => transcript.locator('[data-pending-steering]').filter({ hasText: /BANANA|ORANGE/ }).count(),
       { timeout: 10_000 },
     ).toBe(2)
     expect(await page.locator('[data-queue-dock]').count()).toBe(0)
     // The reasoning row streams independently of the steering handoff. Wait
     // for the block to settle so the mid snapshot does not race its transient
     // visually-hidden Running label while the question keeps the turn open.
-    await page.locator('[data-variant="think"][data-state="ok"]').first().waitFor({ timeout: 10_000 })
+    await transcript.locator('[data-variant="think"][data-state="ok"]').first().waitFor({ timeout: 10_000 })
     const mid = await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(STEER_ALL_MID, mid, MODE)
 
     // Answer the question; the step closes, the loop drains both steerings
     // into one next-step request, and the final reply obeys both markers.
-    const composer = page.locator('[data-question-key]')
+    const composer = page.locator('[data-right-chat-panel] [data-question-key]')
     await composer.waitFor({ timeout: 30_000 })
     await composer.getByRole('radio', { name: 'Yes' }).click()
     await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
@@ -398,9 +411,9 @@ describe('web e2e: empty-draft Cmd+Enter steers the whole queue', () => {
     expect(second).toHaveLength(1)
     expect(assistantText(sessionEvents)).toContain('BANANA')
     expect(assistantText(sessionEvents)).toContain('ORANGE')
-    await expect.poll(() => page.getByText(STEER_ONE, { exact: true }).count(), { timeout: 15_000 }).toBe(1)
-    await expect.poll(() => page.getByText(STEER_TWO, { exact: true }).count(), { timeout: 15_000 }).toBe(1)
-    expect(await page.locator('[data-pending-steering]').count()).toBe(0)
+    await expect.poll(() => transcript.getByText(STEER_ONE, { exact: true }).count(), { timeout: 15_000 }).toBe(1)
+    await expect.poll(() => transcript.getByText(STEER_TWO, { exact: true }).count(), { timeout: 15_000 }).toBe(1)
+    expect(await transcript.locator('[data-pending-steering]').count()).toBe(0)
     const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(STEER_ALL_SETTLED, snapshot, MODE)
     const expanded = await captureExpandedTurnProcessAria(

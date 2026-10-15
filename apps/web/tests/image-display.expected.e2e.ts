@@ -85,6 +85,7 @@ it('accepts pasted images into the composer rail in order and removes them', asy
   const start = tree.querySelector<HTMLButtonElement>('button[aria-label="New session in fixture"]')
   if (start === null) throw new Error('fixture Workspace new-session action missing')
   fireEvent.click(start)
+  fireEvent.click(await screen.findByRole('button', { name: 'Open Chat' }))
 
   // Image-only send arming is pinned at package level (input-bar.spec.tsx);
   // this assembled lane pins the intake chain over the built graph.
@@ -163,6 +164,7 @@ it('accepts a whole-page drop under the limits-labeled overlay and refuses an ov
   const start = tree.querySelector<HTMLButtonElement>('button[aria-label="New session in fixture"]')
   if (start === null) throw new Error('fixture Workspace new-session action missing')
   fireEvent.click(start)
+  fireEvent.click(await screen.findByRole('button', { name: 'Open Chat' }))
   const textarea = await waitFor(() => {
     const surface = document.querySelector<HTMLElement>(
       '[data-composer-input][data-placeholder="Describe what you want to build... / commands, @ files or sessions"]',
@@ -217,6 +219,7 @@ it('renders a host dimension rejection with the projected 2000px limit', async (
   const start = tree.querySelector<HTMLButtonElement>('button[aria-label="New session in fixture"]')
   if (start === null) throw new Error('fixture Workspace new-session action missing')
   fireEvent.click(start)
+  fireEvent.click(await screen.findByRole('button', { name: 'Open Chat' }))
 
   const textarea = await waitFor(() => {
     const surface = document.querySelector<HTMLElement>(

@@ -109,6 +109,63 @@
       }
     },
     {
+      "name": "clarify_requirements",
+      "description": "Ask one batch of Chinese clarification questions for the active Requirement Notebook round. Use only for user-owned choices or material ambiguity that repository inspection cannot resolve.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "questions": {
+            "type": "array",
+            "description": "One to the configured maximum related clarification questions.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable id echoed in the answer."
+                },
+                "question": {
+                  "type": "string",
+                  "description": "One concise Chinese question."
+                },
+                "header": {
+                  "type": "string",
+                  "description": "Optional short Chinese heading."
+                },
+                "options": {
+                  "type": "array",
+                  "description": "Two or three mutually exclusive choices; put the recommended option first.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "question"
+              ]
+            }
+          }
+        },
+        "required": [
+          "questions"
+        ]
+      }
+    },
+    {
       "name": "cordis_define",
       "description": "Define an immutable Cordis Package. For a new Plugin, use kind:\"new\" and provide only a semantic prefix of 3–6 lowercase English letters; the Host returns the final pluginId and packageId. To modify an existing Plugin, use kind:\"existing\" with its exact pluginId to append a Package without overwriting older versions. Provide at least one of code.host and code.client. Each value is a plain JavaScript function body that returns a Cordis Plugin; no TypeScript, JSX, or import transformation occurs. Query Inspect before depending on a Service, Event, Builtin, Slot, or token. Define only validates parameters and syntax and records source: it does not request approval, execute apply, or change currentPackageId. On success, call cordis_run with the returned IDs.",
       "parameters": {
@@ -664,6 +721,118 @@
         "required": [
           "description",
           "prompt"
+        ]
+      }
+    },
+    {
+      "name": "submit_requirement_tasks",
+      "description": "Commit ordered implementation and checkpoint tasks from the active Chinese requirement document. Each task verifies its assigned criteria; together they cover every acceptance criterion.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "description": "At least one implementation or checkpoint task, in dependency order. Each task includes its own verification.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "implementation",
+                    "checkpoint"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Concise Chinese title for the top-level task block."
+                },
+                "markdown": {
+                  "type": "string",
+                  "description": "Complete Chinese Markdown checklist with concrete implementation and verification steps for this task."
+                },
+                "requirement_refs": {
+                  "type": "array",
+                  "description": "Acceptance criterion ids implemented or verified by this task, for example [\"1.1\", \"2.3\"].",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "title",
+                "markdown",
+                "requirement_refs"
+              ]
+            }
+          }
+        },
+        "required": [
+          "tasks"
+        ]
+      }
+    },
+    {
+      "name": "submit_requirements_document",
+      "description": "Commit the complete Chinese requirement document for the active Requirement Notebook round after all material ambiguity is resolved.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "Read-only Chinese round summary of at most 30 characters."
+          },
+          "markdown": {
+            "type": "string",
+            "description": "Complete Chinese Markdown using # 需求文档, ## 简介, and ## 需求."
+          },
+          "relations": {
+            "type": "array",
+            "description": "Requirement dependencies and explicit refinement or supersession links. Submit [] when no relation exists.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source_requirement_id": {
+                  "type": "string",
+                  "description": "Top-level requirement number in the document being submitted, for example \"2\"."
+                },
+                "target_requirement_id": {
+                  "type": "string",
+                  "description": "Top-level prerequisite or prior requirement number."
+                },
+                "target_round_id": {
+                  "type": "string",
+                  "description": "Existing ROUND-NN identity for refines or supersedes; omit for a dependency in the current round."
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "depends-on",
+                    "refines",
+                    "supersedes"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Concise Chinese explanation of the relation."
+                }
+              },
+              "required": [
+                "source_requirement_id",
+                "target_requirement_id",
+                "kind",
+                "reason"
+              ]
+            }
+          }
+        },
+        "required": [
+          "summary",
+          "markdown",
+          "relations"
         ]
       }
     },

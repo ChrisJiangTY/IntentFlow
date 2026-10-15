@@ -16,7 +16,7 @@ import {
   webSnapshotMode,
   type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot, writeComposerDraft } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, newEnglishPage, saveFailureShot, writeComposerDraft } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/streaming-fence-highlight', import.meta.url))
 const MID_EXPECTED = fileURLToPath(new URL('./snapshots/streaming-fence-highlight/mid-stream.expected.md', import.meta.url))
@@ -115,9 +115,10 @@ describe.skipIf(MODE === 'record')('web e2e: streaming code-fence highlighting',
     const settled = scaffold.whenTurnSettled(30_000)
     await writeComposerDraft(page, input, PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     await adapter.paused
 
-    const streaming = page.locator('[data-streaming="true"]')
+    const streaming = page.locator('[data-conversation-scroll] [data-streaming="true"]')
     await streaming.waitFor({ timeout: 10_000 })
     const block = streaming.locator('.md-code-block').filter({ hasText: 'const first' })
     await block.locator('pre.shiki span[style]').first().waitFor({ timeout: 10_000 })
@@ -135,8 +136,8 @@ describe.skipIf(MODE === 'record')('web e2e: streaming code-fence highlighting',
 
     adapter.continue()
     await settled
-    await expect.poll(() => page.locator('[data-streaming="true"]').count(), { timeout: 10_000 }).toBe(0)
-    const settledBlock = page.locator('.md-code-block').filter({ hasText: 'const first' })
+    await expect.poll(() => page.locator('[data-conversation-scroll] [data-streaming="true"]').count(), { timeout: 10_000 }).toBe(0)
+    const settledBlock = page.locator('[data-conversation-scroll] .md-code-block').filter({ hasText: 'const first' })
     await settledBlock.locator('pre.shiki').waitFor({ timeout: 10_000 })
     expect(await fenceTree(settledBlock)).toEqual(midTree)
     expect(tripwire.pageErrors).toEqual([])

@@ -147,9 +147,9 @@ function packageNameOf(specifier: string): string {
 
 /**
  * Collect module-specifier `name` fields from parsed entry rows, recursively
- * through nested `config` row lists (groups). Builtin rows (`cordis:group`)
- * and preset metadata documents carry names that are not module specifiers;
- * only names with a scope or a path separator count.
+ * through nested `config` row lists of groups. Builtin rows (`cordis:group`)
+ * and preset metadata documents do not name packages. Both scoped and bare
+ * package names count, including packages added by a deployment bundle.
  * @param rows - Parsed YAML value; anything but an entry array is ignored.
  * @param names - Package names collected so far.
  */
@@ -157,11 +157,15 @@ function moduleNamesOf(rows: unknown, names: Set<string>): void {
   if (!Array.isArray(rows)) return
   for (const row of rows) {
     if (typeof row !== 'object' || row === null) continue
-    const { name, config } = row as { name?: unknown; config?: unknown }
-    if (typeof name === 'string' && (name.startsWith('@') || name.includes('/'))) {
+    const { name, group, config } = row as { name?: unknown; group?: unknown; config?: unknown }
+    if (group === true) {
+      moduleNamesOf(config, names)
+      continue
+    }
+    if (typeof name === 'string' && !name.startsWith('cordis:')
+      && !name.startsWith('.') && !name.startsWith('/') && !name.startsWith('file:')) {
       names.add(packageNameOf(name))
     }
-    moduleNamesOf(config, names)
   }
 }
 
@@ -213,6 +217,28 @@ function resolveDependency(fromDirectory: string, name: string): string | undefi
     if (parent === directory) return undefined
     directory = parent
   }
+}
+
+/**
+ * Resolve a top-level plugin whose package is installed below a workspace
+ * bundle rather than the repository root. Only runtime dependencies declare a
+ * candidate; multiple installed variants would make the image ambiguous.
+ * @param name - Bare or scoped package named by a Loader row.
+ * @param options - Package index and resolution root.
+ * @returns The unique installed package directory, or undefined.
+ */
+function resolveRosterDependency(name: string, options: PackOptions): string | undefined {
+  const installed = new Set<string>()
+  for (const workspace of options.workspaces.values()) {
+    const dependencies = readJson(join(workspace, 'package.json')).dependencies
+    if (typeof dependencies !== 'object' || dependencies === null || !Object.hasOwn(dependencies, name)) continue
+    const directory = resolveDependency(workspace, name)
+    if (directory !== undefined) installed.add(directory)
+  }
+  if (installed.size > 1) {
+    throw new Error(`vfs image: roster package ${name} resolves to multiple installed variants`)
+  }
+  return installed.values().next().value
 }
 
 /**
@@ -285,10 +311,9 @@ interface SweepOutcome {
  * Keep only the JavaScript the worker can reach, transforming it on the way.
  *
  * Roots are the export faces of every materialized workspace and vendored
- * package — the harness addresses them by constructed name at runtime (Loader
- * rows, typert faces, delegating providers such as `-auto` pickers), so the
- * sweep prunes files only inside third-party packages — plus the worker
- * assembly's own image entries. Resolution runs the runtime loader's own
+ * package — the harness addresses them by constructed name at runtime — and
+ * the main entry of every external package named by a Loader row. Resolution
+ * runs the runtime loader's own
  * algorithm over the candidate set, so pack-time reachability and boot-time
  * resolution cannot drift, and a request that resolves nowhere — an undeclared
  * or missing dependency — fails the pack rather than the boot.
@@ -299,7 +324,7 @@ interface SweepOutcome {
  * this pass cannot see.
  * @param files - Candidate entries after the publish-view filter.
  * @param options - Pack options carrying the sweep roots.
- * @param rootPackages - Roster package names from the workspace.
+ * @param rootPackages - Materialized workspace packages and Loader row packages.
  * @param root - Virtual root the candidates mount under.
  * @returns The final entries plus the sweep's counts.
  */
@@ -386,7 +411,7 @@ function sweepImage(
     }
     // Every non-wildcard face is a root; a face resolving onto a page asset is
     // kept untransformed below rather than excluded here.
-    const subpaths = manifest.exports === undefined
+    const subpaths = manifest.exports === undefined || !options.workspaces.has(name)
       ? ['.']
       : Object.keys(manifest.exports).filter(key => key.startsWith('.') && !key.includes('*'))
     for (const subpath of subpaths) {
@@ -517,6 +542,7 @@ function materialize(
     const { name, from } = entry
     if (packages.has(name) || replaced.has(name)) continue
     const directory = options.workspaces.get(name) ?? resolveDependency(from, name)
+      ?? (from === options.resolveFrom ? resolveRosterDependency(name, options) : undefined)
     if (directory === undefined) {
       missing.push(`${name} (from ${relative(options.resolveFrom, from) || '.'})`)
       continue
@@ -609,7 +635,10 @@ export function packVfsImage(options: PackOptions): PackResult {
   for (const tree of configTrees) collectTree(tree.directory, files, tree.mount, relativePath => !excluded(relativePath))
 
   const executables = dropExecutables(files)
-  const rootPackages = [...packages.keys()].filter(name => options.workspaces.has(name))
+  const rootPackages = [...new Set([
+    ...[...packages.keys()].filter(name => options.workspaces.has(name)),
+    ...roster,
+  ])]
   const { swept, transform, javascriptEntries, droppedJavascriptEntries, unresolvedExternalRequests } =
     sweepImage(files, options, rootPackages, root)
 

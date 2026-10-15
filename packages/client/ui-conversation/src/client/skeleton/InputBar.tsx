@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
+  IconPlusOutline16, IconWarningOutline16, Modal, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the `plan` projection key merge (the TodoDock posture — the
 // composer reads a host-computed value; the domain owns the key).
@@ -29,6 +29,7 @@ import type {} from '@deepseek-ai/dsh-goal/client'
 // api-remotes import already places it in every client program.
 import type { Translate } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ComposerBarProps } from '../contract/slots.ts'
+import type { InputSubmitMode } from '../contract/composer-submission.ts'
 import { ComposerContentEditable } from '../input/editor/ComposerContentEditable.tsx'
 import { DecoratorPortals } from '../input/editor/DecoratorPortals.tsx'
 import { registerComposerKeymap } from '../input/editor/keymap.ts'
@@ -45,7 +46,7 @@ export function InputBar({
   renderSlot, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
-  placeholder, accessory, overlay, leftItems, rightItems, footer, submitOverride,
+  placeholder, accessory, overlay, leftItems, rightItems, footer, submitOverride, submitIntent,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
@@ -74,12 +75,21 @@ export function InputBar({
   // prompt failures): the seq keys the Toast so an identical repeated message
   // restarts the hold-then-fade cycle instead of reusing the faded one.
   const [toast, setToast] = useState<{ seq: number; text: string } | null>(null)
+  const [pendingIntent, setPendingIntent] = useState<{
+    sessionId: typeof sessionId
+    draft: string
+    mode: InputSubmitMode | null
+  } | null>(null)
+  const [intentBusy, setIntentBusy] = useState(false)
+  const currentSessionId = useRef(sessionId)
+  currentSessionId.current = sessionId
   const toastSeq = useRef(0)
   const showToast = useCallback((text: string) => {
     toastSeq.current += 1
     setToast({ seq: toastSeq.current, text })
   }, [])
   const dismissToast = useCallback(() => { setToast(null) }, [])
+  useEffect(() => { setPendingIntent(null); setIntentBusy(false) }, [sessionId])
   // The deployment's image-intake limits (absent while no attachment service
   // is composed — the pre-check below then defers entirely to the host).
   const imageLimits = useProjection('imageLimits')
@@ -248,11 +258,39 @@ export function InputBar({
   // registration survives re-renders without re-arming per keystroke.
   const gate = useRef({
     locked, machineBusy, canSteerQueue, running, subagent, resolveSubmitMode, intakeImages,
-    draft, submitOverride, inputActions,
+    draft, submitOverride, submitIntent, inputActions,
   })
   gate.current = {
     locked, machineBusy, canSteerQueue, running, subagent, resolveSubmitMode, intakeImages,
-    draft, submitOverride, inputActions,
+    draft, submitOverride, submitIntent, inputActions,
+  }
+
+  const promptNeedsChoice = (text: string): boolean =>
+    submitIntent !== undefined && text.trim() !== '' && !text.trimStart().startsWith('/')
+
+  const chooseIntent = (intent: 'chat' | 'requirement' | 'task'): void => {
+    const pending = pendingIntent
+    if (pending === null || pending.sessionId !== sessionId || intentBusy) return
+    if (intent === 'chat') {
+      setPendingIntent(null)
+      if (pending.mode === null) inputActions?.submit()
+      else keyboard?.submit(pending.mode)
+      return
+    }
+    if (submitIntent === undefined) return
+    setIntentBusy(true)
+    void submitIntent(pending.draft, intent).then(
+      (accepted) => {
+        if (currentSessionId.current !== pending.sessionId) return
+        if (accepted && gate.current.draft === pending.draft) inputActions?.setDraft('')
+        setPendingIntent(current => current === pending ? null : current)
+      },
+      (error: unknown) => {
+        if (currentSessionId.current !== pending.sessionId) return
+        showToast(error instanceof Error ? error.message : String(error))
+        setPendingIntent(current => current === pending ? null : current)
+      },
+    ).finally(() => { if (currentSessionId.current === pending.sessionId) setIntentBusy(false) })
   }
 
   const submitActiveView = (): boolean => {
@@ -284,6 +322,14 @@ export function InputBar({
           keyboard.steerQueue()
           return
         }
+        if (g.submitIntent !== undefined && g.draft.trim() !== '' && !g.draft.trimStart().startsWith('/')) {
+          setPendingIntent({
+            sessionId,
+            draft: g.draft,
+            mode: g.resolveSubmitMode(g.running, accelerated ? 'accelerated' : 'enter', g.subagent === null),
+          })
+          return
+        }
         if (g.submitOverride !== undefined && !g.locked && !g.machineBusy && g.draft.trim() !== '') {
           submitActiveView()
           return
@@ -300,7 +346,7 @@ export function InputBar({
         keyboard.paste(text)
       },
     })
-  }, [editor, keyboard])
+  }, [editor, keyboard, sessionId])
 
   // Button presses steal focus from the editor; suppress at mousedown so
   // typing continues seamlessly. Lexical's focus() carries preventScroll and
@@ -339,6 +385,10 @@ export function InputBar({
     if (inputActions === undefined) return // absent machine: the button is disabled
     /* v8 ignore next -- defensive: the primary button is disabled while empty||disabled, so a click cannot reach the false arm. */
     if (!empty && !disabled && !machineBusy) {
+      if (promptNeedsChoice(draft)) {
+        setPendingIntent({ sessionId, draft, mode: null })
+        return
+      }
       if (submitOverride !== undefined) {
         submitActiveView()
         return
@@ -387,6 +437,20 @@ export function InputBar({
 
   return (
     <div className={clsx(css.root, variant === 'hero' && css.hero)}>
+      <Modal
+        open={pendingIntent !== null}
+        onClose={() => { if (!intentBusy) setPendingIntent(null) }}
+        title={t('intent.title')}
+        closeLabel={t('intent.close')}
+      >
+        <div className={css.intentChoices}>
+          <button type="button" data-intent-choice="chat" disabled={intentBusy} onClick={() => { chooseIntent('chat') }}>{t('intent.chat')}</button>
+          <button type="button" data-intent-choice="requirement" disabled={intentBusy || attachments.length > 0} onClick={() => { chooseIntent('requirement') }}>{t('intent.requirement')}</button>
+          <button type="button" data-intent-choice="task" disabled={intentBusy || attachments.length > 0} onClick={() => { chooseIntent('task') }}>{t('intent.task')}</button>
+          {attachments.length > 0 && <p>{t('intent.imagesChatOnly')}</p>}
+          <button type="button" data-intent-choice="cancel" disabled={intentBusy} onClick={() => { setPendingIntent(null) }}>{t('intent.cancel')}</button>
+        </div>
+      </Modal>
       {toast !== null && (
         <Toast
           key={toast.seq}

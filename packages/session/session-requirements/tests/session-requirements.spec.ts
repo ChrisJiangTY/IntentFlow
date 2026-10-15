@@ -290,6 +290,171 @@ async function finishTurn(ctx: Context, session: Session, message: UserMessage, 
 }
 
 describe('session requirements document pipeline', () => {
+  it('creates a document-free task round, keeps it pending, and runs it through the normal task lifecycle', async () => {
+    let taskId = ''
+    const { ctx, agent, session, followup } = await setup({ review: () => reviewRun(taskId) })
+    const started = ctx.sessionRequirements.startTaskRound(agent, {
+      input: '修复导航栏的键盘操作。', language: 'zh',
+    })
+    taskId = started.taskId
+
+    expect(started).toMatchObject({ roundId: 'ROUND-01', round: 1 })
+    expect(followup).not.toHaveBeenCalled()
+    expect(session.events.map(event => event.type)).toEqual(['requirement/round', 'requirement/task-list'])
+    expect(session.deriveMessages()).toEqual([])
+    expect(session.events.some(event => event.type === 'requirement/document')).toBe(false)
+    expect(session.events.findLast(event => event.type === 'requirement/round')).toMatchObject({
+      data: { kind: 'task', status: 'tasks-ready' },
+    })
+    expect(session.events.findLast(event => event.type === 'requirement/task-list')).toMatchObject({
+      data: { documentRevision: 0, tasks: [{ id: taskId, status: 'pending', requirementRefs: [] }] },
+    })
+
+    ctx.sessionRequirements.runTask(agent, { roundId: started.roundId, taskId: started.taskId })
+    const message = followup.mock.calls[0]?.[0]
+    if (message === undefined) throw new Error('expected task message')
+    const content = message.content[0]
+    expect(content?.type === 'text' ? content.text : '').toContain('独立任务')
+    expect(content?.type === 'text' ? content.text : '').toContain('修复导航栏的键盘操作。')
+    expect(session.deriveMessages()).toEqual([])
+    await finishTurn(ctx, session, message, 1)
+    await vi.waitFor(() => {
+      expect(session.events.findLast(event => event.type === 'requirement/round')).toMatchObject({
+        data: { kind: 'task', status: 'completed' },
+      })
+    })
+    expect(session.events.some(event => event.type === 'requirement/document')).toBe(false)
+  })
+
+  it('edits and withdraws standalone tasks without a requirement document', async () => {
+    const { ctx, agent, session } = await setup()
+    const started = ctx.sessionRequirements.startTaskRound(agent, { input: '修复导航栏。', language: 'zh' })
+    const added = ctx.sessionRequirements.addTask(agent, {
+      roundId: started.roundId, title: '验证导航栏', summary: '确认键盘可以操作。', statement: '验证导航栏键盘操作。',
+    })
+    const edited = await ctx.sessionRequirements.editTask(agent, {
+      roundId: started.roundId, taskId: started.taskId,
+      title: '修复键盘操作', summary: '修复导航栏的键盘操作。', statement: '修复导航栏的键盘操作。',
+      humanEdit: false,
+    })
+    expect(edited.task?.status).toBe('pending')
+    ctx.sessionRequirements.withdrawTask(agent, { roundId: started.roundId, taskId: added.taskId })
+    expect(session.events.findLast(event => event.type === 'requirement/task-list')).toMatchObject({
+      data: { documentRevision: 0, tasks: [{ id: started.taskId, status: 'pending' }, { id: added.taskId, status: 'withdrawn' }] },
+    })
+  })
+
+  it('appends to a completed requirement round and permits task regeneration for the new document', async () => {
+    const { ctx, agent, session, followup, tools } = await setup()
+    appendRoundArtifacts(session)
+    session.append('requirement/task-execution', {
+      version: 1, revision: 1, roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never,
+      messageId: MessageId('previous-task'), status: 'completed', turn: 1,
+    })
+    session.append('requirement/round', {
+      version: 1, revision: 2, roundId: 'ROUND-01' as never, round: 1,
+      sourceMessageId: MessageId('source-1'), language: 'zh', input: '创建页面。', status: 'completed',
+    })
+    const taskRound = ctx.sessionRequirements.startTaskRound(agent, { input: '检查页面样式。', language: 'zh' })
+    expect(taskRound.roundId).toBe('ROUND-02')
+    const appended = ctx.sessionRequirements.appendRequirement(agent, {
+      input: '新增键盘操作要求。', language: 'zh',
+    })
+    expect(appended).toMatchObject({ roundId: 'ROUND-01', round: 1 })
+    expect(followup).toHaveBeenCalledOnce()
+    const message = followup.mock.calls[0]?.[0]
+    if (message === undefined) throw new Error('expected revision message')
+    const content = message.content[0]
+    const prompt = content?.type === 'text' ? content.text : ''
+    expect(prompt).toContain('当前完整需求文档 v1')
+    expect(prompt).toContain('新增键盘操作要求。')
+    expect(prompt).toContain('保留仍然有效的现有需求')
+    const revision = session.events.findLast(event => event.type === 'requirement/round')
+    expect(revision).toMatchObject({
+      data: { roundId: 'ROUND-01', revision: 3, status: 'analyzing' },
+    })
+    if (revision?.type !== 'requirement/round') throw new Error('expected requirement round revision')
+    expect(revision.data.input).toContain('新增键盘操作要求。')
+    expect(() => ctx.sessionRequirements.runTask(agent, {
+      roundId: 'ROUND-01' as never, taskId: 'TASK-FINAL' as never,
+    })).toThrow('revision is still in progress')
+
+    session.append('turn/start', { turn: 2 })
+    emit(ctx, session, session.append('user/message', message, { surfaceOp: 'append' }))
+    await Promise.resolve()
+    const submit = tools.get('submit_requirements_document')
+    if (submit === undefined) throw new Error('expected requirement document tool')
+    const revisedMarkdown = documentMarkdown.replace(
+      '2. 当用户提交表单时，系统应当显示结果。',
+      '2. 当用户提交表单时，系统应当显示结果。\n3. 当用户使用键盘时，系统应当支持导航栏操作。',
+    )
+    await submit.execute({ summary: '完善页面键盘操作', markdown: revisedMarkdown, relations: [] }, exec(agent))
+    expect(session.events.findLast(event => event.type === 'requirement/document')).toMatchObject({
+      data: { revision: 2, markdown: revisedMarkdown },
+    })
+    expect(() => ctx.sessionRequirements.runTask(agent, {
+      roundId: 'ROUND-01' as never, taskId: 'TASK-FINAL' as never,
+    })).toThrow('generated tasks are stale')
+    expect(() => ctx.sessionRequirements.generateTasks(agent, {
+      roundId: 'ROUND-01' as never, documentRevision: 2,
+    })).not.toThrow()
+  })
+
+  it('starts a requirement round when none exists and continues one without a document after input resumes', async () => {
+    const { ctx, agent, session, followup } = await setup()
+    const first = ctx.sessionRequirements.appendRequirement(agent, { input: '创建页面。', language: 'zh' })
+    expect(first).toMatchObject({ roundId: 'ROUND-01', round: 1 })
+    session.append('requirement/round', {
+      version: 1, revision: 2, roundId: first.roundId, round: first.round,
+      sourceMessageId: followup.mock.calls[0]![0].id,
+      language: 'zh', input: '创建页面。', status: 'awaiting-input',
+    })
+    const resumed = ctx.sessionRequirements.appendRequirement(agent, { input: '加入搜索。', language: 'zh' })
+    expect(resumed.roundId).toBe(first.roundId)
+    const message = followup.mock.calls[1]?.[0]
+    const content = message?.content[0]
+    expect(content?.type === 'text' ? content.text : '').toContain('本轮尚无需求文档')
+  })
+
+  it('retains a failed appended input when the Agent cannot accept its followup', async () => {
+    const { ctx, agent, session, followup } = await setup()
+    appendRoundArtifacts(session)
+    followup.mockImplementation(() => { throw new Error('inbox unavailable') })
+    expect(() => ctx.sessionRequirements.appendRequirement(agent, {
+      input: '加入键盘操作。', language: 'zh',
+    })).toThrow('inbox unavailable')
+    const failed = session.events.findLast(event => event.type === 'requirement/round')
+    expect(failed).toMatchObject({ data: { roundId: 'ROUND-01', status: 'failed' } })
+    if (failed?.type !== 'requirement/round') throw new Error('expected failed requirement revision')
+    expect(failed.data.input).toContain('加入键盘操作。')
+    expect(() => ctx.sessionRequirements.runTask(agent, {
+      roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never,
+    })).toThrow('revision is still in progress')
+  })
+
+  it('locks only the task-list version that has executed when editing a revised document', async () => {
+    const { ctx, agent, session } = await setup()
+    appendRoundArtifacts(session)
+    session.append('requirement/task-execution', {
+      version: 1, revision: 1, roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never,
+      messageId: MessageId('executed-v1'), status: 'completed', turn: 1,
+    })
+    session.append('requirement/document', {
+      version: 1, revision: 2, roundId: 'ROUND-01' as never, turn: 2,
+      summary: '添加键盘支持', markdown: documentMarkdown, valid: true, issues: [],
+    })
+    session.append('requirement/task-list', {
+      version: 1, revision: 2, roundId: 'ROUND-01' as never, documentRevision: 2,
+      tasks: [{
+        id: 'TASK-V2' as never, order: 0, kind: 'implementation', title: '添加键盘支持', summary: '支持键盘操作。',
+        statement: '添加键盘支持。', requirementRefs: ['1.1', '1.2'], status: 'pending',
+      }],
+    })
+    expect(() => ctx.sessionRequirements.editDocument(agent, {
+      roundId: 'ROUND-01' as never, revision: 2, markdown: documentMarkdown,
+    })).not.toThrow()
+  })
+
   it('cancels only the selected active turn, stops Run All, and permits retry after settlement', async () => {
     const { ctx, agent, session, followup } = await setup()
     appendRoundArtifacts(session)
@@ -365,10 +530,10 @@ describe('session requirements document pipeline', () => {
     const { ctx, agent, session, followup, start } = await setup()
     appendRoundArtifacts(session)
     const result = await ctx.sessionRequirements.editTask(agent, {
-      roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never, title: '实现页面',
+      roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never, title: '精简结果页面',
       summary: '只显示结果，不再需要导航栏。', statement: '- [ ] 1.1 实现导航栏\n\n_关联需求：1.1_', humanEdit: true,
     })
-    expect(result.task).toMatchObject({ summary: '只显示结果，不再需要导航栏。', humanInstruction: '只显示结果，不再需要导航栏。', status: 'pending' })
+    expect(result.task).toMatchObject({ title: '精简结果页面', summary: '只显示结果，不再需要导航栏。', humanInstruction: '只显示结果，不再需要导航栏。', status: 'pending' })
     expect(result.task?.statement).toContain('只显示结果，不再需要导航栏。')
     expect(start.mock.calls[0]?.[1].toolFilter).toEqual({ allow: [] })
     ctx.sessionRequirements.runTask(agent, { roundId: 'ROUND-01' as never, taskId: 'TASK-A' as never })

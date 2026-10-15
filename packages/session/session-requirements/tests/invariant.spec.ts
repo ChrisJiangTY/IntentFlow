@@ -62,6 +62,42 @@ function finalTask(order: number): RequirementTask {
 }
 
 describe('requirement document pipeline invariant', () => {
+  it('accepts a document-free task round and rejects document-backed task data', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(InvariantRegistry, { enabled: true })
+    await ctx.plugin(RequirementsInvariant)
+    const session = ctx.sessions.create(SessionId('standalone-task-invariant'))
+    const roundId = 'ROUND-01' as never
+    session.append('requirement/round', {
+      version: 1, kind: 'task', revision: 1, roundId, round: 1,
+      sourceMessageId: 'task-input' as never, language: 'zh', input: '修复导航栏。', status: 'tasks-ready',
+    })
+    const standalone = { ...task('A', 0, 'pending'), requirementRefs: [], statement: '修复导航栏。' }
+    expect(() => session.append('requirement/task-list', {
+      version: 1, revision: 1, roundId, documentRevision: 0, tasks: [standalone],
+    })).not.toThrow()
+    expect(() => session.append('requirement/document', {
+      version: 1, revision: 1, roundId, turn: 1, summary: '不应存在', markdown, valid: true, issues: [],
+    })).toThrow('no valid round')
+    expect(() => session.append('requirement/task-list', {
+      version: 1, revision: 2, roundId, documentRevision: 1, tasks: [standalone],
+    })).toThrow('no valid round or revision')
+    expect(() => session.append('requirement/task-list', {
+      version: 1, revision: 2, roundId, documentRevision: 0,
+      tasks: [{ ...standalone, requirementRefs: ['1.1'] }],
+    })).toThrow('invalid standalone tasks')
+  })
+
+  it('rejects a zero document revision for a requirement round', async () => {
+    const { session, roundId } = await setup()
+    expect(() => session.append('requirement/task-list', {
+      version: 1, revision: 1, roundId, documentRevision: 0,
+      tasks: [task('A', 0, 'pending')],
+    })).toThrow('no valid round or revision')
+  })
+
   it('accepts a graph for the current document and rejects unknown relation endpoints', async () => {
     const { session, roundId } = await setup()
     session.append('requirement/graph', {

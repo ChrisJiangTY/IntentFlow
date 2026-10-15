@@ -16,7 +16,7 @@ import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, expandOwningTurnProcess, newEnglishPage, saveFailureShot } from './support.ts'
+import { chooseNormalChatIntent, connectFreshWorkspace, expandOwningTurnProcess, newEnglishPage, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/web-search-round', import.meta.url))
 const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/web-search-round/session.jsonl', import.meta.url))
@@ -190,6 +190,7 @@ describe('web e2e: shipped default web search', () => {
     const settled = scaffold.whenTurnSettled()
     await input.fill(PROMPT)
     await input.press('Enter')
+    await chooseNormalChatIntent(page)
     const sessionId = await settled
     if (MODE === 'record') await recordFixture(scaffold, sessionId, FIXTURE)
   }, 200_000)
@@ -263,7 +264,7 @@ describe('web e2e: shipped default web search', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-search-aria'))
     await expect.poll(() => page.getByText('SEARCH_DONE', { exact: true }).count(), { timeout: 15_000 })
       .toBeGreaterThanOrEqual(1)
-    const searchTool = page.locator('[data-tool="web_search"]')
+    const searchTool = page.locator('[data-conversation-scroll] [data-tool="web_search"]')
     await expandOwningTurnProcess(page, searchTool)
     await searchTool.waitFor({ timeout: 10_000 })
     const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd)
@@ -272,12 +273,12 @@ describe('web e2e: shipped default web search', () => {
 
   it.skipIf(MODE === 'record')('scrolls the capped source list inside the fixed-height container', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-search-sources-scroll'))
-    const row = page.locator('[data-tool="web_search"] [data-expandable]').first()
+    const row = page.locator('[data-conversation-scroll] [data-tool="web_search"] [data-expandable]').first()
     await expandOwningTurnProcess(page, row)
     await row.click()
     await expect.poll(() => row.getAttribute('aria-expanded'), { timeout: 5_000 }).toBe('true')
 
-    const card = page.locator('[data-web="search"]')
+    const card = page.locator('[data-conversation-scroll] [data-web="search"]')
     const sources = card.locator('ol')
     await sources.waitFor({ timeout: 10_000 })
     // The card draws exactly the sources the model saw after the combined cap.
@@ -302,13 +303,13 @@ describe('web e2e: shipped default web search', () => {
 
   it.skipIf(MODE === 'record')('reserves marker room a scroll container cannot clip back', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-search-marker-room'))
-    await expandOwningTurnProcess(page, page.locator('[data-tool="web_search"]'))
+    await expandOwningTurnProcess(page, page.locator('[data-conversation-scroll] [data-tool="web_search"]'))
     // `overflow-y: auto` clips inline-start overflow with no way to scroll it
     // back, and markers are right-aligned to the content edge, so a marker wider
     // than `padding-left` silently loses its leading digits. `searchMaxResults`
     // is an unbounded positive integer, so measure the widest three-digit marker
     // in the list's own font and require the shipped padding to hold it.
-    const marker = await page.locator('[data-web="search"] ol').evaluate((element) => {
+    const marker = await page.locator('[data-conversation-scroll] [data-web="search"] ol').evaluate((element) => {
       const probe = document.createElement('span')
       probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:inherit'
       probe.textContent = '999. '

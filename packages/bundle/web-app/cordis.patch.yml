@@ -462,3 +462,6 @@
       name: '@deepseek-ai/dsh-agent-presets'
       config:
         default: standard
+        # A patch replacing this row's config must restate the minimal policy.
+        toolAllowLists:
+          minimal: [bash, str_replace_editor]
